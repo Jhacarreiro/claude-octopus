@@ -8,6 +8,8 @@ source "$SCRIPT_DIR/../helpers/test-framework.sh"
 
 test_suite "Codex binary override"
 
+export OCTOPUS_CODEX_SANDBOX="workspace-write"
+
 log() { :; }
 source "$PROJECT_ROOT/scripts/lib/dispatch.sh"
 migrate_provider_config() { :; }

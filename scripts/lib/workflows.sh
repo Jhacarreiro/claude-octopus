@@ -786,6 +786,90 @@ EOF
     echo ""
 }
 
+
+tangle_resolve_repo_context_files() {
+    local text="$1"
+    local max_files="${OCTOPUS_TANGLE_CONTEXT_MAX_FILES:-16}"
+    [[ "$max_files" =~ ^[0-9]+$ ]] || max_files=16
+
+    local repo_root="${PROJECT_ROOT:-$(pwd)}"
+    [[ -d "$repo_root" ]] || repo_root="$(pwd)"
+    git -C "$repo_root" rev-parse --show-toplevel >/dev/null 2>&1 || return 0
+
+    local files=()
+    local token full basename
+
+    # 1. Keep concrete existing files explicitly named by the decomposition.
+    while IFS= read -r token; do
+        [[ -z "$token" ]] && continue
+        token="${token#./}"
+        if [[ -f "$repo_root/$token" ]]; then
+            files+=("$token")
+        else
+            basename="${token##*/}"
+            if [[ "$basename" == *.* ]]; then
+                while IFS= read -r full; do
+                    [[ -n "$full" ]] && files+=("$full")
+                done < <(git -C "$repo_root" ls-files | awk -v b="$basename" 'BEGIN{n=0} {split($0,a,"/"); if (a[length(a)]==b && n<4) {print; n++}}')
+            fi
+        fi
+    done < <(printf '%s\n' "$text" | grep -Eo '[A-Za-z0-9_./-]+\.(js|ts|json|md|yml|yaml|toml|py|sh)' | sort -u)
+
+    # 2. Add high-signal files by endpoint/domain terms. This turns invented
+    # names like server.js/index.js into the actual files in this repo.
+    local lower
+    lower=$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]')
+    if [[ "$lower" == *"runterminalscript"* || "$lower" == *"commands/execute"* || "$lower" == *"script mode"* || "$lower" == *"bounded executor"* ]]; then
+        for full in api/terminal.js serverModules/apiRoutes.js serverModules/swaggerSetup.js api/activityLog.js package.json README.md SETUP.md; do
+            [[ -f "$repo_root/$full" ]] && files+=("$full")
+        done
+    fi
+    if [[ "$lower" == *"openapi"* || "$lower" == *"schema"* || "$lower" == *"readme"* || "$lower" == *"setup"* || "$lower" == *"documentation"* ]]; then
+        for full in serverModules/swaggerSetup.js README.md SETUP.md package.json; do
+            [[ -f "$repo_root/$full" ]] && files+=("$full")
+        done
+    fi
+    if [[ "$lower" == *"test"* || "$lower" == *"acceptance"* || "$lower" == *"smoke"* ]]; then
+        for full in package.json README.md SETUP.md; do
+            [[ -f "$repo_root/$full" ]] && files+=("$full")
+        done
+    fi
+
+    # 3. Fallback: use grep over tracked text files for rare domain tokens.
+    if [[ ${#files[@]} -lt 3 ]]; then
+        for token in runTerminalScript commands execute terminal swagger activity bounded timeout; do
+            if [[ "$lower" == *"${token,,}"* ]]; then
+                while IFS= read -r full; do
+                    [[ -n "$full" ]] && files+=("$full")
+                done < <(git -C "$repo_root" grep -Il -m1 "$token" -- '*.js' '*.json' '*.md' 2>/dev/null | head -n 6)
+            fi
+        done
+    fi
+
+    printf '%s\n' "${files[@]}" | sed '/^$/d' | awk '!seen[$0]++' | sed -n "1,${max_files}p"
+}
+
+tangle_build_repo_context_block() {
+    local assigned_subtask="$1"
+    local repo_root="${PROJECT_ROOT:-$(pwd)}"
+    [[ -d "$repo_root" ]] || repo_root="$(pwd)"
+    git -C "$repo_root" rev-parse --show-toplevel >/dev/null 2>&1 || return 0
+    local resolved
+    resolved=$(tangle_resolve_repo_context_files "$assigned_subtask")
+    cat <<EOF
+Repository context for this subtask:
+- The worktree is the source of truth. Do not invent repository layout from generic names.
+- Treat the decomposer's Files clause as approximate intent. Prefer the resolved files below when they conflict with invented paths.
+- If none of the resolved files fit, inspect the tracked file list and report the blocker.
+
+Tracked files, first 200:
+$(git -C "$repo_root" ls-files 2>/dev/null | sed -n '1,200p')
+
+Resolved relevant files to inspect/edit for this subtask:
+${resolved:-<none resolved>}
+EOF
+}
+
 build_tangle_subtask_prompt() {
     local original_task="$1"
     local assigned_subtask="$2"
@@ -799,6 +883,9 @@ build_tangle_subtask_prompt() {
         return 64
     fi
 
+    local repo_context
+    repo_context=$(tangle_build_repo_context_block "$assigned_subtask")
+
     cat <<EOF
 Original task context:
 ${original_task}
@@ -806,11 +893,13 @@ ${original_task}
 Assigned subtask:
 ${assigned_subtask}
 
+${repo_context}
+
 Execution instructions:
 - Treat the original task as authoritative for requirements, explicit file targets, acceptance criteria, and forbidden changes.
 - Complete the assigned subtask without dropping original constraints that apply to it.
 - For [CODING] work, edit the repository files directly in the current worktree. Do not only describe a plan or paste code snippets.
-- For [CODING] work, treat file paths/directories named in the assigned subtask as your exclusive write scope. Do not edit files owned by another subtask; report a blocker if the required change crosses scopes.
+- For [CODING] work, treat file paths/directories named in the assigned subtask as approximate scope intent. Use the resolved repository context files above as the concrete targets. Do not edit files clearly owned by another subtask; report a blocker if the required change crosses scopes.
 - If the subtask creates a new exported component, command, event type, route, hook, or helper, wire it into at least one production call site unless the original task explicitly asks for an isolated artifact.
 - Tests alone are not integration evidence. User-facing features must be reachable from the relevant user flow or the subtask must report a blocker.
 - In the final output, include "## Worktree Changes", "## Integration Evidence", and "## Verification" sections.
@@ -823,6 +912,7 @@ tangle_extract_write_scopes() {
     local files_text
 
     files_text=$(printf '%s\n' "$text" | sed -nE 's/.*Files:[[:space:]]*//p' | head -n 1)
+    files_text=$(printf '%s\n' "$files_text" | sed -E 's/[[:space:]]+[—-][[:space:]]+Task:.*$//; s/[[:space:]]+Task:.*$//')
     [[ -n "$files_text" ]] || return 0
 
     printf '%s\n' "$files_text" \
@@ -859,6 +949,91 @@ tangle_scopes_overlap() {
     return 1
 }
 
+
+
+tangle_line_is_numbered_subtask() {
+    local line="$1"
+    printf '%s\n' "$line" | grep -Eq '^[[:space:]]*(\*\*)?[0-9]+[.)]'
+}
+
+tangle_parseable_subtask_count() {
+    local subtasks="$1"
+    local count=0
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        tangle_line_is_numbered_subtask "$line" && ((count++)) || true
+    done <<< "$subtasks"
+    echo "$count"
+}
+
+tangle_reformat_decomposition() {
+    local original_task="$1"
+    local previous_decomposition="$2"
+    local reason="${3:-not parseable}"
+    local reformat_prompt="Reformat the previous Octopus task decomposition. Do not add analysis.
+
+Required output format, exactly one subtask per line:
+1. [CODING] Short title — Files: relative/file.js, another/file.js — Task: specific coding work
+2. [REASONING] Short title — Task: specific reasoning/review work
+
+Rules:
+- Output only numbered lines. No Markdown headings, no code fences, no prose before or after.
+- Every [CODING] line must include a same-line 'Files:' clause.
+- Use relative file or directory scopes from the repository file map when possible.
+- Prefer concrete paths from the repository file map; invented/generic paths will be resolved against the actual worktree before dispatch.
+- New files should be explicit filenames whose parent directory already exists, or root-level files; avoid creating new source trees unless explicitly required.
+- Coding write scopes must be disjoint. If scopes overlap, merge those items into one [CODING] line.
+- If all coding work touches the same files, output one [CODING] line with those files rather than pretending it can be parallelized.
+- Keep 1-6 total subtasks.
+
+Original task:
+${original_task}
+
+Previous decomposition failed validation because: ${reason}
+
+Previous decomposition:
+${previous_decomposition}
+"
+
+    run_agent_sync "gemini" "$reformat_prompt" 120 "researcher" "tangle" || \
+    run_agent_sync "claude-sonnet" "$reformat_prompt" 120 "researcher" "tangle"
+}
+
+
+tangle_scope_is_known_or_explicit_new_file() {
+    local scope="$1"
+    local normalized="${scope%/}"
+    [[ -z "$normalized" ]] && return 1
+
+    # Existing tracked file/dir scopes are valid.
+    local repo_root="${PROJECT_ROOT:-$(pwd)}"
+    [[ -d "$repo_root" ]] || repo_root="$(pwd)"
+    if git -C "$repo_root" rev-parse --show-toplevel >/dev/null 2>&1; then
+        if git -C "$repo_root" ls-files --error-unmatch "$normalized" >/dev/null 2>&1; then
+            return 0
+        fi
+        if git -C "$repo_root" ls-files "$normalized/" 2>/dev/null | grep -q .; then
+            return 0
+        fi
+    fi
+
+    # Existing filesystem paths are valid even if untracked.
+    [[ -e "$repo_root/$normalized" ]] && return 0
+
+    # Allow explicit new root files, or explicit new files under an existing
+    # parent directory. Reject new parallel trees like src/foo.js when src/ is
+    # not already part of the repository.
+    if [[ "$scope" != */ && "${normalized##*/}" == *.* ]]; then
+        local parent="${normalized%/*}"
+        [[ "$parent" == "$normalized" ]] && return 0
+        [[ -d "$repo_root/$parent" ]] && return 0
+        if git -C "$repo_root" rev-parse --show-toplevel >/dev/null 2>&1 && git -C "$repo_root" ls-files "$parent/" 2>/dev/null | grep -q .; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
 tangle_validate_parallel_write_scopes() {
     local subtasks="$1"
     local task_index=0
@@ -868,10 +1043,10 @@ tangle_validate_parallel_write_scopes() {
 
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
-        [[ ! "$line" =~ ^[0-9]+[\.\)] ]] && continue
+        tangle_line_is_numbered_subtask "$line" || continue
 
         local subtask
-        subtask=$(echo "$line" | sed 's/^[0-9]*[\.\)]\s*//')
+        subtask=$(echo "$line" | sed -E 's/^[[:space:]]*(\*\*)?[0-9]+[\.\)][[:space:]]*//; s/^[[:space:]]+//')
         ((task_index++)) || true
 
         if [[ "$subtask" =~ \[REASONING\] ]]; then
@@ -888,18 +1063,43 @@ tangle_validate_parallel_write_scopes() {
             return 1
         fi
 
+        local effective_scopes=""
+        while IFS= read -r scope; do
+            [[ -z "$scope" ]] && continue
+            if tangle_scope_is_known_or_explicit_new_file "$scope"; then
+                effective_scopes="${effective_scopes}${scope}
+"
+            else
+                local resolved_scopes
+                resolved_scopes=$(tangle_resolve_repo_context_files "$subtask")
+                if [[ -n "$resolved_scopes" ]]; then
+                    effective_scopes="${effective_scopes}${resolved_scopes}
+"
+                else
+                    # Keep the approximate scope as a last-resort coordination key.
+                    # Do not hard-fail here; dispatch will include the repo file map
+                    # and the agent can report a blocker if it still cannot resolve it.
+                    effective_scopes="${effective_scopes}${scope}
+"
+                fi
+            fi
+        done <<< "$scopes"
+        effective_scopes=$(printf '%s
+' "$effective_scopes" | sed '/^$/d' | sort -u)
+
         while IFS= read -r scope; do
             [[ -z "$scope" ]] && continue
             local i
             for i in "${!existing_scopes[@]}"; do
+                [[ "${existing_tasks[$i]}" == "$task_index" ]] && continue
                 if tangle_scopes_overlap "$scope" "${existing_scopes[$i]}"; then
-                    echo "coding subtask ${task_index} write scope '${scope}' overlaps subtask ${existing_tasks[$i]} scope '${existing_scopes[$i]}'"
+                    echo "coding subtask ${task_index} effective write scope '${scope}' overlaps subtask ${existing_tasks[$i]} scope '${existing_scopes[$i]}'"
                     return 1
                 fi
             done
             existing_scopes+=("$scope")
             existing_tasks+=("$task_index")
-        done <<< "$scopes"
+        done <<< "$effective_scopes"
     done <<< "$subtasks"
 
     [[ $coding_count -eq 0 ]] && return 0
@@ -960,14 +1160,9 @@ tangle_develop() {
         log INFO "Using grasp context from: $grasp_file"
     fi
 
-    # v8.18.0: Pre-work design review ceremony
-    design_review_ceremony "$prompt" "$context"
-
-    # Step 1: Decompose into validated subtasks
-    log INFO "Step 1: Task decomposition..."
-
-    # Resolve a referenced Markdown plan file without letting grep/head trip
-    # pipefail when the prompt has no file token.
+    # Resolve a referenced Markdown plan file before both design review and
+    # decomposition. Claude-based reviewers cannot read files outside the active
+    # worktree unless the content is injected into the prompt.
     local resolved_prompt="$prompt"
     local file_ref=""
     local raw_file_ref=""
@@ -983,8 +1178,19 @@ tangle_develop() {
     done
     [[ "$noglob_was_set" == "false" ]] && set +f
     if [[ -n "$file_ref" && -f "$file_ref" ]]; then
+        local max_plan_bytes="${OCTOPUS_PLAN_INJECT_MAX_BYTES:-40000}"
+        [[ "$max_plan_bytes" =~ ^[0-9]+$ ]] || max_plan_bytes=40000
+        local file_size
+        file_size=$(wc -c < "$file_ref" 2>/dev/null || echo 0)
         local file_content
-        file_content=$(<"$file_ref")
+        if [[ "$file_size" -gt "$max_plan_bytes" ]]; then
+            file_content="$(head -c "$max_plan_bytes" "$file_ref" 2>/dev/null)"
+            file_content="${file_content}
+
+[... truncated from ${file_size} bytes to ${max_plan_bytes} bytes ...]"
+        else
+            file_content=$(<"$file_ref")
+        fi
         local plan_block="--- PLAN: ${file_ref} ---
 ${file_content}
 --- END PLAN ---"
@@ -1003,7 +1209,21 @@ The following referenced plan file has been resolved. Use it as implementation c
 
 ${plan_block}"
         fi
-        log INFO "Resolved file reference: ${file_ref} - injecting content into decompose prompt"
+        log INFO "Resolved file reference: ${file_ref} - injecting content into workflow prompt"
+    fi
+
+    # v8.18.0: Pre-work design review ceremony. Use resolved_prompt so reviewers
+    # receive plan content instead of an unreadable cross-workspace file path.
+    design_review_ceremony "$resolved_prompt" "$context"
+
+    # Step 1: Decompose into validated subtasks
+    log INFO "Step 1: Task decomposition..."
+
+    local repo_file_map=""
+    if git -C "$PROJECT_ROOT" rev-parse --show-toplevel >/dev/null 2>&1; then
+        repo_file_map="Repository files available for write scopes (from git ls-files, first 200):
+$(git -C "$PROJECT_ROOT" ls-files 2>/dev/null | sed -n '1,200p')
+"
     fi
 
     local decompose_prompt="Decompose this task into subtasks that can be executed in parallel.
@@ -1012,13 +1232,20 @@ Each subtask should be:
 - Clear about inputs and expected outputs
 - Assignable to either a coding agent [CODING] or reasoning agent [REASONING]
 - For every [CODING] subtask, include an explicit 'Files:' clause listing the exact files or directories that subtask owns and may edit
+- Prefer paths from the repository file map for existing files/directories. If the model proposes generic or invented paths, Octopus will resolve them against the actual worktree before dispatch.
+- New files should be explicit filenames whose parent directory already exists, or root-level files such as openapi.json; avoid creating new source trees unless the original task explicitly asks for them.
 - Coding write scopes must be disjoint. If two subtasks need the same file or directory, merge them into one [CODING] subtask instead of splitting them.
 
 **Cohesion rule:** If the task produces a single deliverable (one file, one script, one page, one config), keep it as ONE subtask — do not split it. Only decompose when subtasks are truly independent with no cross-file references between them. Aim for 2-6 subtasks; fewer is better when the work is tightly coupled.
 
-${context}Task: $resolved_prompt
+${context}${repo_file_map}
+Task: $resolved_prompt
 
-Output as numbered list with [CODING] or [REASONING] prefix for each subtask."
+Output only numbered subtask lines, with no headings, no analysis, no Markdown fences, and no prose before or after.
+Required format:
+1. [CODING] Short title — Files: relative/file.js, relative/dir/ — Task: specific coding work
+2. [REASONING] Short title — Task: specific reasoning work
+Every [CODING] line must include a same-line Files: clause."
 
     local subtasks
     subtasks=$(run_agent_sync "gemini" "$decompose_prompt" 120 "researcher" "tangle") || \
@@ -1035,29 +1262,38 @@ Output as numbered list with [CODING] or [REASONING] prefix for each subtask."
     echo "$subtasks"
     echo ""
 
-    local parseable_subtask_count=0
-    while IFS= read -r line; do
-        [[ -z "$line" ]] && continue
-        [[ "$line" =~ ^[0-9]+[\.\)] ]] && ((parseable_subtask_count++)) || true
-    done <<< "$subtasks"
-
-    if [[ $parseable_subtask_count -eq 0 ]]; then
-        log WARN "Decomposition produced no parseable subtasks, falling back to direct execution"
-        local direct_prompt
-        direct_prompt=$(build_tangle_subtask_prompt "$resolved_prompt" "Implement the full task directly because decomposition produced no parseable subtasks.")
-        spawn_agent "codex" "$direct_prompt" "tangle-${task_group}-direct" "implementer" "tangle"
-        wait
-        return
-    fi
+    local parseable_subtask_count
+    parseable_subtask_count=$(tangle_parseable_subtask_count "$subtasks")
 
     local parallel_safety_reason=""
+    if [[ $parseable_subtask_count -eq 0 ]] || ! parallel_safety_reason=$(tangle_validate_parallel_write_scopes "$subtasks"); then
+        local retry_reason="${parallel_safety_reason:-no parseable subtasks}"
+        if [[ $parseable_subtask_count -eq 0 ]]; then
+            retry_reason="no parseable subtasks"
+        fi
+        log WARN "Decomposition failed validation (${retry_reason}); retrying with strict one-line Files format"
+        local reformatted_subtasks
+        if reformatted_subtasks=$(tangle_reformat_decomposition "$resolved_prompt" "$subtasks" "$retry_reason"); then
+            subtasks="$reformatted_subtasks"
+            echo -e "${CYAN}Reformatted subtasks:${NC}"
+            echo "$subtasks"
+            echo ""
+            parseable_subtask_count=$(tangle_parseable_subtask_count "$subtasks")
+            parallel_safety_reason=""
+        else
+            log ERROR "Decomposition reformat retry failed; refusing monolithic direct fallback"
+            return 1
+        fi
+    fi
+
+    if [[ $parseable_subtask_count -eq 0 ]]; then
+        log ERROR "Decomposition still produced no parseable subtasks after retry; refusing monolithic direct fallback"
+        return 1
+    fi
+
     if ! parallel_safety_reason=$(tangle_validate_parallel_write_scopes "$subtasks"); then
-        log WARN "Unsafe parallel decomposition: ${parallel_safety_reason}"
-        local direct_prompt
-        direct_prompt=$(build_tangle_subtask_prompt "$resolved_prompt" "Implement the full task directly because parallel decomposition is unsafe: ${parallel_safety_reason}")
-        spawn_agent "codex" "$direct_prompt" "tangle-${task_group}-direct" "implementer" "tangle"
-        wait
-        return
+        log ERROR "Unsafe parallel decomposition after retry: ${parallel_safety_reason}; refusing monolithic direct fallback"
+        return 1
     fi
 
     # Step 2: Parallel execution with progress tracking
@@ -1065,15 +1301,18 @@ Output as numbered list with [CODING] or [REASONING] prefix for each subtask."
     local subtask_num=0
     local pids=()
     local task_ids=()
+    local task_agents=()
+    local task_roles=()
+    local task_prompts=()
 
     fleet_dispatch_begin
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
-        [[ ! "$line" =~ ^[0-9]+[\.\)] ]] && continue
+        tangle_line_is_numbered_subtask "$line" || continue
 
         local subtask
-        subtask=$(echo "$line" | sed 's/^[0-9]*[\.\)]\s*//')
-        local agent="codex"
+        subtask=$(echo "$line" | sed -E 's/^[[:space:]]*(\*\*)?[0-9]+[\.\)][[:space:]]*//; s/^[[:space:]]+//')
+        local agent="${OCTOPUS_TANGLE_CODING_AGENT:-codex}"
         local role="implementer"
         local pane_icon="⚙️"
         if [[ "$subtask" =~ \[REASONING\] ]]; then
@@ -1103,6 +1342,9 @@ Output as numbered list with [CODING] or [REASONING] prefix for each subtask."
             pids+=("$pid")
         fi
         task_ids+=("$task_id")
+        task_agents+=("$agent")
+        task_roles+=("$role")
+        task_prompts+=("$subtask_prompt")
         ((subtask_num++)) || true
     done <<< "$subtasks"
     fleet_dispatch_end
@@ -1155,6 +1397,84 @@ Output as numbered list with [CODING] or [REASONING] prefix for each subtask."
         fi
     done
     [[ ${#_failed_tasks[@]} -gt 0 ]] && log WARN "${#_failed_tasks[@]}/${#task_ids[@]} subtasks failed: ${_failed_tasks[*]}"
+
+    # Retry failed subtasks once against the current worktree before validation.
+    # Retries are intentionally sequential: patch conflicts often happen because
+    # parallel workers produced diffs against an older worktree snapshot. Running
+    # retries one-by-one lets each failed slice see the latest successful changes.
+    if [[ ${#_failed_tasks[@]} -gt 0 && "${OCTOPUS_TANGLE_RETRY_FAILED_SUBTASKS:-true}" != "false" && "${OCTOPUS_TANGLE_RETRY_FAILED_SUBTASKS:-true}" != "0" ]]; then
+        log WARN "Retrying ${#_failed_tasks[@]} failed subtasks once, sequentially, against current worktree"
+
+        for failed_id in "${_failed_tasks[@]}"; do
+            local failed_index=""
+            for i in "${!task_ids[@]}"; do
+                if [[ "${task_ids[$i]}" == "$failed_id" ]]; then
+                    failed_index="$i"
+                    break
+                fi
+            done
+            [[ -z "$failed_index" ]] && continue
+
+            local previous_artifact=""
+            previous_artifact=$(ls "${RESULTS_DIR}"/*"${failed_id}".md 2>/dev/null | head -n 1 || true)
+            local previous_tail=""
+            if [[ -n "$previous_artifact" && -f "$previous_artifact" ]]; then
+                previous_tail=$(tail -120 "$previous_artifact" 2>/dev/null)
+            fi
+
+            local retry_id="${failed_id}-retry1"
+            local retry_prompt="${task_prompts[$failed_index]}
+
+Retry context:
+- This is a targeted retry of failed subtask ${failed_id}.
+- Run after all first-pass parallel workers; use the current worktree as the source of truth.
+- If the previous failure was a patch conflict, inspect the current versions of the resolved files and produce a minimal update relative to the current worktree, not the original pre-parallel state.
+- Do not rewrite unrelated files. Do not revert successful sibling subtasks.
+- If the subtask is already satisfied by sibling changes, return success with verification rather than producing another conflicting patch.
+
+Previous failed result tail:
+${previous_tail}
+"
+            log INFO "Retrying failed subtask ${failed_id} as ${retry_id} with ${task_agents[$failed_index]}"
+            local retry_pid
+            retry_pid=$(spawn_agent_capture_pid "${task_agents[$failed_index]}" "$retry_prompt" "$retry_id" "${task_roles[$failed_index]}" "tangle")
+
+            local retry_done_file="${_done_dir}/${retry_id}.done"
+            local retry_deadline=$(( $(date +%s) + ${OCTOPUS_TANGLE_RETRY_DEADLINE:-300} ))
+            while [[ ! -f "$retry_done_file" ]]; do
+                if (( $(date +%s) > retry_deadline )); then
+                    log WARN "Retry ${retry_id} deadline exceeded — killing and marking timeout"
+                    if [[ -n "${retry_pid:-}" ]]; then
+                        pkill -TERM -P "$retry_pid" 2>/dev/null || true
+                        kill -TERM "$retry_pid" 2>/dev/null || true
+                        sleep 1
+                        pkill -KILL -P "$retry_pid" 2>/dev/null || true
+                        kill -KILL "$retry_pid" 2>/dev/null || true
+                    fi
+                    mkdir -p "$_done_dir" 2>/dev/null || true
+                    echo "timeout" > "$retry_done_file" 2>/dev/null || true
+                    break
+                fi
+                echo -ne "\r${YELLOW}Retrying ${retry_id}...${NC}"
+                sleep 2
+            done
+            echo ""
+
+            local retry_exit
+            retry_exit=$(cat "$retry_done_file" 2>/dev/null || echo "unknown")
+            if [[ "$retry_exit" == "0" ]]; then
+                log INFO "Retry ${retry_id} succeeded; superseding ${failed_id}"
+                local old_artifact
+                old_artifact=$(ls "${RESULTS_DIR}"/*"${failed_id}".md 2>/dev/null | head -n 1 || true)
+                if [[ -n "$old_artifact" && -f "$old_artifact" ]]; then
+                    mv "$old_artifact" "${old_artifact%.md}.superseded-by-${retry_id}.txt" 2>/dev/null || true
+                fi
+            else
+                log WARN "Retry ${retry_id} finished with status: ${retry_exit}"
+            fi
+            rm -f "$retry_done_file" 2>/dev/null || true
+        done
+    fi
 
     # Cleanup done markers
     for i in "${!task_ids[@]}"; do

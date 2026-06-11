@@ -8,6 +8,38 @@ if ! type probe_result_file_status >/dev/null 2>&1; then
     [[ -f "$_octo_probe_results_lib" ]] && source "$_octo_probe_results_lib"
 fi
 
+if ! type octopus_agent_override >/dev/null 2>&1; then
+    octopus_agent_override() {
+        local phase="$1"
+        local role="$2"
+        local default_agent="$3"
+        local phase_key role_key env_name value
+
+        phase_key=$(printf '%s' "$phase" | tr '[:lower:]-' '[:upper:]_' | sed -E 's/[^A-Z0-9_]+/_/g; s/^_+//; s/_+$//')
+        role_key=$(printf '%s' "$role" | tr '[:lower:]-' '[:upper:]_' | sed -E 's/[^A-Z0-9_]+/_/g; s/^_+//; s/_+$//')
+
+        if [[ -n "$phase_key" && -n "$role_key" ]]; then
+            env_name="OCTOPUS_${phase_key}_${role_key}_AGENT"
+            value="${!env_name:-}"
+            [[ -n "$value" ]] && { echo "$value"; return 0; }
+        fi
+
+        if [[ -n "$phase_key" ]]; then
+            env_name="OCTOPUS_${phase_key}_AGENT"
+            value="${!env_name:-}"
+            [[ -n "$value" ]] && { echo "$value"; return 0; }
+        fi
+
+        if [[ -n "$role_key" ]]; then
+            env_name="OCTOPUS_${role_key}_AGENT"
+            value="${!env_name:-}"
+            [[ -n "$value" ]] && { echo "$value"; return 0; }
+        fi
+
+        echo "$default_agent"
+    }
+fi
+
 # v8.54.0: Single-agent probe for multi-agentic skill dispatch
 # Runs one probe perspective synchronously and writes result to RESULTS_DIR.
 # Called by Claude's Agent tool (one per perspective) instead of probe_discover().
@@ -1303,8 +1335,12 @@ Required format:
 Every [CODING] line must include a same-line Files: clause."
 
     local subtasks
-    subtasks=$(run_agent_sync "gemini" "$decompose_prompt" 120 "researcher" "tangle") || \
-    subtasks=$(run_agent_sync "codex" "$decompose_prompt" 120 "researcher" "tangle") || {
+    local tangle_decompose_agent tangle_decompose_fallback_agent
+    tangle_decompose_agent=$(octopus_agent_override "tangle" "decompose" "gemini")
+    tangle_decompose_fallback_agent=$(octopus_agent_override "tangle" "decompose_fallback" "codex")
+
+    subtasks=$(run_agent_sync "$tangle_decompose_agent" "$decompose_prompt" 120 "researcher" "tangle") || \
+    subtasks=$(run_agent_sync "$tangle_decompose_fallback_agent" "$decompose_prompt" 120 "researcher" "tangle") || {
         log ERROR "Decomposition failed with all providers; refusing monolithic direct fallback"
         return 1
     }
@@ -1374,11 +1410,15 @@ Every [CODING] line must include a same-line Files: clause."
 
         local subtask
         subtask=$(echo "$line" | sed -E 's/^[[:space:]]*(\*\*)?[0-9]+[\.\)][[:space:]]*//; s/^[[:space:]]+//')
-        local agent="codex"
+        local agent
         local role="implementer"
         local pane_icon="⚙️"
+        # Selects the tangle coding agent/provider only. The concrete model for
+        # that provider is still resolved by resolve_octopus_model(), including
+        # its persistent /tmp/octo-model-cache-*.json behavior.
+        agent=$(octopus_agent_override "tangle" "coding" "codex")
         if [[ "$subtask" =~ \[REASONING\] ]]; then
-            agent="gemini"
+            agent=$(octopus_agent_override "tangle" "reasoning" "gemini")
             role="researcher"
             pane_icon="🧠"
         fi

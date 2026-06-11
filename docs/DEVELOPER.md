@@ -110,3 +110,20 @@ OCTOPUS_RELEASE_RUNTIME_SMOKE=1 bash scripts/validate-release.sh
 That mode creates a temporary plugin zip, loads it with `claude --plugin-dir <zip>`, serves it locally, then loads it with `claude --plugin-url http://127.0.0.1:<port>/octo-plugin.zip`. Both calls use stream-json with hook events enabled so `init.plugin_errors` surfaces plugin load failures in the release log.
 
 Use `OCTOPUS_RELEASE_SMOKE_MAX_BUDGET_USD` to lower or raise the Claude Code budget cap for the runtime smoke, and `OCTOPUS_RELEASE_SMOKE_PORT` if the default localhost port is busy.
+## Agent lifecycle hook
+
+External dashboards or runtime control planes can observe spawned agents without patching provider commands by setting:
+
+```bash
+export OCTOPUS_AGENT_LIFECYCLE_HOOK=/path/to/hook
+export OCTOPUS_AGENT_LIFECYCLE_HOOK_LOG=/tmp/octopus-agent-hook.log  # optional
+```
+
+When configured, `spawn_agent` emits best-effort lifecycle events. The hook is invoked as:
+
+```bash
+$OCTOPUS_AGENT_LIFECYCLE_HOOK spawned
+$OCTOPUS_AGENT_LIFECYCLE_HOOK completed
+```
+
+The hook receives metadata through environment variables including `OCTOPUS_AGENT_TYPE`, `OCTOPUS_AGENT_TASK_ID`, `OCTOPUS_AGENT_ROLE`, `OCTOPUS_AGENT_PHASE`, `OCTOPUS_AGENT_PID`, `OCTOPUS_AGENT_RESULT_FILE`, `OCTOPUS_AGENT_RESULTS_DIR`, `OCTOPUS_AGENT_WORKSPACE_DIR`, `OCTOPUS_AGENT_EXIT_CODE`, `OCTOPUS_AGENT_STATUS`, `OCTOPUS_AGENT_ROOT_SESSION_ID`, and `OCTOPUS_AGENT_PARENT_SESSION_ID`. Hook output is redirected to the optional log path or `/dev/null`; hook failures are ignored so observer outages never fail agent execution.

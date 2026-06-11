@@ -14,6 +14,48 @@ quota_watcher_kill_spawn_children() {
     pkill -KILL -P "$spawn_pid" 2>/dev/null || true
 }
 
+# Optional generic lifecycle hook for external control planes.
+#
+# When OCTOPUS_AGENT_LIFECYCLE_HOOK points to an executable, Octopus emits
+# best-effort agent spawn/completion events without coupling to any particular
+# dashboard/runtime. The hook receives the event name as argv[1] and metadata in
+# environment variables. Hook failures never fail the agent run.
+_octopus_agent_lifecycle_hook() {
+    local event="$1"
+    local agent_type="$2"
+    local task_id="$3"
+    local role="${4:-}"
+    local phase="${5:-}"
+    local pid="${6:-}"
+    local result_file="${7:-}"
+    local exit_code="${8:-}"
+    local status="${9:-}"
+
+    local hook="${OCTOPUS_AGENT_LIFECYCLE_HOOK:-}"
+    [[ -n "$hook" && -x "$hook" ]] || return 0
+
+    local hook_log="${OCTOPUS_AGENT_LIFECYCLE_HOOK_LOG:-/dev/null}"
+    (
+        export OCTOPUS_AGENT_HOOK_EVENT="$event"
+        export OCTOPUS_AGENT_TYPE="$agent_type"
+        export OCTOPUS_AGENT_TASK_ID="$task_id"
+        export OCTOPUS_AGENT_ROLE="$role"
+        export OCTOPUS_AGENT_PHASE="$phase"
+        export OCTOPUS_AGENT_PID="$pid"
+        export OCTOPUS_AGENT_RESULT_FILE="$result_file"
+        export OCTOPUS_AGENT_RESULTS_DIR="${RESULTS_DIR:-}"
+        export OCTOPUS_AGENT_WORKSPACE_DIR="${WORKSPACE_DIR:-}"
+        export OCTOPUS_AGENT_EXIT_CODE="$exit_code"
+        export OCTOPUS_AGENT_STATUS="$status"
+        local prompt_preview="${prompt:-}"
+        prompt_preview="${prompt_preview:0:500}"
+        export OCTOPUS_AGENT_PROMPT_PREVIEW="$prompt_preview"
+        export OCTOPUS_AGENT_ROOT_SESSION_ID="${CRABFLEET_ROOT_SESSION_ID:-${OCTOPUS_ROOT_SESSION_ID:-}}"
+        export OCTOPUS_AGENT_PARENT_SESSION_ID="${CRABFLEET_PARENT_SESSION_ID:-${OCTOPUS_PARENT_SESSION_ID:-}}"
+        "$hook" "$event"
+    ) >>"$hook_log" 2>&1 || true
+}
+
 spawn_agent() {
     local _ts; _ts=$(date +%s)
     local agent_type="$1"
@@ -916,11 +958,25 @@ ${heuristic_ctx}"
             rm -f "$_done_tmp" 2>/dev/null || true
         fi
 
+        local _hook_final_status="failed"
+        if [[ "${_spawn_exit:-0}" -eq 0 ]]; then
+            if [[ "${_octo_success_status:-ok}" == "failed" ]]; then
+                _hook_final_status="failed"
+            else
+                _hook_final_status="completed"
+            fi
+        elif [[ "${_spawn_exit:-0}" -eq 124 || "${_spawn_exit:-0}" -eq 143 ]]; then
+            _hook_final_status="timeout"
+        fi
+        _octopus_agent_lifecycle_hook "completed" "$agent_type" "$task_id" "$role" "$phase" "$BASHPID" "$result_file" "$_spawn_exit" "$_hook_final_status"
+
         # v8.19.0: Cleanup heartbeat (self-terminating monitor handles this too)
         cleanup_heartbeat "$$" 2>/dev/null || true
     ) &
 
     local pid=$!
+
+    _octopus_agent_lifecycle_hook "spawned" "$agent_type" "$task_id" "$role" "$phase" "$pid" "$result_file" "" "running"
 
     # v8.19.0: Start heartbeat monitor for agent process
     start_heartbeat_monitor "$pid" "$task_id"

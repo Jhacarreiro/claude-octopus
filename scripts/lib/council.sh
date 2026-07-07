@@ -13,6 +13,7 @@ COUNCIL_IMPLEMENT=""
 COUNCIL_WORKTREE=""
 COUNCIL_BENCHMARK=""
 COUNCIL_PROVIDERS=""
+COUNCIL_DEFAULT_AUTO_PROVIDERS="claude,codex,agy,gemini,qwen,opencode,openrouter"
 COUNCIL_MAX_COST=""
 COUNCIL_DRY_RUN=""
 COUNCIL_JSON=""
@@ -173,12 +174,21 @@ council_validate_choice() {
     return 2
 }
 
+council_auto_providers() {
+    local providers="${OCTOPUS_COUNCIL_AUTO_PROVIDERS:-$COUNCIL_DEFAULT_AUTO_PROVIDERS}"
+    providers="${providers// /}"
+    if [[ -z "$providers" ]]; then
+        providers="$COUNCIL_DEFAULT_AUTO_PROVIDERS"
+    fi
+    echo "$providers"
+}
+
 council_validate_provider_list() {
     local providers="$1"
     local allowed="claude,codex,agy,gemini,qwen,opencode,openrouter"
 
     if [[ "$providers" == "auto" ]]; then
-        return 0
+        providers="$(council_auto_providers)"
     fi
 
     if [[ "$providers" == *auto* ]]; then
@@ -884,7 +894,7 @@ council_pick_provider() {
     fi
 
     local provider providers="$COUNCIL_PROVIDERS"
-    [[ "$providers" == "auto" ]] && providers="claude,codex,agy,gemini,qwen,opencode,openrouter"
+    [[ "$providers" == "auto" ]] && providers="$(council_auto_providers)"
     IFS=',' read -r -a provider_list <<< "$providers"
     for provider in "${provider_list[@]}"; do
         provider="${provider// /}"
@@ -984,7 +994,7 @@ council_candidate_personas() {
 
 council_available_provider_orgs_json() {
     local providers="$COUNCIL_PROVIDERS"
-    [[ "$providers" == "auto" ]] && providers="claude,codex,agy,gemini,qwen,opencode,openrouter"
+    [[ "$providers" == "auto" ]] && providers="$(council_auto_providers)"
 
     local json='[]' provider org
     IFS=',' read -r -a provider_list <<< "$providers"
@@ -1000,7 +1010,7 @@ council_available_provider_orgs_json() {
 council_provider_for_org() {
     local wanted_org="$1"
     local providers="$COUNCIL_PROVIDERS"
-    [[ "$providers" == "auto" ]] && providers="claude,codex,agy,gemini,qwen,opencode,openrouter"
+    [[ "$providers" == "auto" ]] && providers="$(council_auto_providers)"
 
     local provider
     IFS=',' read -r -a provider_list <<< "$providers"
@@ -2109,7 +2119,7 @@ council_start_implementation_handoff() {
 council_detect_providers() {
     local providers="$COUNCIL_PROVIDERS"
     if [[ "$providers" == "auto" ]]; then
-        providers="claude,codex,agy,gemini,qwen,opencode,openrouter"
+        providers="$(council_auto_providers)"
     fi
 
     local json='{}'

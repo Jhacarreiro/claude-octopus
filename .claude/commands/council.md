@@ -90,6 +90,7 @@ If the user already provided clear flags and a clear task, skip clarification an
 - `--worktree auto|on|off`
 - `--benchmark auto|on|off`
 - `--providers auto|claude,codex,gemini,agy,opencode,openrouter`
+- `OCTOPUS_COUNCIL_AUTO_PROVIDERS=claude,codex,agy,...` overrides the provider list expanded by `--providers auto`.
 - `--max-cost <usd>`
 - `--simulate`
 - `--single-model`

@@ -503,6 +503,10 @@ ${YELLOW}Options:${NC}
   --dry-run
   --json
   --output-dir <path>
+
+Environment:
+  OCTOPUS_COUNCIL_AUTO_PROVIDERS=claude,codex,agy,...
+      Override the provider list expanded by --providers auto.
 EOF
             ;;
         squeeze|red-team)

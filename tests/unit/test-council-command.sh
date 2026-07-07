@@ -232,6 +232,30 @@ test_council_provider_fixture_records_status() {
     fi
 }
 
+
+test_council_auto_provider_env_override_excludes_gemini() {
+    test_case "Council auto providers can be overridden to prefer agy and exclude Gemini"
+    load_council_lib || return 1
+
+    local tmp_dir
+    tmp_dir="$(mktemp -d "$TEST_TMP_DIR/council-auto-providers.XXXXXX")"
+
+    OCTOPUS_COUNCIL_AUTO_PROVIDERS='claude,codex,agy' \
+    OCTOPUS_COUNCIL_PROVIDER_FIXTURE='claude:available,codex:available,agy:available,gemini:available' \
+        council_run --dry-run --providers auto --output-dir "$tmp_dir" "Review auth"
+
+    local summary
+    summary="$(find "$tmp_dir" -name summary.json -type f | head -1)"
+    [[ -n "$summary" ]] || { test_fail "summary.json not written"; return 1; }
+
+    if jq -e 'any(.council[]; .provider == "agy") and all(.council[]; .provider != "gemini")' "$summary" >/dev/null; then
+        test_pass
+    else
+        test_fail "auto provider override did not keep Gemini out of the roster: $(jq -c [.council[].provider] "$summary" 2>/dev/null)"
+        return 1
+    fi
+}
+
 test_council_rejects_unknown_provider() {
     test_case "Council rejects unknown providers"
     load_council_lib || return 1
@@ -1125,6 +1149,7 @@ test_council_dry_run_has_multi_seat_recommendation_and_cost
 test_council_critical_veto_fixture_marks_veto
 test_council_dry_run_loads_fresh_benchmark_snapshot
 test_council_provider_fixture_records_status
+test_council_auto_provider_env_override_excludes_gemini
 test_council_rejects_unknown_provider
 test_council_roster_matches_resolved_members
 test_council_persona_pin_affects_roster

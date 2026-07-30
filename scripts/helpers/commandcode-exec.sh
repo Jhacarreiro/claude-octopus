@@ -34,13 +34,13 @@ prompt="$(cat)"
 tmp="$(mktemp "${TMPDIR:-/tmp}/octopus-commandcode.XXXXXX")" || exit 1
 trap 'rm -f "$tmp"' EXIT INT TERM
 
-args=(-p "$prompt" --model "$model" --output-format json --max-turns "$max_turns" --skip-onboarding --no-auto-update --trust --no-session)
+args=(-p --model "$model" --output-format json --max-turns "$max_turns" --skip-onboarding --no-auto-update --trust --no-session)
 case "$permission_mode" in
   yolo) args+=(--yolo) ;;
   *) args+=(--permission-mode "$permission_mode") ;;
 esac
 
-if "$bin" "${args[@]}" >"$tmp"; then
+if printf '%s' "$prompt" | "$bin" "${args[@]}" >"$tmp"; then
   rc=0
 else
   rc=$?

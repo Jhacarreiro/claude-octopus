@@ -60,10 +60,17 @@ get_family() {
 # Order = preference for primary slot assignment
 AVAILABLE_CLI=()
 if octo_provider_allowed codex && command -v codex >/dev/null 2>&1; then AVAILABLE_CLI+=(codex); fi
-if octo_provider_allowed commandcode && { command -v command-code >/dev/null 2>&1 || command -v cmd >/dev/null 2>&1; }; then
-    _commandcode_bin="command-code"
-    command -v command-code >/dev/null 2>&1 || _commandcode_bin="cmd"
-    if [[ -n "${COMMAND_CODE_API_KEY:-}" ]] || "$_commandcode_bin" status --json >/dev/null 2>&1; then
+if octo_provider_allowed commandcode; then
+    [[ -n "${COMMAND_CODE_API_KEY:-}" ]] || resolve_provider_env "COMMAND_CODE_API_KEY" 2>/dev/null || true
+    _commandcode_bin="${OCTOPUS_COMMANDCODE_BIN:-}"
+    if [[ -z "$_commandcode_bin" ]]; then
+        if command -v command-code >/dev/null 2>&1; then
+            _commandcode_bin="command-code"
+        elif command -v cmd >/dev/null 2>&1; then
+            _commandcode_bin="cmd"
+        fi
+    fi
+    if [[ -n "$_commandcode_bin" ]] && { [[ -n "${COMMAND_CODE_API_KEY:-}" ]] || "$_commandcode_bin" status --json >/dev/null 2>&1; }; then
         AVAILABLE_CLI+=(commandcode)
     fi
 fi

@@ -13,16 +13,17 @@ mkdir -p "$FIXTURE_DIR/bin"
 cat > "$FIXTURE_DIR/bin/command-code" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$MOCK_ARGS"
+cat > "${MOCK_STDIN:-/dev/null}"
 printf '%s\n' '{"type":"event","event":{"type":"tool_running"}}'
 printf '%s\n' "${MOCK_RESULT:-{\"type\":\"result\",\"subtype\":\"success\",\"sessionId\":\"abc\",\"finalText\":\"HARNESS_OK\"}}"
 exit "${MOCK_RC:-0}"
 EOF
 chmod +x "$FIXTURE_DIR/bin/command-code"
-export PATH="$FIXTURE_DIR/bin:$PATH" MOCK_ARGS
+export PATH="$FIXTURE_DIR/bin:$PATH" MOCK_ARGS MOCK_STDIN="$FIXTURE_DIR/stdin"
 
 test_case "extracts final text and passes plan-mode arguments"
 out=$(printf 'inspect only' | "$PROJECT_ROOT/scripts/helpers/commandcode-exec.sh" deepseek/deepseek-v4-pro plan)
-if [[ "$out" == "HARNESS_OK" ]] && grep -Fx -- '--permission-mode' "$MOCK_ARGS" >/dev/null && grep -Fx -- 'plan' "$MOCK_ARGS" >/dev/null && grep -Fx -- '--output-format' "$MOCK_ARGS" >/dev/null && grep -Fx -- 'json' "$MOCK_ARGS" >/dev/null; then
+if [[ "$out" == "HARNESS_OK" ]] && grep -Fx -- '--permission-mode' "$MOCK_ARGS" >/dev/null && grep -Fx -- 'plan' "$MOCK_ARGS" >/dev/null && grep -Fx -- '--output-format' "$MOCK_ARGS" >/dev/null && grep -Fx -- 'json' "$MOCK_ARGS" >/dev/null && ! grep -Fx -- 'inspect only' "$MOCK_ARGS" >/dev/null && [[ "$(cat "$MOCK_STDIN")" == "inspect only" ]]; then
     test_pass
 else
     test_fail "expected finalText and plan/json arguments"

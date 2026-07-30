@@ -733,6 +733,23 @@ check_provider_health() {
                 fi
             fi
             ;;
+        commandcode)
+            if ! command -v command-code >/dev/null 2>&1 && ! command -v cmd >/dev/null 2>&1; then
+                echo "commandcode CLI not found in PATH" >&2
+                return 1
+            fi
+            if [[ -z "${COMMAND_CODE_API_KEY:-}" ]]; then
+                resolve_provider_env "COMMAND_CODE_API_KEY" 2>/dev/null || true
+            fi
+            if [[ -z "${COMMAND_CODE_API_KEY:-}" ]]; then
+                local cc_bin="command-code"
+                command -v command-code >/dev/null 2>&1 || cc_bin="cmd"
+                "$cc_bin" status --json >/dev/null 2>&1 || {
+                    echo "commandcode: no API key or authenticated CLI session" >&2
+                    return 1
+                }
+            fi
+            ;;
         gemini)
             if ! command -v gemini &>/dev/null; then
                 echo "gemini CLI not found in PATH" >&2

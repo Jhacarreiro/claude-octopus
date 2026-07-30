@@ -19,6 +19,7 @@ printf '%s\n' "${MOCK_RESULT:-{\"type\":\"result\",\"subtype\":\"success\",\"ses
 exit "${MOCK_RC:-0}"
 EOF
 chmod +x "$FIXTURE_DIR/bin/command-code"
+unset OCTOPUS_COMMANDCODE_BIN MOCK_RESULT MOCK_RC
 export PATH="$FIXTURE_DIR/bin:$PATH" MOCK_ARGS MOCK_STDIN="$FIXTURE_DIR/stdin"
 
 test_case "extracts final text and passes plan-mode arguments"

@@ -70,7 +70,7 @@ if octo_provider_allowed commandcode; then
             _commandcode_bin="cmd"
         fi
     fi
-    if [[ -n "$_commandcode_bin" ]] && { [[ -n "${COMMAND_CODE_API_KEY:-}" ]] || "$_commandcode_bin" status --json >/dev/null 2>&1; }; then
+    if [[ -n "$_commandcode_bin" ]] && { [[ -x "$_commandcode_bin" ]] || command -v "$_commandcode_bin" >/dev/null 2>&1; } && { [[ -n "${COMMAND_CODE_API_KEY:-}" ]] || "$_commandcode_bin" status --json >/dev/null 2>&1; }; then
         AVAILABLE_CLI+=(commandcode)
     fi
 fi

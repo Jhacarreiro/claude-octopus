@@ -78,7 +78,7 @@ if [[ -z "$cc_bin" ]]; then
         cc_bin="cmd"
     fi
 fi
-if [[ -n "$cc_bin" ]]; then
+if [[ -n "$cc_bin" ]] && { [[ -x "$cc_bin" ]] || command -v "$cc_bin" >/dev/null 2>&1; }; then
     if [[ -n "${COMMAND_CODE_API_KEY:-}" ]]; then
         commandcode_state="available"
     else

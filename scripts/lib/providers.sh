@@ -742,8 +742,8 @@ check_provider_health() {
                     cc_bin="cmd"
                 fi
             fi
-            if [[ -z "$cc_bin" ]]; then
-                echo "commandcode CLI not found in PATH and OCTOPUS_COMMANDCODE_BIN is unset" >&2
+            if [[ -z "$cc_bin" ]] || ! { [[ -x "$cc_bin" ]] || command -v "$cc_bin" >/dev/null 2>&1; }; then
+                echo "commandcode CLI is not executable or not found" >&2
                 return 1
             fi
             if [[ -z "${COMMAND_CODE_API_KEY:-}" ]]; then

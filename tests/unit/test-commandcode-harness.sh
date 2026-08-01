@@ -73,6 +73,18 @@ else
     test_fail "unexpected role permission mapping"
 fi
 
+# The command dispatch actually returns must survive validate_agent_command, or
+# every commandcode dispatch aborts the phase before the CLI is ever invoked —
+# the same failure mode as #697 (copilot-exec.sh) and #705 (agy-exec.sh). Asserting
+# the shape of get_agent_command's output is not enough; validate it.
+test_case "dispatch commands for commandcode pass validate_agent_command"
+source "$PROJECT_ROOT/scripts/lib/utils.sh"
+if validate_agent_command "$impl_cmd" >/dev/null 2>&1 && validate_agent_command "$verify_cmd" >/dev/null 2>&1; then
+    test_pass
+else
+    test_fail "commandcode dispatch command rejected by validate_agent_command"
+fi
+
 test_case "provider environment forwards only dedicated controls"
 export COMMAND_CODE_API_KEY=test-key CMD_ZDR=1 OCTOPUS_COMMANDCODE_BIN=/custom/cmd OCTOPUS_COMMANDCODE_MAX_TURNS=12
 build_provider_env commandcode

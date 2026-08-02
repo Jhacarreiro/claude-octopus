@@ -116,6 +116,72 @@ cat > "$CONFIG_FILE" << EOF
 EOF
 assert_eq "$(resolve_octopus_model "codex" "codex" "deliver")" "deliver-model" "Phase routing"
 
+# Test 5b: Literal object role routing preserves exact provider model IDs
+clear_model_cache
+cat > "$CONFIG_FILE" << EOF
+{
+  "version": "3.0",
+  "providers": {
+    "commandcode": { "default": "deepseek/deepseek-v4-pro" }
+  },
+  "routing": {
+    "roles": {
+      "researcher": {
+        "provider": "commandcode",
+        "model": "minimaxai/minimax-m3"
+      }
+    }
+  }
+}
+EOF
+assert_eq "$(resolve_octopus_model "commandcode" "commandcode-research" "probe" "researcher")" "minimaxai/minimax-m3" "Literal object role routing"
+
+# Test 5c: Literal object phase routing preserves exact provider model IDs
+clear_model_cache
+cat > "$CONFIG_FILE" << EOF
+{
+  "version": "3.0",
+  "providers": {
+    "commandcode": { "default": "deepseek/deepseek-v4-pro" }
+  },
+  "routing": {
+    "phases": {
+      "research": {
+        "provider": "commandcode",
+        "model": "minimaxai/minimax-m3"
+      }
+    }
+  }
+}
+EOF
+assert_eq "$(resolve_octopus_model "commandcode" "commandcode-research" "research" "")" "minimaxai/minimax-m3" "Literal object phase routing"
+
+# Test 5d: Cross-provider literal role route does not leak its model
+clear_model_cache
+cat > "$CONFIG_FILE" << EOF
+{
+  "version": "3.0",
+  "providers": {
+    "commandcode": { "default": "deepseek/deepseek-v4-pro" }
+  },
+  "routing": {
+    "roles": {
+      "researcher": {
+        "provider": "claude",
+        "model": "claude-sonnet-4.6"
+      }
+    },
+    "phases": {
+      "research": {
+        "provider": "commandcode",
+        "model": "minimaxai/minimax-m3"
+      }
+    }
+  }
+}
+EOF
+assert_eq "$(resolve_octopus_model "commandcode" "commandcode-research" "research" "researcher")" "minimaxai/minimax-m3" "Cross-provider literal role falls through to matching phase"
+
 # Test 6: Recursive reference (codex:spark)
 clear_model_cache
 cat > "$CONFIG_FILE" << EOF

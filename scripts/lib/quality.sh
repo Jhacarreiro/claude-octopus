@@ -531,9 +531,24 @@ Be concise and specific. This is a planning exercise, not implementation."
     log INFO "Design review: gathering provider approaches..."
     log INFO "Design review seats: seat_1=${seat_1_label}, seat_2=${seat_2_label}, seat_3=${seat_3_label}, synthesis=${synthesis_label}, timeout=${_design_timeout_label}, synth_timeout=${_synth_timeout_label}"
 
-    seat_1_approach=$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="design-review-ceremony" run_agent_sync_consultative "$design_codex_agent" "$ceremony_prompt" "$design_timeout" "implementer" "ceremony" 2>/dev/null) || true
-    seat_2_approach=$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="design-review-ceremony" run_agent_sync_consultative "$design_agy_agent" "$ceremony_prompt" "$design_timeout" "researcher" "ceremony" 2>/dev/null) || true
-    seat_3_approach=$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="design-review-ceremony" run_agent_sync_consultative "$design_claude_agent" "$ceremony_prompt" "$design_timeout" "code-reviewer" "ceremony" 2>/dev/null) || true
+    seat_1_approach="$(
+        (
+            export "OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED=design-review-ceremony"
+            run_agent_sync_consultative "$design_codex_agent" "$ceremony_prompt" "$design_timeout" "implementer" "ceremony"
+        ) 2>/dev/null
+    )" || true
+    seat_2_approach="$(
+        (
+            export "OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED=design-review-ceremony"
+            run_agent_sync_consultative "$design_agy_agent" "$ceremony_prompt" "$design_timeout" "researcher" "ceremony"
+        ) 2>/dev/null
+    )" || true
+    seat_3_approach="$(
+        (
+            export "OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED=design-review-ceremony"
+            run_agent_sync_consultative "$design_claude_agent" "$ceremony_prompt" "$design_timeout" "code-reviewer" "ceremony"
+        ) 2>/dev/null
+    )" || true
 
     # Synthesize conflicts and resolution.
     # synthesis.start/end bracket the call so the event stream shows how long the

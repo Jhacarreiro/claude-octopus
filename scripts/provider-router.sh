@@ -3,6 +3,9 @@
 # Provider routing with reliability layer: error classification, circuit breaker, backoff
 # Config: OCTOPUS_ROUTING_MODE=round-robin|fastest|cheapest|scored (default: round-robin)
 
+_provider_router_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "${_provider_router_dir}/lib/provider-registry.sh" 2>/dev/null || true
+
 # Routing mode configuration
 OCTOPUS_ROUTING_MODE="${OCTOPUS_ROUTING_MODE:-round-robin}"
 
@@ -171,7 +174,8 @@ is_provider_available() {
 filter_available_providers() {
     local available=""
     for candidate in "$@"; do
-        local base_provider="${candidate%%-*}"
+        local base_provider
+        base_provider="$(octo_provider_canonical "$candidate" 2>/dev/null || printf '%s' "$candidate")"
         if is_provider_available "$base_provider"; then
             available+="$candidate "
         fi
@@ -188,7 +192,7 @@ get_circuit_breaker_status() {
     local now
     now=$(date +%s)
 
-    for provider in codex gemini claude perplexity ollama copilot qwen cursor-agent grok vibe; do
+    for provider in $(octo_provider_ids dispatch); do
         local state="closed"
         local detail=""
         local cooldown_file="${_PROVIDER_STATE_DIR}/${provider}.cooldown"
@@ -256,21 +260,33 @@ build_provider_stats() {
     mkdir -p "$metrics_dir"
 
     # Extract per-provider average latency from completed agent metrics
-    jq '{
-        providers: (
-            [.phases[]?.agents[]? | select(.status == "completed")] |
-            group_by(.agent_type | split("-")[0]) |
+    local provider_ids_json
+    provider_ids_json=$(octo_provider_ids | tr ' ' '\n' | jq -R . | jq -s .) || return 1
+    jq --argjson provider_ids "$provider_ids_json" '
+        def canonical_provider($agent_type):
+            ([ $provider_ids[]
+               | . as $id
+               | select($agent_type == $id or ($agent_type | startswith($id + "-"))) ]
+             | sort_by(length)
+             | last) // $agent_type;
+        {
+          providers: (
+            [.phases[]?.agents[]? | select(.status == "completed")
+             | . + {canonical_provider: canonical_provider(.agent_type)}] |
+            sort_by(.canonical_provider) |
+            group_by(.canonical_provider) |
             map({
-                key: .[0].agent_type | split("-")[0],
+                key: .[0].canonical_provider,
                 value: {
                     avg_latency_ms: ([.[].duration_ms // 0] | add / length),
                     call_count: length,
                     avg_cost_usd: ([.[].estimated_cost_usd // 0] | add / length)
                 }
             }) | from_entries
-        ),
-        updated_at: now | todate
-    }' "$metrics_file" > "$stats_file" 2>/dev/null || return 1
+          ),
+          updated_at: now | todate
+        }
+    ' "$metrics_file" > "$stats_file" 2>/dev/null || return 1
 }
 
 # Select fastest provider from candidates
@@ -298,7 +314,8 @@ select_fastest_provider() {
             local best=""
             local best_latency=999999
             for candidate in "${candidates[@]}"; do
-                local base_provider="${candidate%%-*}"
+                local base_provider
+                base_provider="$(octo_provider_canonical "$candidate" 2>/dev/null || printf '%s' "$candidate")"
                 local latency
                 latency=$(jq -r ".providers.\"$base_provider\".avg_latency_ms // 999999" "$stats_file" 2>/dev/null || echo "999999")
                 if awk -v a="$latency" -v b="$best_latency" 'BEGIN { exit !(a < b) }'; then
@@ -316,7 +333,8 @@ select_fastest_provider() {
             local best=""
             local best_cost=999999
             for candidate in "${candidates[@]}"; do
-                local base_provider="${candidate%%-*}"
+                local base_provider
+                base_provider="$(octo_provider_canonical "$candidate" 2>/dev/null || printf '%s' "$candidate")"
                 local cost
                 cost=$(jq -r ".providers.\"$base_provider\".avg_cost_usd // 999999" "$stats_file" 2>/dev/null || echo "999999")
                 if awk -v a="$cost" -v b="$best_cost" 'BEGIN { exit !(a < b) }'; then
@@ -335,7 +353,8 @@ select_fastest_provider() {
 
             local best="" best_score="0.00"
             for candidate in $available_candidates; do
-                local base_provider="${candidate%%-*}"
+                local base_provider
+                base_provider="$(octo_provider_canonical "$candidate" 2>/dev/null || printf '%s' "$candidate")"
                 local score
                 if type get_provider_score &>/dev/null; then
                     score=$(get_provider_score "$base_provider" 2>/dev/null || echo "0.70")

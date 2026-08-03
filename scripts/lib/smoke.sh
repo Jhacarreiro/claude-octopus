@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+_smoke_policy_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${_smoke_policy_dir}/provider-policy.sh" 2>/dev/null || true
 # Claude Octopus â Provider Smoke Tests & Configuration
 # Extracted from orchestrate.sh
 # Source-safe: no main execution block.
@@ -809,7 +811,7 @@ select_provider() {
     local best_provider=""
     local best_score=-1
 
-    for provider in codex gemini agy claude opencode openrouter; do
+    for provider in $(octo_smoke_routing_providers); do
         local score
         score=$(score_provider "$provider" "$task_type" "$complexity")
 

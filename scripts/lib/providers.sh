@@ -12,6 +12,7 @@ if ! declare -f _is_cursor_agent_binary >/dev/null 2>&1; then
     source "${_providers_lib_dir}/cursor-agent.sh" 2>/dev/null || true
 fi
 source "${_providers_lib_dir}/provider-allowlist.sh" 2>/dev/null || true
+source "${_providers_lib_dir}/provider-registry.sh" 2>/dev/null || true
 source "${_providers_lib_dir}/auth.sh" 2>/dev/null || true
 source "${_providers_lib_dir}/qwen.sh" 2>/dev/null || true
 source "${_providers_lib_dir}/openai-compatible.sh" 2>/dev/null || true
@@ -942,7 +943,7 @@ check_all_providers() {
     local healthy=0 unhealthy=0
     local -a results=()
 
-    for provider in codex gemini agy claude claude-sdk perplexity openrouter atlascloud ollama copilot qwen cursor-agent grok vibe; do
+    for provider in $(octo_provider_ids health); do
         local diag
         if diag=$(check_provider_health "$provider" 2>&1); then
             results+=("  ✓ $provider")
@@ -1098,6 +1099,15 @@ detect_providers() {
             codex_auth="api-key"
         fi
         result="${result}codex:${codex_auth} "
+    fi
+
+    # Detect Command Code CLI
+    if { ! declare -f octo_provider_allowed >/dev/null 2>&1 || octo_provider_allowed commandcode; } && command -v command-code >/dev/null 2>&1; then
+        local commandcode_auth="cli"
+        if [[ -n "${COMMAND_CODE_API_KEY:-}" ]]; then
+            commandcode_auth="api-key"
+        fi
+        result="${result}commandcode:${commandcode_auth} "
     fi
 
     # Detect Gemini CLI

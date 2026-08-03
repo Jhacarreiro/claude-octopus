@@ -216,11 +216,12 @@ test_provider_health_gemini_google_key() {
 }
 
 test_provider_all_includes_gemini() {
-    test_case "providers: check_all_providers includes gemini"
-    if grep 'for provider in' "$PROVIDERS" | grep -q 'gemini'; then
+    test_case "providers: health registry includes gemini"
+    source "$PROJECT_ROOT/scripts/lib/provider-registry.sh"
+    if octo_provider_has_capability gemini health; then
         test_pass
     else
-        test_fail "check_all_providers loop should include gemini"
+        test_fail "gemini should have the health capability"
     fi
 }
 
@@ -263,10 +264,11 @@ test_model_resolver_gemini_model_name() {
 
 test_circuit_breaker_includes_gemini() {
     test_case "circuit breaker: iterates over gemini"
-    if grep 'for provider in' "$PROVIDER_ROUTER" | grep -q 'gemini'; then
+    source "$PROJECT_ROOT/scripts/lib/provider-registry.sh"
+    if octo_provider_has_capability gemini dispatch && grep -q 'octo_provider_ids dispatch' "$PROVIDER_ROUTER"; then
         test_pass
     else
-        test_fail "circuit breaker loop should include gemini"
+        test_fail "circuit breaker should derive dispatch providers from registry"
     fi
 }
 
@@ -320,10 +322,18 @@ test_embrace_gemini_in_strategy() {
 
 test_detect_providers_gemini() {
     test_case "detect_providers: detects Gemini CLI"
-    if grep -A20 'detect_providers()' "$ALL_SRC" | grep -q 'gemini'; then
+    local stub_dir out
+    stub_dir=$(mktemp -d)
+    printf '#!/usr/bin/env bash
+exit 0
+' > "$stub_dir/gemini"
+    chmod +x "$stub_dir/gemini"
+    out=$(HOME="$stub_dir" PATH="$stub_dir:$PATH" OCTO_ALLOWED_PROVIDERS=gemini GEMINI_API_KEY=test bash -c 'source "'$PROJECT_ROOT'/scripts/lib/providers.sh"; detect_providers')
+    rm -rf "$stub_dir"
+    if [[ "$out" == *"gemini:"* ]]; then
         test_pass
     else
-        test_fail "detect_providers should detect gemini"
+        test_fail "detect_providers should detect gemini: $out"
     fi
 }
 

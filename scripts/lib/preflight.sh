@@ -2,6 +2,8 @@
 # lib/preflight.sh — Preflight checks and provider detection
 # Extracted from orchestrate.sh (v9.7.x decomposition)
 # shellcheck source=/dev/null
+_preflight_registry_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${_preflight_registry_dir}/provider-registry.sh" 2>/dev/null || true
 
 if ! declare -f _is_cursor_agent_binary >/dev/null 2>&1; then
     _preflight_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,6 +69,20 @@ cmd_detect_providers() {
     else
         echo "CODEX_STATUS=missing"
         echo "CODEX_AUTH=none"
+    fi
+    echo ""
+
+    # Check Command Code CLI
+    if command -v command-code >/dev/null 2>&1; then
+        echo "COMMANDCODE_STATUS=ok"
+        if [[ -n "${COMMAND_CODE_API_KEY:-}" ]]; then
+            echo "COMMANDCODE_AUTH=api-key"
+        else
+            echo "COMMANDCODE_AUTH=cli-session"
+        fi
+    else
+        echo "COMMANDCODE_STATUS=missing"
+        echo "COMMANDCODE_AUTH=none"
     fi
     echo ""
 
@@ -206,6 +222,8 @@ cmd_detect_providers() {
     mkdir -p "$WORKSPACE_DIR"
     local codex_status=$(command -v codex &>/dev/null && echo "ok" || echo "missing")
     local codex_auth=$([[ -f "$HOME/.codex/auth.json" ]] && echo "oauth" || [[ -n "${OPENAI_API_KEY:-}" ]] && echo "api-key" || echo "none")
+    local commandcode_status=$(command -v command-code >/dev/null 2>&1 && echo "ok" || echo "missing")
+    local commandcode_auth=$([[ -n "${COMMAND_CODE_API_KEY:-}" ]] && echo "api-key" || [[ "$commandcode_status" == "ok" ]] && echo "cli-session" || echo "none")
     local gemini_status=$(command -v gemini &>/dev/null && echo "ok" || echo "missing")
     local gemini_auth=$([[ -f "$HOME/.gemini/oauth_creds.json" ]] && echo "oauth" || [[ -n "${GEMINI_API_KEY:-}" ]] && echo "api-key" || echo "none")
     local agy_status=$(command -v agy &>/dev/null && echo "ok" || echo "not-installed")
@@ -233,6 +251,10 @@ cmd_detect_providers() {
 # Codex Status
 CODEX_STATUS=$(printf '%q' "$codex_status")
 CODEX_AUTH=$(printf '%q' "$codex_auth")
+
+# Command Code Status
+COMMANDCODE_STATUS=$(printf '%q' "$commandcode_status")
+COMMANDCODE_AUTH=$(printf '%q' "$commandcode_auth")
 
 # Gemini Status
 GEMINI_STATUS=$(printf '%q' "$gemini_status")
@@ -278,6 +300,12 @@ EOF
         echo "  ⚠ Codex: Installed but not authenticated (run: codex login  OR  export OPENAI_API_KEY=\"sk-...\")"
     else
         echo "  ✗ Codex: Not installed (run: npm install -g @openai/codex)"
+    fi
+
+    if [[ "$commandcode_status" == "ok" ]]; then
+        echo "  ✓ Command Code: Installed (${commandcode_auth})"
+    else
+        echo "  ○ Command Code: Not installed (optional)"
     fi
 
     if [[ "$gemini_status" == "ok" && "$gemini_auth" != "none" ]]; then

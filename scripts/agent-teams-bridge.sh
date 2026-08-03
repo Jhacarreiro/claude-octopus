@@ -266,6 +266,9 @@ bridge_evaluate_gate() {
     [[ "$passed" == "true" ]]
 }
 
+_bridge_registry_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "${_bridge_registry_dir}/lib/provider-registry.sh" 2>/dev/null || true
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # BRIDGE: Cross-provider task dispatch
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -277,9 +280,17 @@ bridge_get_idle_dispatch_target() {
     command -v jq &>/dev/null || return 1
 
     # Find providers with no running tasks
-    local idle_providers
-    idle_providers=$(jq -r '
-        [.tasks | to_entries[] | select(.value.status == "running") | .value.agent_type | split("-")[0]] |
+    local provider_ids_json idle_providers
+    provider_ids_json=$(octo_provider_ids | tr ' ' '\n' | jq -R . | jq -s .) || return 1
+    idle_providers=$(jq -r --argjson provider_ids "$provider_ids_json" '
+        def canonical_provider($agent_type):
+            ([ $provider_ids[]
+               | . as $id
+               | select($agent_type == $id or ($agent_type | startswith($id + "-"))) ]
+             | sort_by(length)
+             | last) // $agent_type;
+        [.tasks | to_entries[] | select(.value.status == "running")
+         | canonical_provider(.value.agent_type)] |
         unique |
         . as $busy |
         ["codex", "gemini", "claude"] - $busy |

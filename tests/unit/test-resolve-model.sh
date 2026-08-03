@@ -5,10 +5,10 @@ set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-source "$SCRIPT_DIR/helpers/test-framework.sh"
+source "$SCRIPT_DIR/../helpers/test-framework.sh"
 test_suite "resolve_octopus_model (v3.0 refactor)"
 
-PLUGIN_DIR="$(dirname "$SCRIPT_DIR")"
+PLUGIN_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ORCHESTRATE_SH="${PLUGIN_DIR}/scripts/orchestrate.sh"
 
 

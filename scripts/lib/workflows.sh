@@ -984,9 +984,22 @@ tangle_scope_is_safe_relative_path() {
     local normalized="${scope#./}"
     normalized="${normalized%/}"
 
-    [[ -n "$normalized" ]] || return 1
+    # Reject scopes that are empty once trimmed, not merely empty: a
+    # whitespace-only scope is non-empty here but names nothing.
+    [[ -n "${normalized//[[:space:]]/}" ]] || return 1
     case "$normalized" in
-        /*|.|..|.git|.git/*|*\\*|*'*'*|*'?'*|*'['*|*']'*) return 1 ;;
+        /*|.|..|*\\*|*'*'*|*'?'*|*'['*|*']'*) return 1 ;;
+    esac
+    # Compare the .git check case-insensitively. macOS APFS/HFS+ is
+    # case-insensitive by default and is this project's primary platform, so a
+    # literal `.git` match let `.GIT/hooks/pre-commit` through — which resolves
+    # to the real hook and is arbitrary code execution on the next commit.
+    # Verified in a scratch repo: `mkdir -p .GIT/hooks && echo x > .GIT/hooks/p`
+    # creates `.git/hooks/p`.
+    local lower
+    lower=$(printf '%s' "$normalized" | tr '[:upper:]' '[:lower:]')
+    case "$lower" in
+        .git|.git/*) return 1 ;;
     esac
     case "/$normalized/" in
         */../*|*/./*) return 1 ;;

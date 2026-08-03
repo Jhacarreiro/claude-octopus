@@ -43,6 +43,26 @@ if tangle_scope_is_known_or_explicit_new_file "/tmp/outside.js"; then test_fail 
 test_case "rejects glob scope"
 if tangle_scope_is_known_or_explicit_new_file "apps/server/src/**"; then test_fail "glob accepted"; else test_pass; fi
 
+# macOS APFS/HFS+ is case-insensitive by default and is this project's primary
+# platform, so a literal `.git` match let these through — and `.GIT/hooks/*`
+# resolves to the real hook directory, making it arbitrary code execution on the
+# next commit. A guard whose suite never tries a case variant passes while the
+# hole is open, which is what happened here.
+test_case "rejects .git"
+if tangle_scope_is_known_or_explicit_new_file ".git/config"; then test_fail ".git accepted"; else test_pass; fi
+
+for variant in ".GIT/config" ".Git/hooks/pre-commit" ".gIt/HOOKS/pre-commit"; do
+    test_case "rejects case variant $variant"
+    if tangle_scope_is_known_or_explicit_new_file "$variant"; then
+        test_fail "$variant accepted — resolves into .git on a case-insensitive filesystem"
+    else
+        test_pass
+    fi
+done
+
+test_case "rejects a whitespace-only scope"
+if tangle_scope_is_known_or_explicit_new_file "  "; then test_fail "whitespace-only scope accepted"; else test_pass; fi
+
 test_case "explicit new scope does not fall back to README heuristic"
 subtasks='1. [CODING] Docs — Files: README.md — Task: Update documentation and acceptance notes.
 2. [CODING] Development scope — Files: apps/server/src/development-scope/ — Task: Implement a new development-only server module and tests.'

@@ -4,6 +4,11 @@
 #
 # Columns: id|aliases|command|organization|capabilities
 # Capabilities describe which shared interfaces should expose the provider.
+# Every provider must implement the universal baseline below. Optional capability
+# omissions must be documented in octo_provider_limitations_rows().
+
+OCTO_PROVIDER_BASELINE_CAPABILITIES="model-config dispatch env"
+OCTO_PROVIDER_OPTIONAL_CAPABILITIES="council health detect"
 
 octo_provider_registry_rows() {
     cat <<'EOF'
@@ -150,4 +155,106 @@ octo_provider_ids() {
 $(octo_provider_registry_rows)
 EOF
     printf '%s\n' "$out"
+}
+
+octo_provider_limitations_rows() {
+    cat <<'EOF'
+claude-sdk|council|sdk-agent-runtime-is-not-a-supported-council-seat
+perplexity|council|research-api-runtime-is-not-a-supported-council-seat
+opencode|health|no-provider-specific-health-probe
+atlascloud|council|atlascloud-runtime-is-not-a-supported-council-seat
+openai-compatible|health|generic-api-provider-has-no-provider-specific-health-probe
+openai-tools|health|generic-tool-loop-has-no-provider-specific-health-probe
+openai-tools|detect|api-configured-runtime-has-no-local-cli-detection
+openai-compatible-agent|council|agent-runtime-is-not-a-supported-council-seat
+openai-compatible-agent|health|generic-agent-runtime-has-no-provider-specific-health-probe
+openai-compatible-agent|detect|api-configured-runtime-has-no-local-cli-detection
+cursor-agent|council|interactive-agent-cli-is-not-a-supported-council-seat
+grok|council|grok-runtime-is-not-a-supported-council-seat
+ollama|council|local-runtime-is-not-a-supported-council-seat
+copilot|council|copilot-runtime-is-not-a-supported-council-seat
+vibe|council|vibe-runtime-is-not-a-supported-council-seat
+EOF
+}
+
+octo_provider_limitation_reason() {
+    local requested capability canonical id cap reason
+    requested="$1"
+    capability="$2"
+    canonical="$(octo_provider_canonical "$requested")" || return 1
+    while IFS='|' read -r id cap reason; do
+        if [[ "$id" == "$canonical" && "$cap" == "$capability" ]]; then
+            printf '%s\n' "$reason"
+            return 0
+        fi
+    done <<EOF
+$(octo_provider_limitations_rows)
+EOF
+    return 1
+}
+
+octo_provider_validate_contracts() {
+    local id aliases command org caps capability reason key seen=""
+
+    while IFS='|' read -r id aliases command org caps; do
+        [[ -n "$id" && -n "$command" && -n "$org" && -n "$caps" ]] || {
+            echo "provider registry: incomplete metadata for '$id'" >&2
+            return 1
+        }
+        for capability in $OCTO_PROVIDER_BASELINE_CAPABILITIES; do
+            octo_provider_has_capability "$id" "$capability" || {
+                echo "provider registry: '$id' is missing baseline capability '$capability'" >&2
+                return 1
+            }
+        done
+        for capability in $OCTO_PROVIDER_OPTIONAL_CAPABILITIES; do
+            if octo_provider_has_capability "$id" "$capability"; then
+                if octo_provider_limitation_reason "$id" "$capability" >/dev/null 2>&1; then
+                    echo "provider registry: '$id' declares '$capability' and a contradictory limitation" >&2
+                    return 1
+                fi
+            else
+                reason="$(octo_provider_limitation_reason "$id" "$capability" 2>/dev/null || true)"
+                [[ -n "$reason" ]] || {
+                    echo "provider registry: '$id' omits '$capability' without an explicit limitation" >&2
+                    return 1
+                }
+            fi
+        done
+    done <<EOF
+$(octo_provider_registry_rows)
+EOF
+
+    while IFS='|' read -r id capability reason; do
+        [[ -n "$id" && -n "$capability" && -n "$reason" ]] || {
+            echo "provider registry: malformed limitation row" >&2
+            return 1
+        }
+        octo_provider_valid "$id" || {
+            echo "provider registry: limitation references unknown provider '$id'" >&2
+            return 1
+        }
+        case " $OCTO_PROVIDER_OPTIONAL_CAPABILITIES " in
+            *" $capability "*) ;;
+            *)
+                echo "provider registry: limitation for non-optional capability '$capability'" >&2
+                return 1
+                ;;
+        esac
+        key="$id:$capability"
+        case " $seen " in
+            *" $key "*)
+                echo "provider registry: duplicate limitation '$key'" >&2
+                return 1
+                ;;
+        esac
+        seen="${seen}${seen:+ }${key}"
+        if octo_provider_has_capability "$id" "$capability"; then
+            echo "provider registry: limitation contradicts declared capability '$key'" >&2
+            return 1
+        fi
+    done <<EOF
+$(octo_provider_limitations_rows)
+EOF
+    return 0
 }

@@ -810,8 +810,13 @@ select_provider() {
 
     local best_provider=""
     local best_score=-1
+    local routing_providers
+    routing_providers="$(octo_smoke_routing_providers)" || {
+        log ERROR "Invalid OCTOPUS_SMOKE_ROUTING_PROVIDERS policy"
+        return 2
+    }
 
-    for provider in $(octo_smoke_routing_providers); do
+    for provider in $routing_providers; do
         local score
         score=$(score_provider "$provider" "$task_type" "$complexity")
 

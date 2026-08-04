@@ -16,7 +16,8 @@ COUNCIL_PROVIDERS=""
 _council_registry_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_council_registry_dir}/provider-registry.sh" 2>/dev/null || true
 source "${_council_registry_dir}/provider-policy.sh" 2>/dev/null || true
-COUNCIL_DEFAULT_PROVIDERS="$(octo_council_default_providers)"
+COUNCIL_PROVIDER_POLICY_VALID="true"
+COUNCIL_DEFAULT_PROVIDERS="$(octo_council_default_providers)" || COUNCIL_PROVIDER_POLICY_VALID="false"
 COUNCIL_MAX_COST=""
 COUNCIL_SEAT_TIMEOUT=""
 COUNCIL_DRY_RUN=""
@@ -184,6 +185,11 @@ council_validate_choice() {
 
 council_validate_provider_list() {
     local providers="$1"
+
+    if [[ "$COUNCIL_PROVIDER_POLICY_VALID" != "true" ]]; then
+        council_error_usage "invalid OCTOPUS_COUNCIL_DEFAULT_PROVIDERS policy"
+        return 2
+    fi
 
     if [[ "$providers" == "auto" ]]; then
         return 0

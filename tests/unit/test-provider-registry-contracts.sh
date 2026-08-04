@@ -85,4 +85,18 @@ else
     test_fail "generic provider environment fallback missing"
 fi
 
+
+test_case "detect capability matches the complete implemented detection inventory"
+expected="codex commandcode claude claude-sdk gemini agy perplexity opencode openrouter atlascloud openai-compatible cursor-agent grok qwen ollama copilot vibe"
+actual="$(octo_provider_ids detect)"
+if [[ "$actual" == "$expected" ]]; then test_pass; else test_fail "detect set drift: $actual"; fi
+
+test_case "canonical provider inventory is explicit and complete"
+expected="codex commandcode claude claude-sdk gemini agy perplexity opencode openrouter atlascloud openai-compatible openai-tools openai-compatible-agent cursor-agent grok qwen ollama copilot vibe"
+actual="$(octo_provider_ids)"
+if [[ "$actual" == "$expected" ]]; then test_pass; else test_fail "canonical provider inventory drift: $actual"; fi
+
+test_case "registry self-validation enforces baseline and documented omissions"
+if octo_provider_validate_contracts; then test_pass; else test_fail "registry governance contract failed"; fi
+
 test_summary

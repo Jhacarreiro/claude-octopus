@@ -6,10 +6,11 @@ source "$SCRIPT_DIR/../helpers/test-framework.sh"
 
 test_suite "Provider router canonical compound IDs"
 
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-export HOME="$tmp/home"
-export WORKSPACE_DIR="$tmp/workspace"
+TEST_TMP_DIR="${TEST_TMP_DIR:-/tmp/octopus-tests-$$}"
+trap 'rm -rf "$TEST_TMP_DIR"' EXIT INT TERM
+export HOME="$TEST_TMP_DIR/home"
+export WORKSPACE_DIR="$TEST_TMP_DIR/workspace"
+export OCTO_CB_COOLDOWN_SECS=300
 mkdir -p "$HOME" "$WORKSPACE_DIR"
 source "$PROJECT_ROOT/scripts/provider-router.sh"
 
@@ -42,10 +43,12 @@ else
     test_fail "compound cooldown filtering failed: $filtered"
 fi
 
-test_case "circuit breaker inventory derives all dispatch providers"
+test_case "circuit breaker reports registry-backed dispatch providers at runtime"
 source "$PROJECT_ROOT/scripts/lib/provider-registry.sh"
-expected=$(octo_provider_ids dispatch)
-loop=$(grep -F 'for provider in $(octo_provider_ids dispatch)' "$PROJECT_ROOT/scripts/provider-router.sh" || true)
-if [[ -n "$expected" && -n "$loop" ]]; then test_pass; else test_fail "dispatch registry loop missing"; fi
+mkdir -p "$_PROVIDER_STATE_DIR"
+printf '%s\n' "$(( $(date +%s) + 60 ))" > "$_PROVIDER_STATE_DIR/gemini.cooldown"
+status=$(get_circuit_breaker_status)
+rm -f "$_PROVIDER_STATE_DIR/gemini.cooldown"
+if [[ "$status" == *"gemini: OPEN"* || "$status" == *"gemini: half-open"* ]] && [[ -n "$(octo_provider_ids dispatch)" ]]; then test_pass; else test_fail "runtime circuit breaker omitted Gemini: $status"; fi
 
 test_summary

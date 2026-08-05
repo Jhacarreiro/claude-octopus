@@ -702,11 +702,13 @@ test_agy_allowlist_alias() {
 
     source "$PROJECT_ROOT/scripts/lib/provider-allowlist.sh"
     local agy_ok=false alias_ok=false
+    local had_allowlist=false previous_allowlist=""
+    if [[ ${OCTO_ALLOWED_PROVIDERS+x} ]]; then had_allowlist=true; previous_allowlist="$OCTO_ALLOWED_PROVIDERS"; fi
     OCTO_ALLOWED_PROVIDERS=agy
     octo_provider_allowed agy && agy_ok=true
     OCTO_ALLOWED_PROVIDERS=antigravity
     octo_provider_allowed agy && alias_ok=true
-    unset OCTO_ALLOWED_PROVIDERS
+    if [[ "$had_allowlist" == true ]]; then OCTO_ALLOWED_PROVIDERS="$previous_allowlist"; else unset OCTO_ALLOWED_PROVIDERS; fi
 
     if [[ "$agy_ok" == true && "$alias_ok" == true ]]; then
         test_pass

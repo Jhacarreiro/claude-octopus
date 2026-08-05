@@ -52,22 +52,40 @@ source "$PROJECT_ROOT/scripts/helpers/octo-model-config.sh"
 test_pass
 
 test_case "Council accepts every council-capable provider and rejects the rest"
+failed=false
 for id in $all_ids; do
     if octo_provider_has_capability "$id" council; then
         council_validate_provider_list "$id" >/dev/null 2>&1 || { test_fail "Council rejected $id"; exit 0; }
     else
-        if council_validate_provider_list "$id" >/dev/null 2>&1; then test_fail "Council accepted unsupported $id"; exit 0; fi
+        if council_validate_provider_list "$id" >/dev/null 2>&1; then test_fail "Council accepted unsupported $id"; failed=true; break; fi
     fi
 done
-test_pass
+[[ "$failed" == true ]] || test_pass
 
 test_case "allowlist accepts every provider ID and declared alias"
+had_allowlist=false; previous_allowlist=""; failed=false
+if [[ ${OCTO_ALLOWED_PROVIDERS+x} ]]; then had_allowlist=true; previous_allowlist="$OCTO_ALLOWED_PROVIDERS"; fi
 for id in $all_ids; do
     OCTO_ALLOWED_PROVIDERS="$id"
-    octo_provider_allowed "$id" || { test_fail "allowlist rejected $id"; exit 0; }
+    if ! octo_provider_allowed "$id"; then test_fail "allowlist rejected $id"; failed=true; break; fi
 done
-unset OCTO_ALLOWED_PROVIDERS
-test_pass
+if [[ "$failed" == false ]]; then
+    while IFS='|' read -r id aliases command org caps; do
+        old_ifs="$IFS"; IFS=','
+        for alias in $aliases; do
+            IFS="$old_ifs"; [[ -n "$alias" ]] || { IFS=','; continue; }
+            probe="$alias"; case "$alias" in *'*') probe="${alias%\*}probe" ;; esac
+            OCTO_ALLOWED_PROVIDERS="$probe"
+            if ! octo_provider_allowed "$id"; then test_fail "allowlist alias $probe rejected canonical $id"; failed=true; break 2; fi
+            IFS=','
+        done
+        IFS="$old_ifs"
+    done <<EOF
+$(octo_provider_registry_rows)
+EOF
+fi
+if [[ "$had_allowlist" == true ]]; then OCTO_ALLOWED_PROVIDERS="$previous_allowlist"; else unset OCTO_ALLOWED_PROVIDERS; fi
+[[ "$failed" == true ]] || test_pass
 
 test_case "compound provider IDs are not truncated by router or bridge"
 if grep -q 'split("-")\[0\]' "$PROJECT_ROOT/scripts/provider-router.sh" "$PROJECT_ROOT/scripts/agent-teams-bridge.sh" || \
@@ -79,7 +97,7 @@ fi
 
 test_case "Council default policy is configurable without changing registry support"
 defaults=$(bash -c 'source "'$PROJECT_ROOT'/scripts/lib/council.sh"; printf "%s" "$COUNCIL_DEFAULT_PROVIDERS"')
-override=$(OCTOPUS_COUNCIL_DEFAULT_PROVIDERS=commandcode,claude bash -c 'source "'$PROJECT_ROOT'/scripts/lib/council.sh"; printf "%s" "$COUNCIL_DEFAULT_PROVIDERS"')
+override=$(env "OCTOPUS_COUNCIL_DEFAULT_PROVIDERS=commandcode,claude" bash -c 'source "'$PROJECT_ROOT'/scripts/lib/council.sh"; printf "%s" "$COUNCIL_DEFAULT_PROVIDERS"')
 if [[ "$defaults" == "claude,codex,agy,gemini,qwen,opencode,openrouter,openai-compatible,openai-tools" && "$override" == "commandcode,claude" ]]; then
     test_pass
 else

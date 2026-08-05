@@ -263,12 +263,22 @@ test_model_resolver_gemini_model_name() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 test_circuit_breaker_includes_gemini() {
-    test_case "circuit breaker: iterates over gemini"
-    source "$PROJECT_ROOT/scripts/lib/provider-registry.sh"
-    if octo_provider_has_capability gemini dispatch && grep -q 'octo_provider_ids dispatch' "$PROVIDER_ROUTER"; then
+    test_case "circuit breaker: reports Gemini at runtime"
+    local tmp_home old_home status
+    tmp_home="$TEST_TMP_DIR/gemini-circuit-home"
+    mkdir -p "$tmp_home"
+    old_home="$HOME"
+    HOME="$tmp_home"
+    source "$PROVIDER_ROUTER"
+    mkdir -p "$_PROVIDER_STATE_DIR"
+    printf '%s
+' "$(( $(date +%s) + 60 ))" > "$_PROVIDER_STATE_DIR/gemini.cooldown"
+    status=$(get_circuit_breaker_status)
+    HOME="$old_home"
+    if [[ "$status" == *"gemini: OPEN"* || "$status" == *"gemini: half-open"* ]]; then
         test_pass
     else
-        test_fail "circuit breaker should derive dispatch providers from registry"
+        test_fail "runtime circuit breaker omitted Gemini: $status"
     fi
 }
 
@@ -328,13 +338,12 @@ test_detect_providers_gemini() {
 exit 0
 ' > "$stub_dir/gemini"
     chmod +x "$stub_dir/gemini"
-    out=$(HOME="$stub_dir" PATH="$stub_dir:$PATH" OCTO_ALLOWED_PROVIDERS=gemini GEMINI_API_KEY=test bash -c 'source "'$PROJECT_ROOT'/scripts/lib/providers.sh"; detect_providers')
-    rm -rf "$stub_dir"
-    if [[ "$out" == *"gemini:"* ]]; then
-        test_pass
-    else
-        test_fail "detect_providers should detect gemini: $out"
+    local detected=false out=""
+    if out=$(env "HOME=$stub_dir" "PATH=$stub_dir:$PATH" "OCTO_ALLOWED_PROVIDERS=gemini" "GEMINI_API_KEY=test" bash -c 'source "'$PROJECT_ROOT'/scripts/lib/providers.sh"; detect_providers'); then
+        [[ "$out" == *"gemini:"* ]] && detected=true
     fi
+    rm -rf "$stub_dir"
+    if [[ "$detected" == true ]]; then test_pass; else test_fail "detect_providers should detect gemini: $out"; fi
 }
 
 test_preflight_gemini_status() {

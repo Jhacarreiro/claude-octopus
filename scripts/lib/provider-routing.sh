@@ -12,7 +12,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _provider_registry_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${_provider_registry_dir}/provider-registry.sh" 2>/dev/null || true
+source "${_provider_registry_dir}/provider-registry.sh" || { echo "provider-routing: failed to load provider-registry.sh" >&2; return 1 2>/dev/null || exit 1; }
 
 # Providers accepted by set_provider_model / reset_provider_model.
 #

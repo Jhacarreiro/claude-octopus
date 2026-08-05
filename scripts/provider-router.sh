@@ -4,7 +4,7 @@
 # Config: OCTOPUS_ROUTING_MODE=round-robin|fastest|cheapest|scored (default: round-robin)
 
 _provider_router_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-source "${_provider_router_dir}/lib/provider-registry.sh" 2>/dev/null || true
+source "${_provider_router_dir}/lib/provider-registry.sh" || { echo "provider-router: failed to load provider-registry.sh" >&2; return 1 2>/dev/null || exit 1; }
 
 # Routing mode configuration
 OCTOPUS_ROUTING_MODE="${OCTOPUS_ROUTING_MODE:-round-robin}"
@@ -257,18 +257,19 @@ build_provider_stats() {
         return 1
     fi
 
-    mkdir -p "$metrics_dir"
+    mkdir -p "$metrics_dir" "$(dirname "$stats_file")"
 
     # Extract per-provider average latency from completed agent metrics
-    local provider_ids_json
-    provider_ids_json=$(octo_provider_ids | tr ' ' '\n' | jq -R . | jq -s .) || return 1
-    jq --argjson provider_ids "$provider_ids_json" '
+    local provider_contract_json
+    provider_contract_json=$(octo_provider_jq_contract_json) || return 1
+    jq --argjson provider_contract "$provider_contract_json" '
         def canonical_provider($agent_type):
-            ([ $provider_ids[]
-               | . as $id
-               | select($agent_type == $id or ($agent_type | startswith($id + "-"))) ]
-             | sort_by(length)
-             | last) // $agent_type;
+            ($provider_contract.exact[$agent_type]
+             // ([ $provider_contract.prefixes[]
+                    | .prefix as $prefix
+                    | select($agent_type | startswith($prefix))
+                    | .id ][0])
+             // $agent_type);
         {
           providers: (
             [.phases[]?.agents[]? | select(.status == "completed")

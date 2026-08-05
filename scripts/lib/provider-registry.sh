@@ -157,6 +157,28 @@ EOF
     printf '%s\n' "$out"
 }
 
+
+octo_provider_jq_contract_json() {
+    command -v jq >/dev/null 2>&1 || return 1
+    octo_provider_registry_rows | jq -R -s '
+      split("\n")
+      | map(select(length > 0) | split("|")
+          | {id: .[0], aliases: ((.[1] // "") | split(",") | map(select(length > 0)))}) as $rows
+      | {
+          exact: (reduce $rows[] as $row ({};
+            . + {($row.id): $row.id}
+              + (reduce ($row.aliases[] | select(endswith("*") | not)) as $alias
+                   ({}; . + {($alias): $row.id})))),
+          prefixes: ([
+            $rows[] as $row
+            | ({prefix: ($row.id + "-"), id: $row.id}),
+              ($row.aliases[] | select(endswith("*"))
+               | {prefix: .[0:-1], id: $row.id})
+          ] | sort_by(.prefix | length) | reverse)
+        }
+    '
+}
+
 octo_provider_limitations_rows() {
     cat <<'EOF'
 claude-sdk|council|sdk-agent-runtime-is-not-a-supported-council-seat

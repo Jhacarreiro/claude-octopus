@@ -2,8 +2,8 @@
 # Usage help functions extracted from orchestrate.sh
 # Part of the lib/ decomposition wave
 _usage_help_registry_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${_usage_help_registry_dir}/provider-registry.sh" 2>/dev/null || true
-source "${_usage_help_registry_dir}/provider-policy.sh" 2>/dev/null || true
+source "${_usage_help_registry_dir}/provider-registry.sh" || { echo "usage-help: failed to load provider-registry.sh" >&2; return 1 2>/dev/null || exit 1; }
+source "${_usage_help_registry_dir}/provider-policy.sh" || { echo "usage-help: failed to load provider-policy.sh" >&2; return 1 2>/dev/null || exit 1; }
 
 generate_zsh_completion() {
     cat << 'ZSH_COMPLETION'

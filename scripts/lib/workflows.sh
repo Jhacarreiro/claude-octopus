@@ -2479,10 +2479,9 @@ Every [CODING] line must include a same-line Files: clause."
     if ! parallel_safety_reason=$(tangle_validate_parallel_write_scopes "$subtasks"); then
         log WARN "Reformatted decomposition still overlaps (${parallel_safety_reason}); consolidating connected coding scopes"
         subtasks=$(tangle_consolidate_overlapping_subtasks "$subtasks")
-        # Diagnostics belong on stderr with the log WARN above, not on stdout
-        # where a caller piping this workflow would collect them as output.
-        log INFO "Consolidated subtasks:"
-        log INFO "$subtasks"
+        echo -e "${CYAN}Consolidated subtasks:${NC}"
+        echo "$subtasks"
+        echo ""
         parseable_subtask_count=$(tangle_parseable_subtask_count "$subtasks")
         parseable_coding_subtask_count=$(tangle_parseable_coding_subtask_count "$subtasks")
         parallel_safety_reason=""

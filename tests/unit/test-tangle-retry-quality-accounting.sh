@@ -35,11 +35,8 @@ evaluate_quality_branch() {
     if [[ "$1" -ge 75 ]]; then echo proceed; else echo abort; fi
 }
 
-TEST_TMP_DIR="${TEST_TMP_DIR:-/tmp/octopus-tests-$$}"
 RESULTS_DIR="$TEST_TMP_DIR/tangle-retry-quality-accounting"
-rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
-trap 'rm -rf "$TEST_TMP_DIR"' EXIT INT TERM
 
 write_result() {
     local file="$1"

@@ -14,33 +14,63 @@ mkdir -p "$RESULTS_DIR"
 
 run_decision() {
     local validation_rc="$1"
-    local changes="$2"
+    local before_state="$2"
+    local after_state="$3"
     local before="$TMP_DIR/before-$validation_rc-$RANDOM"
-    touch "$before"
+    printf '%s' "$before_state" > "$before"
     bash -c '
         set -u
         source "$1/scripts/lib/workflows.sh" 2>/dev/null
-        CHANGES="$3"
-        check_tangle_worktree_changes() { printf "%s" "$CHANGES"; }
+        AFTER_STATE="$3"
+        snapshot_tangle_worktree_state() { printf "%s" "$AFTER_STATE"; }
         if tangle_should_attempt_contextual_review "$4" "$2"; then
             echo yes
         else
             echo no
         fi
-    ' _ "$PROJECT_ROOT" "$before" "$changes" "$validation_rc"
+    ' _ "$PROJECT_ROOT" "$before" "$after_state" "$validation_rc"
 }
 
 test_case "successful initial validation keeps the existing review path"
-out=$(run_decision 0 "")
+out=$(run_decision 0 "same" "same")
 [[ "$out" == "yes" ]] && test_pass || test_fail "expected yes, got '$out'"
 
 test_case "failed validation without worktree progress still fails fast"
-out=$(run_decision 1 "")
+out=$(run_decision 1 "same" "same")
 [[ "$out" == "no" ]] && test_pass || test_fail "expected no, got '$out'"
 
 test_case "failed validation with worktree progress enters review recovery"
-out=$(run_decision 1 $'apps/server/src/app.js\n')
+out=$(run_decision 1 "before" "after")
 [[ "$out" == "yes" ]] && test_pass || test_fail "expected yes, got '$out'"
+
+test_case "failed validation detects further edits to an already dirty path"
+dirty_repo="$TMP_DIR/dirty-repo"
+mkdir -p "$dirty_repo"
+git -C "$dirty_repo" init -q
+git -C "$dirty_repo" config user.email test@example.com
+git -C "$dirty_repo" config user.name "Octopus Test"
+printf '%s
+' clean > "$dirty_repo/tracked.txt"
+git -C "$dirty_repo" add tracked.txt
+git -C "$dirty_repo" commit -qm baseline
+printf '%s
+' dirty-before > "$dirty_repo/tracked.txt"
+before_state="$TMP_DIR/dirty-before-state.txt"
+out=$(bash -c '
+    set -u
+    export PROJECT_ROOT="$2"
+    source "$1/scripts/lib/testing.sh" 2>/dev/null
+    source "$1/scripts/lib/workflows.sh" 2>/dev/null
+    snapshot_tangle_worktree_state > "$3"
+    printf "%s
+" dirty-after > "$2/tracked.txt"
+    if tangle_should_attempt_contextual_review 1 "$3"; then
+        echo yes
+    else
+        echo no
+    fi
+' _ "$PROJECT_ROOT" "$dirty_repo" "$before_state")
+[[ "$out" == "yes" ]] && test_pass || test_fail "expected already-dirty edit to enter recovery, got '$out'"
 
 test_case "failed initial validation can recover after one correction round"
 out=$(bash -c '

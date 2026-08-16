@@ -682,11 +682,23 @@ review_supervise_round1() {
     for _pid in "${round1_pids[@]}"; do wait "$_pid" 2>/dev/null || true; done
 }
 
-# review_extract_output_text: print only the reviewer's actual Output section.
+# review_extract_output_text: print only the Output block associated with the final artifact status boundary.
 review_extract_output_text() {
     local review_md="$1"
     [[ -f "$review_md" ]] || return 1
-    awk '/^## Output$/{found=1;next} /^## /{if(found)exit} found && !/^```(json|JSON)?$/{print}' "$review_md" 2>/dev/null
+    awk '''
+        /^## Output$/ { in_output=1; candidate=""; next }
+        /^## Status:/ { if (in_output) selected=candidate; in_output=0; next }
+        /^## / { in_output=0; next }
+        in_output && !/^```(json|JSON)?$/ { candidate = candidate (candidate == "" ? "" : "\n") $0 }
+        END { if (selected != "") print selected }
+    ''' "$review_md" 2>/dev/null
+}
+
+review_output_has_finding_signal() {
+    local output_text="$1"
+    [[ -n "$output_text" ]] || return 1
+    printf '%s' "$output_text" | grep -Eq '''(^|[^[:alnum:]_])"?severity"?[[:space:]]*:'''
 }
 
 review_extract_findings_text() {
@@ -1392,9 +1404,12 @@ ${round1_prompts[$retry_idx]}"
         local severity_count
         local provider_output_text
         provider_output_text=$(review_extract_output_text "$f" 2>/dev/null || true)
-        severity_count=$(printf '%s' "$provider_output_text" | grep -c '"severity"[[:space:]]*:[[:space:]]*"' 2>/dev/null || true)
-        severity_count=${severity_count:-0}
-        if [[ "$agent_findings" == "[]" ]] && [[ "${severity_count%%$'\n'*}" -gt 0 ]] && review_result_completed_successfully "$f"; then
+        if review_output_has_finding_signal "$provider_output_text"; then
+            severity_count=1
+        else
+            severity_count=0
+        fi
+        if [[ "$agent_findings" == "[]" ]] && [[ "$severity_count" -gt 0 ]] && review_result_completed_successfully "$f"; then
             local recovered_findings=""
             log WARN "review_run: malformed findings output in $(basename "$f"); attempting one format-only recovery with ${atype}/${round1_roles[$idx]}"
             if recovered_findings=$(review_recover_malformed_findings "$atype" "${round1_roles[$idx]}" "$provider_output_text" "Round 1 ${atype}/${round1_roles[$idx]} malformed-output recovery"); then
@@ -1404,7 +1419,7 @@ ${round1_prompts[$retry_idx]}"
                 ((round1_parse_miss_count++)) || true
                 log WARN "review_run: possible findings in $(basename "$f") but extractor and format-only recovery returned no usable findings"
             fi
-        elif [[ "$agent_findings" == "[]" ]] && [[ "${severity_count%%$'\n'*}" -gt 0 ]]; then
+        elif [[ "$agent_findings" == "[]" ]] && [[ "$severity_count" -gt 0 ]]; then
             ((round1_parse_miss_count++)) || true
             log WARN "review_run: possible findings in $(basename "$f") but extractor returned empty array"
         fi

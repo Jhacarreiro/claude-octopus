@@ -90,6 +90,22 @@ else
   test_fail "design review labels did not expose resolved runtime identity: $label | $research_label"
 fi
 
+test_case "design review configuration is role-first and provider-neutral"
+quality="$PROJECT_ROOT/scripts/lib/quality.sh"
+if grep -q 'OCTOPUS_DESIGN_REVIEW_IMPLEMENTER_AGENT' "$quality" &&    grep -q 'OCTOPUS_DESIGN_REVIEW_RESEARCHER_AGENT' "$quality" &&    grep -q 'OCTOPUS_DESIGN_REVIEW_CODE_REVIEWER_AGENT' "$quality" &&    grep -q 'OCTOPUS_DESIGN_REVIEW_SYNTHESIZER_AGENT' "$quality" &&    grep -q 'design_implementer_agent' "$quality" &&    grep -q 'design_researcher_agent' "$quality" &&    grep -q 'design_code_reviewer_agent' "$quality" &&    grep -q 'design_synthesizer_agent' "$quality" &&    ! grep -q 'local design_codex_agent=' "$quality" &&    ! grep -q 'local design_agy_agent=' "$quality" &&    ! grep -q 'local design_claude_agent=' "$quality" &&    ! grep -q 'local design_synthesis_agent=' "$quality"; then
+  test_pass
+else
+  test_fail "design review configuration still identifies semantic seats by provider"
+fi
+
+test_case "legacy provider-named design review overrides remain compatibility fallbacks"
+quality="$PROJECT_ROOT/scripts/lib/quality.sh"
+if grep -q 'OCTOPUS_DESIGN_REVIEW_IMPLEMENTER_AGENT:-${OCTOPUS_DESIGN_REVIEW_CODEX_AGENT:-codex-mini}' "$quality" &&    grep -q 'OCTOPUS_DESIGN_REVIEW_RESEARCHER_AGENT:-${OCTOPUS_DESIGN_REVIEW_AGY_AGENT:-${OCTOPUS_DESIGN_REVIEW_GEMINI_AGENT:-agy}}' "$quality" &&    grep -q 'OCTOPUS_DESIGN_REVIEW_CODE_REVIEWER_AGENT:-${OCTOPUS_DESIGN_REVIEW_CLAUDE_AGENT:-claude-sonnet}' "$quality" &&    grep -q 'OCTOPUS_DESIGN_REVIEW_SYNTHESIZER_AGENT:-${OCTOPUS_DESIGN_REVIEW_SYNTH_AGENT:-claude-opus}' "$quality"; then
+  test_pass
+else
+  test_fail "legacy design review override compatibility changed unexpectedly"
+fi
+
 test_case "design review synthesis prompt no longer uses historical provider headings"
 if ! grep -q '^CODEX APPROACH:' "$PROJECT_ROOT/scripts/lib/quality.sh" && \
    ! grep -q '^GEMINI APPROACH:' "$PROJECT_ROOT/scripts/lib/quality.sh" && \

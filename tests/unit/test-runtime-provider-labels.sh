@@ -111,8 +111,13 @@ run_design_review_dispatch_probe() {
     else
       unset OCTOPUS_DESIGN_REVIEW_IMPLEMENTER_AGENT OCTOPUS_DESIGN_REVIEW_RESEARCHER_AGENT OCTOPUS_DESIGN_REVIEW_CODE_REVIEWER_AGENT OCTOPUS_DESIGN_REVIEW_SYNTHESIZER_AGENT
       export "OCTOPUS_DESIGN_REVIEW_CODEX_AGENT=legacy-codex"
-      export "OCTOPUS_DESIGN_REVIEW_AGY_AGENT=legacy-agy"
-      unset OCTOPUS_DESIGN_REVIEW_GEMINI_AGENT
+      if [[ "$MODE" == "gemini" ]]; then
+        unset OCTOPUS_DESIGN_REVIEW_AGY_AGENT
+        export "OCTOPUS_DESIGN_REVIEW_GEMINI_AGENT=legacy-gemini"
+      else
+        export "OCTOPUS_DESIGN_REVIEW_AGY_AGENT=legacy-agy"
+        unset OCTOPUS_DESIGN_REVIEW_GEMINI_AGENT
+      fi
       export "OCTOPUS_DESIGN_REVIEW_CLAUDE_AGENT=legacy-claude"
       export "OCTOPUS_DESIGN_REVIEW_SYNTH_AGENT=legacy-synth"
     fi
@@ -154,6 +159,16 @@ if grep -q '^legacy-codex|implementer|ceremony$' "$legacy_log" &&
   test_pass
 else
   test_fail "legacy provider override did not remain a functional fallback"
+fi
+
+test_case "legacy GEMINI design review override remains secondary researcher fallback"
+gemini_log="$TEST_TMP_DIR/gemini-fallback.log"
+run_design_review_dispatch_probe gemini "$gemini_log"
+if grep -q '^legacy-gemini|researcher|ceremony$' "$gemini_log" &&
+   ! grep -q '^legacy-agy|researcher|ceremony$' "$gemini_log"; then
+  test_pass
+else
+  test_fail "legacy GEMINI override did not remain the secondary researcher fallback"
 fi
 
 test_case "design review synthesis events carry stable executor and role identity"

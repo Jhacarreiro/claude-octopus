@@ -93,28 +93,28 @@ fi
 run_design_review_dispatch_probe() {
   local mode="$1"
   local dispatch_log="$2"
-  MODE="$mode" PROJECT_ROOT="$PROJECT_ROOT" DISPATCH_LOG="$dispatch_log" \
-  WORKSPACE_DIR="$TEST_TMP_DIR/workspace-$mode" DRY_RUN=false OCTOPUS_CEREMONIES=true \
+  env "MODE=${mode}" "PROJECT_ROOT=${PROJECT_ROOT}" "DISPATCH_LOG=${dispatch_log}" \
+    "WORKSPACE_DIR=${TEST_TMP_DIR}/workspace-${mode}" "DRY_RUN=false" "OCTOPUS_CEREMONIES=true" \
   bash -c '
     set -e
     mkdir -p "$WORKSPACE_DIR"
     source "$PROJECT_ROOT/scripts/lib/quality.sh"
     if [[ "$MODE" == "role" ]]; then
-      export OCTOPUS_DESIGN_REVIEW_IMPLEMENTER_AGENT=role-implementer
-      export OCTOPUS_DESIGN_REVIEW_RESEARCHER_AGENT=role-researcher
-      export OCTOPUS_DESIGN_REVIEW_CODE_REVIEWER_AGENT=role-reviewer
-      export OCTOPUS_DESIGN_REVIEW_SYNTHESIZER_AGENT=role-synthesizer
-      export OCTOPUS_DESIGN_REVIEW_CODEX_AGENT=legacy-codex
-      export OCTOPUS_DESIGN_REVIEW_AGY_AGENT=legacy-agy
-      export OCTOPUS_DESIGN_REVIEW_CLAUDE_AGENT=legacy-claude
-      export OCTOPUS_DESIGN_REVIEW_SYNTH_AGENT=legacy-synth
+      export "OCTOPUS_DESIGN_REVIEW_IMPLEMENTER_AGENT=role-implementer"
+      export "OCTOPUS_DESIGN_REVIEW_RESEARCHER_AGENT=role-researcher"
+      export "OCTOPUS_DESIGN_REVIEW_CODE_REVIEWER_AGENT=role-reviewer"
+      export "OCTOPUS_DESIGN_REVIEW_SYNTHESIZER_AGENT=role-synthesizer"
+      export "OCTOPUS_DESIGN_REVIEW_CODEX_AGENT=legacy-codex"
+      export "OCTOPUS_DESIGN_REVIEW_AGY_AGENT=legacy-agy"
+      export "OCTOPUS_DESIGN_REVIEW_CLAUDE_AGENT=legacy-claude"
+      export "OCTOPUS_DESIGN_REVIEW_SYNTH_AGENT=legacy-synth"
     else
       unset OCTOPUS_DESIGN_REVIEW_IMPLEMENTER_AGENT OCTOPUS_DESIGN_REVIEW_RESEARCHER_AGENT OCTOPUS_DESIGN_REVIEW_CODE_REVIEWER_AGENT OCTOPUS_DESIGN_REVIEW_SYNTHESIZER_AGENT
-      export OCTOPUS_DESIGN_REVIEW_CODEX_AGENT=legacy-codex
-      export OCTOPUS_DESIGN_REVIEW_AGY_AGENT=legacy-agy
+      export "OCTOPUS_DESIGN_REVIEW_CODEX_AGENT=legacy-codex"
+      export "OCTOPUS_DESIGN_REVIEW_AGY_AGENT=legacy-agy"
       unset OCTOPUS_DESIGN_REVIEW_GEMINI_AGENT
-      export OCTOPUS_DESIGN_REVIEW_CLAUDE_AGENT=legacy-claude
-      export OCTOPUS_DESIGN_REVIEW_SYNTH_AGENT=legacy-synth
+      export "OCTOPUS_DESIGN_REVIEW_CLAUDE_AGENT=legacy-claude"
+      export "OCTOPUS_DESIGN_REVIEW_SYNTH_AGENT=legacy-synth"
     fi
     : > "$DISPATCH_LOG"
     run_agent_sync_consultative() {
@@ -162,8 +162,13 @@ if grep -A9 'octo_event_emit "synthesis.start"' "$quality" | grep -q 'executor_a
    grep -A9 'octo_event_emit "synthesis.start"' "$quality" | grep -q 'configured_provider=' &&
    grep -A9 'octo_event_emit "synthesis.start"' "$quality" | grep -q 'configured_model=' &&
    grep -A9 'octo_event_emit "synthesis.start"' "$quality" | grep -q 'runtime_provider=' &&
+   grep -A9 'octo_event_emit "synthesis.start"' "$quality" | grep -q 'runtime_model=' &&
    grep -A9 'octo_event_emit "synthesis.start"' "$quality" | grep -q 'role="synthesizer"' &&
    grep -A10 'octo_event_emit "synthesis.end"' "$quality" | grep -q 'executor_alias=' &&
+   grep -A10 'octo_event_emit "synthesis.end"' "$quality" | grep -q 'configured_provider=' &&
+   grep -A10 'octo_event_emit "synthesis.end"' "$quality" | grep -q 'configured_model=' &&
+   grep -A10 'octo_event_emit "synthesis.end"' "$quality" | grep -q 'runtime_provider=' &&
+   grep -A10 'octo_event_emit "synthesis.end"' "$quality" | grep -q 'runtime_model=' &&
    grep -A10 'octo_event_emit "synthesis.end"' "$quality" | grep -q 'role="synthesizer"'; then
   test_pass
 else

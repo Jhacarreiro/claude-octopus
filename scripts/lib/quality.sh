@@ -436,7 +436,11 @@ Be concise and specific. This is a planning exercise, not implementation."
     _synth_started_at=$(date +%s 2>/dev/null || echo 0)
     if declare -f octo_event_emit >/dev/null 2>&1; then
         octo_event_emit "synthesis.start" phase="ceremony" scope="design-review" \
-            provider="$design_synthesizer_agent" inputs="3" || true
+            provider="$design_synthesizer_agent" provider_label_kind="legacy-alias" \
+            executor_alias="$design_synthesizer_agent" \
+            configured_provider="$(octo_provider_identity_from_agent_type "$design_synthesizer_agent")" \
+            configured_model="$(get_agent_model "$design_synthesizer_agent" "ceremony" "synthesizer" 2>/dev/null || echo unresolved)" \
+            runtime_provider="unknown" runtime_model="unknown" role="synthesizer" inputs="3" || true
     fi
 
     local synthesis
@@ -468,7 +472,11 @@ Be brief and actionable." "$design_synth_timeout" "synthesizer" "ceremony" 2>/de
         [[ "$_synth_started_at" =~ ^[0-9]+$ && "$_synth_now" =~ ^[0-9]+$ && "$_synth_started_at" -gt 0 ]] \
             && _synth_elapsed=$(( _synth_now - _synth_started_at ))
         octo_event_emit "synthesis.end" phase="ceremony" scope="design-review" \
-            provider="$design_synthesizer_agent" \
+            provider="$design_synthesizer_agent" provider_label_kind="legacy-alias" \
+            executor_alias="$design_synthesizer_agent" \
+            configured_provider="$(octo_provider_identity_from_agent_type "$design_synthesizer_agent")" \
+            configured_model="$(get_agent_model "$design_synthesizer_agent" "ceremony" "synthesizer" 2>/dev/null || echo unresolved)" \
+            runtime_provider="unknown" runtime_model="unknown" role="synthesizer" \
             status="$([[ -n "$synthesis" ]] && echo produced || echo empty)" \
             bytes="${#synthesis}" elapsed_s="$_synth_elapsed" || true
     fi

@@ -43,6 +43,7 @@ run_gate() {
         echo 0 > "$REVIEW_IDX_FILE"
         echo 0 > "$KEY_IDX_FILE"
         CORRECTION_CALLS=0
+        CORRECTION_STRATEGIES=()
 
         source "$2/scripts/lib/workflows.sh" 2>/dev/null
 
@@ -81,6 +82,7 @@ run_gate() {
         }
         tangle_validation_signature() { echo "vsig"; }
         tangle_apply_review_corrections() {
+            CORRECTION_STRATEGIES+=("${6:-}")
             local status="${CORRECTION_STATUSES[$((CORRECTION_CALLS))]:-done}"
             CORRECTION_CALLS=$((CORRECTION_CALLS + 1))
             TANGLE_CORRECTION_STATUS="$status"
@@ -106,7 +108,11 @@ run_gate() {
         rc=0
         tangle_contextual_review_gate tg "prompt" "ctx" "subtasks" \
             "$RESULTS_DIR/validation.md" "$RESULTS_DIR/wt.txt" 0 codex || rc=$?
-        echo "rounds=$CORRECTION_CALLS rc=$rc"
+        if [[ "${ASSERT_STRATEGIES:-0}" == "1" ]]; then
+            echo "rounds=$CORRECTION_CALLS rc=$rc strategies=${CORRECTION_STRATEGIES[*]}"
+        else
+            echo "rounds=$CORRECTION_CALLS rc=$rc"
+        fi
     ' _ "$seq" "$PROJECT_ROOT"
 }
 
@@ -145,24 +151,24 @@ else
 fi
 
 test_case "single failed-no-progress round consumes convergence budget and retries"
-out=$(CORRECTION_STATUS_SEQUENCE="failed-no-progress done" OCTOPUS_TANGLE_CONVERGENCE_NO_PROGRESS_ROUNDS=3 run_gate "2 1 0")
-if [[ "$out" == "rounds=3 rc=0" ]]; then
+out=$(ASSERT_STRATEGIES=1 CORRECTION_STATUS_SEQUENCE="failed-no-progress done" OCTOPUS_TANGLE_CONVERGENCE_NO_PROGRESS_ROUNDS=3 run_gate "2 1 0")
+if [[ "$out" == "rounds=3 rc=0 strategies=delta single-finding delta" ]]; then
     test_pass
 else
     test_fail "expected failed-no-progress retry to recover, got '$out'"
 fi
 
 test_case "three consecutive failed-no-progress rounds stop at convergence limit"
-out=$(CORRECTION_STATUS_SEQUENCE="failed-no-progress failed-no-progress failed-no-progress done" OCTOPUS_TANGLE_CONVERGENCE_NO_PROGRESS_ROUNDS=3 run_gate "2 1 0")
-if [[ "$out" == "rounds=3 rc=1" ]]; then
+out=$(ASSERT_STRATEGIES=1 CORRECTION_STATUS_SEQUENCE="failed-no-progress failed-no-progress failed-no-progress done" OCTOPUS_TANGLE_CONVERGENCE_NO_PROGRESS_ROUNDS=3 run_gate "2 1 0")
+if [[ "$out" == "rounds=3 rc=1 strategies=delta single-finding single-finding" ]]; then
     test_pass
 else
     test_fail "expected three failed-no-progress rounds to stop, got '$out'"
 fi
 
 test_case "interrupted correction remains terminal"
-out=$(CORRECTION_STATUS_SEQUENCE="interrupted-partial done" OCTOPUS_TANGLE_CONVERGENCE_NO_PROGRESS_ROUNDS=3 run_gate "2 1 0")
-if [[ "$out" == "rounds=1 rc=1" ]]; then
+out=$(ASSERT_STRATEGIES=1 CORRECTION_STATUS_SEQUENCE="interrupted-partial done" OCTOPUS_TANGLE_CONVERGENCE_NO_PROGRESS_ROUNDS=3 run_gate "2 1 0")
+if [[ "$out" == "rounds=1 rc=1 strategies=delta" ]]; then
     test_pass
 else
     test_fail "expected interrupted correction to remain terminal, got '$out'"

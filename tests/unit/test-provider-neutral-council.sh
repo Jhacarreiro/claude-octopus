@@ -5,9 +5,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/../helpers/test-framework.sh"
 test_suite "Provider-neutral review council with role-based model routing"
 
-TMP_HOME="$(mktemp -d)"
+TMP_HOME="$TEST_TMP_DIR/provider-neutral-council"
 CHECKER="$TMP_HOME/check-providers.sh"
-trap 'rm -rf "$TMP_HOME"' EXIT
 mkdir -p "$TMP_HOME/.claude-octopus/config"
 cat >"$CHECKER" <<'EOF'
 #!/bin/sh
@@ -41,14 +40,47 @@ export OCTOPUS_PROVIDER_CHECKER="$CHECKER"
 export OCTOPUS_ALLOWED_PROVIDERS="codex commandcode claude"
 
 output="$(bash "$PROJECT_ROOT/scripts/helpers/build-fleet.sh" review standard test 2>/dev/null)"
+provider_ids="$(printf '%s\n' "$output" | cut -d'|' -f1)"
 
 test_case "review council uses admitted council-capable providers without AGY/Perplexity"
-if echo "$output" | cut -d'|' -f1 | grep -Eq '^(agy|perplexity)$'; then
-  test_fail "unusable provider entered council: $output"
-elif echo "$output" | cut -d'|' -f1 | grep -q '^commandcode$'; then
-  test_pass
+case "$provider_ids" in
+  *$'\nagy'$'\n'*|agy$'\n'*|*$'\nperplexity'$'\n'*|perplexity$'\n'*)
+    test_fail "unusable provider entered council: $output"
+    ;;
+  *)
+    case $'\n'"$provider_ids"$'\n' in
+      *$'\ncommandcode\n'*) test_pass ;;
+      *) test_fail "CommandCode did not naturally fill a council seat: $output" ;;
+    esac
+    ;;
+esac
+
+test_case "review council emits four seats and wraps provider order deterministically"
+seat_count="$(printf '%s\n' "$provider_ids" | sed '/^$/d' | wc -l | tr -d ' ')"
+first_provider="$(printf '%s\n' "$provider_ids" | sed -n '1p')"
+fourth_provider="$(printf '%s\n' "$provider_ids" | sed -n '4p')"
+missing=""
+for expected in claude-sonnet codex commandcode; do
+  case $'\n'"$provider_ids"$'\n' in
+    *$'\n'"$expected"$'\n'*) ;;
+    *) missing="${missing}${missing:+ }${expected}" ;;
+  esac
+done
+if [[ "$seat_count" != "4" ]]; then
+  test_fail "expected four review seats, got $seat_count: $output"
+elif [[ -n "$missing" ]]; then
+  test_fail "missing admitted providers from council: $missing; output: $output"
+elif [[ "$fourth_provider" != "$first_provider" ]]; then
+  test_fail "expected fourth seat to wrap to first provider ($first_provider), got $fourth_provider"
 else
-  test_fail "CommandCode did not naturally fill a council seat: $output"
+  test_pass
+fi
+
+test_case "invalid council provider policy fails closed"
+if OCTOPUS_COUNCIL_DEFAULT_PROVIDERS="codex,codex" bash "$PROJECT_ROOT/scripts/helpers/build-fleet.sh" review standard test >/dev/null 2>&1; then
+  test_fail "duplicate council provider policy unexpectedly succeeded"
+else
+  test_pass
 fi
 
 test_case "review seats remain role labels rather than provider identities"

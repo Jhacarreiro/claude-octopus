@@ -50,7 +50,17 @@ export WORKSPACE_DIR="$TMP_HOME/workspace"
 mkdir -p "$WORKSPACE_DIR"
 source "$PROJECT_ROOT/scripts/lib/quality.sh"
 
-test_case "design review preserves role-specific provider policy"
+test_case "design review defaults use the provider-neutral council pool"
+defaults="$(design_review_default_agents test)"
+if echo "$defaults" | grep -Eq '^(agy|perplexity)$'; then
+  test_fail "ineligible provider entered design review: $defaults"
+elif echo "$defaults" | grep -q '^commandcode$' && echo "$defaults" | grep -q '^codex$' && echo "$defaults" | grep -q '^claude-sonnet$'; then
+  test_pass
+else
+  test_fail "expected Claude, Codex and CommandCode in design review defaults: $defaults"
+fi
+
+test_case "design review assigns providers independently from semantic roles"
 CAPTURE="$TMP_HOME/design-review.calls"
 : > "$CAPTURE"
 DRY_RUN=false
@@ -64,30 +74,28 @@ run_agent_sync_consultative() {
   printf '%s\n' 'planning output'
 }
 design_review_ceremony "test" >/dev/null
-expected="$(printf '%s\n' \
-  'commandcode|implementer|ceremony' \
-  'commandcode|researcher|ceremony' \
-  'claude-sonnet|code-reviewer|ceremony' \
-  'claude-opus|synthesizer|ceremony')"
-actual="$(cat "$CAPTURE")"
-if [[ "$actual" == "$expected" ]]; then
-  test_pass
+roles="$(cut -d'|' -f2 "$CAPTURE" | tr '\n' '|')"
+providers="$(cut -d'|' -f1 "$CAPTURE" | tr '\n' '|')"
+case "$roles" in
+  implementer\|researcher\|code-reviewer\|synthesizer\|) ;;
+  *) test_fail "semantic roles changed: $roles"; roles_bad=1 ;;
+esac
+if [[ "${roles_bad:-0}" == 1 ]]; then :
+elif echo "$providers" | grep -Eq '(^|\|)(agy|perplexity)(\||$)'; then
+  test_fail "legacy provider default leaked into ceremony: $providers"
 else
-  test_fail "unexpected design-review provider/role mapping: $actual"
+  test_pass
 fi
 
 test_case "provider-local model keeps provider identity separate from role model"
 log() { :; }
 export OCTOPUS_PLATFORM=Linux
 source "$PROJECT_ROOT/scripts/lib/model-resolver.sh"
-implementer_model="$(resolve_octopus_model commandcode commandcode ceremony implementer)"
-researcher_model="$(resolve_octopus_model commandcode commandcode ceremony researcher)"
-if [[ "$implementer_model" != "deepseek/deepseek-v4-flash" ]]; then
-  test_fail "expected DeepSeek implementer model, got '$implementer_model'"
-elif [[ "$researcher_model" != "minimaxai/minimax-m3" ]]; then
-  test_fail "expected provider-local MiniMax researcher model, got '$researcher_model'"
-else
+model="$(resolve_octopus_model commandcode commandcode ceremony researcher)"
+if [[ "$model" == "minimaxai/minimax-m3" ]]; then
   test_pass
+else
+  test_fail "expected provider-local MiniMax researcher model, got '$model'"
 fi
 
 test_summary

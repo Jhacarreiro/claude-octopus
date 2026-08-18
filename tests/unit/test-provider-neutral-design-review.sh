@@ -5,9 +5,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/../helpers/test-framework.sh"
 test_suite "Provider-neutral design review ceremony"
 
-TMP_HOME="$(mktemp -d)"
+TMP_HOME="$TEST_TMP_DIR/provider-neutral-design-review"
 CHECKER="$TMP_HOME/check-providers.sh"
-trap 'rm -rf "$TMP_HOME"' EXIT
 mkdir -p "$TMP_HOME/.claude-octopus/config"
 cat >"$CHECKER" <<'EOF'
 #!/bin/sh

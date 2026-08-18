@@ -55,23 +55,13 @@ case "$provider_ids" in
     ;;
 esac
 
-test_case "review council emits four seats and wraps provider order deterministically"
+test_case "review council emits four seats in deterministic policy order"
 seat_count="$(printf '%s\n' "$provider_ids" | sed '/^$/d' | wc -l | tr -d ' ')"
-first_provider="$(printf '%s\n' "$provider_ids" | sed -n '1p')"
-fourth_provider="$(printf '%s\n' "$provider_ids" | sed -n '4p')"
-missing=""
-for expected in claude-sonnet codex commandcode; do
-  case $'\n'"$provider_ids"$'\n' in
-    *$'\n'"$expected"$'\n'*) ;;
-    *) missing="${missing}${missing:+ }${expected}" ;;
-  esac
-done
+expected_provider_ids="$(printf '%s\n' claude-sonnet codex commandcode claude-sonnet)"
 if [[ "$seat_count" != "4" ]]; then
   test_fail "expected four review seats, got $seat_count: $output"
-elif [[ -n "$missing" ]]; then
-  test_fail "missing admitted providers from council: $missing; output: $output"
-elif [[ "$fourth_provider" != "$first_provider" ]]; then
-  test_fail "expected fourth seat to wrap to first provider ($first_provider), got $fourth_provider"
+elif [[ "$provider_ids" != "$expected_provider_ids" ]]; then
+  test_fail "expected provider order [claude-sonnet,codex,commandcode,claude-sonnet], got [$(printf '%s' "$provider_ids" | paste -sd, -)]"
 else
   test_pass
 fi

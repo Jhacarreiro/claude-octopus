@@ -235,6 +235,36 @@ test_openclaw_plugin_json() {
     fi
 }
 
+test_openclaw_tool_contracts_match_runtime() {
+    test_case "OpenClaw manifest declares every registered agent tool"
+    if python3 - "$PROJECT_ROOT/openclaw/openclaw.plugin.json" \
+        "$PROJECT_ROOT/openclaw/src/index.ts" <<'PY'
+import json
+import re
+import sys
+
+manifest_path, source_path = sys.argv[1:]
+with open(manifest_path, encoding="utf-8") as handle:
+    manifest = json.load(handle)
+with open(source_path, encoding="utf-8") as handle:
+    source = handle.read()
+
+declared = manifest.get("contracts", {}).get("tools", [])
+registered = sorted(set(re.findall(r'name:\s*["\'](octopus_[a-z0-9_]+)["\']', source)))
+valid = (
+    isinstance(declared, list)
+    and len(declared) == len(set(declared))
+    and sorted(declared) == registered
+)
+sys.exit(0 if valid else 1)
+PY
+    then
+        test_pass
+    else
+        test_fail "openclaw.plugin.json contracts.tools must exactly match registered OpenClaw tools"
+    fi
+}
+
 test_openclaw_correct_command_mapping() {
     test_case "OpenClaw extension uses correct orchestrate.sh command names"
     local src="$PROJECT_ROOT/openclaw/src/index.ts"
@@ -511,6 +541,7 @@ test_skill_schema_platform_support
 test_openclaw_package_json
 test_openclaw_extensions_field
 test_openclaw_plugin_json
+test_openclaw_tool_contracts_match_runtime
 test_openclaw_correct_command_mapping
 test_openclaw_flags_before_command
 

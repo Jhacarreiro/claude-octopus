@@ -174,10 +174,18 @@ run_with_timeout() {
     # would otherwise outlive the timeout — that is exactly how an expired-token
     # qwen probe hung ~10min instead of dying at the per-agent cap.
     if [[ "$_cmd_is_function" == "false" ]] && command -v gtimeout &>/dev/null; then
-        gtimeout -k 10 "$timeout_secs" "$@"
+        if [[ "${OCTOPUS_PRESERVE_CALLER_PROCESS_GROUP:-false}" == "true" ]]; then
+            gtimeout --foreground -k 10 "$timeout_secs" "$@"
+        else
+            gtimeout -k 10 "$timeout_secs" "$@"
+        fi
         exit_code=$?
     elif [[ "$_cmd_is_function" == "false" ]] && command -v timeout &>/dev/null; then
-        timeout -k 10 "$timeout_secs" "$@"
+        if [[ "${OCTOPUS_PRESERVE_CALLER_PROCESS_GROUP:-false}" == "true" ]]; then
+            timeout --foreground -k 10 "$timeout_secs" "$@"
+        else
+            timeout -k 10 "$timeout_secs" "$@"
+        fi
         exit_code=$?
     else
         # Fallback with proper cleanup (also used for shell functions).

@@ -243,6 +243,43 @@ import json
 import re
 import sys
 
+def extract_registered_tools(source):
+    definitions = re.search(
+        r"const\s+WORKFLOW_DEFS\s*:\s*WorkflowDef\[\]\s*=\s*\[(.*?)\n\];"
+        r"\s*// --- Extension Entry Point ---",
+        source,
+        re.DOTALL,
+    )
+    registration_loop = re.search(
+        r"for\s*\(\s*const\s+def\s+of\s+WORKFLOW_DEFS\s*\)\s*\{(.*?)"
+        r"// Register introspection tool",
+        source,
+        re.DOTALL,
+    )
+    if definitions is None or registration_loop is None:
+        raise ValueError("workflow definitions are not registered through WORKFLOW_DEFS")
+
+    loop_body = registration_loop.group(1)
+    if not re.search(r"\bname:\s*def\.name\b", loop_body):
+        raise ValueError("registered workflow tools do not use def.name")
+    if not re.search(r"api\.registerTool\(\s*tool\s*\)", loop_body):
+        raise ValueError("workflow tool object is not passed to api.registerTool")
+
+    workflow_names = re.findall(
+        r"\bname:\s*[\"'](octopus_[a-z0-9_]+)[\"']",
+        definitions.group(1),
+    )
+    direct_names = re.findall(
+        r"api\.registerTool\(\s*\{.*?\bname:\s*[\"'](octopus_[a-z0-9_]+)[\"']",
+        source,
+        re.DOTALL,
+    )
+    register_calls = re.findall(r"api\.registerTool\(", source)
+    if len(register_calls) != 1 + len(direct_names):
+        raise ValueError("an api.registerTool call is not covered by contract extraction")
+
+    return workflow_names + direct_names
+
 manifest_path, source_path = sys.argv[1:]
 with open(manifest_path, encoding="utf-8") as handle:
     manifest = json.load(handle)
@@ -250,11 +287,12 @@ with open(source_path, encoding="utf-8") as handle:
     source = handle.read()
 
 declared = manifest.get("contracts", {}).get("tools", [])
-registered = sorted(set(re.findall(r'name:\s*["\'](octopus_[a-z0-9_]+)["\']', source)))
+registered = extract_registered_tools(source)
 valid = (
     isinstance(declared, list)
     and len(declared) == len(set(declared))
-    and sorted(declared) == registered
+    and len(registered) == len(set(registered))
+    and sorted(declared) == sorted(registered)
 )
 sys.exit(0 if valid else 1)
 PY

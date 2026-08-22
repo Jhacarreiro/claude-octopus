@@ -143,7 +143,7 @@ _run_with_timeout_preserving_process_group() {
     local timeout_secs="$2"
     shift 2
 
-    "$timeout_bin" --foreground -k 10 "$timeout_secs" bash -c '
+    "$timeout_bin" --foreground "$timeout_secs" bash -c '
         set +e
         _octo_collect_descendants() {
             local parent="$1" child
@@ -159,15 +159,29 @@ _run_with_timeout_preserving_process_group() {
             _octo_collect_descendants "$child_pid"
             if ((${#_octo_descendants[@]})); then
                 kill -TERM "${_octo_descendants[@]}" 2>/dev/null || true
-                sleep 0.2
-                kill -KILL "${_octo_descendants[@]}" 2>/dev/null || true
             fi
-            for _octo_i in 1 2 3 4 5; do
-                kill -0 "$child_pid" 2>/dev/null || break
+            kill -TERM "$child_pid" 2>/dev/null || true
+
+            # Match timeout -k 10 semantics: give the provider subtree the full
+            # 10-second TERM grace period before escalating remaining processes.
+            for _octo_i in $(seq 1 100); do
+                _octo_any_alive=false
+                kill -0 "$child_pid" 2>/dev/null && _octo_any_alive=true
+                for _octo_pid in "${_octo_descendants[@]}"; do
+                    if kill -0 "$_octo_pid" 2>/dev/null; then
+                        _octo_any_alive=true
+                        break
+                    fi
+                done
+                [[ "$_octo_any_alive" == "false" ]] && break
                 sleep 0.1
             done
-            kill -TERM "$child_pid" 2>/dev/null || true
-            sleep 0.1
+
+            _octo_descendants=()
+            _octo_collect_descendants "$child_pid"
+            if ((${#_octo_descendants[@]})); then
+                kill -KILL "${_octo_descendants[@]}" 2>/dev/null || true
+            fi
             kill -KILL "$child_pid" 2>/dev/null || true
             wait "$child_pid" 2>/dev/null || true
         }

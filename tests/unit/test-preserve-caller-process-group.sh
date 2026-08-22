@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$PROJECT_ROOT/tests/helpers/test-framework.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+source "$SCRIPT_DIR/../helpers/test-framework.sh"
 test_suite "Caller process-group preservation"
 log() { :; }
 source "$PROJECT_ROOT/scripts/lib/heartbeat.sh"
@@ -28,7 +29,8 @@ fi
 
 test_case "preserve mode cleans up timed-out descendants"
 if [[ -n "$timeout_bin" ]]; then
-    tmpdir="$(mktemp -d)"
+    tmpdir="$TEST_TMP_DIR/preserve-timeout"
+    mkdir -p "$tmpdir"
     pidfile="$tmpdir/child.pid"
     set +e
     OCTOPUS_PRESERVE_CALLER_PROCESS_GROUP=true run_with_timeout 1 sh -c 'sleep 30 & echo "$!" > "$1"; wait' sh "$pidfile" >/dev/null 2>&1
@@ -36,15 +38,13 @@ if [[ -n "$timeout_bin" ]]; then
     set -e
     child_pid="$(cat "$pidfile" 2>/dev/null || true)"
     sleep 0.3
-    if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
+    child_stat="$(ps -o stat= -p "$child_pid" 2>/dev/null | tr -d "[:space:]" || true)"
+    if [[ -n "$child_stat" && "$child_stat" != Z* ]]; then
         kill -KILL "$child_pid" 2>/dev/null || true
-        rm -rf "$tmpdir"
-        test_fail "descendant survived preserve-mode timeout: $child_pid"
-    elif [[ "$status" -eq 124 || "$status" -eq 143 ]]; then
-        rm -rf "$tmpdir"
+        test_fail "descendant survived preserve-mode timeout: $child_pid (stat=$child_stat)"
+    elif [[ "$status" -eq 124 || "$status" -eq 143 || "$status" -eq 137 ]]; then
         test_pass
     else
-        rm -rf "$tmpdir"
         test_fail "unexpected timeout status: $status"
     fi
 else

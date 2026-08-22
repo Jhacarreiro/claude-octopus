@@ -32,10 +32,14 @@ if [[ -n "$timeout_bin" ]]; then
     tmpdir="$TEST_TMP_DIR/preserve-timeout"
     mkdir -p "$tmpdir"
     pidfile="$tmpdir/child.pid"
-    set +e
-    OCTOPUS_PRESERVE_CALLER_PROCESS_GROUP=true run_with_timeout 1 sh -c 'sleep 30 & echo "$!" > "$1"; wait' sh "$pidfile" >/dev/null 2>&1
-    status=$?
-    set -e
+    if (
+        export "OCTOPUS_PRESERVE_CALLER_PROCESS_GROUP=true"
+        run_with_timeout 1 sh -c 'sleep 30 & echo "$!" > "$1"; wait' sh "$pidfile" >/dev/null 2>&1
+    ); then
+        status=0
+    else
+        status=$?
+    fi
     child_pid="$(cat "$pidfile" 2>/dev/null || true)"
     sleep 0.3
     child_stat="$(ps -o stat= -p "$child_pid" 2>/dev/null | tr -d "[:space:]" || true)"

@@ -234,6 +234,10 @@ assert_contains "$(cat "$TMPDIR_TEST/working-tree.diff")" \
   "tracked.txt" "review_collect_diff: working-tree includes tracked modifications"
 assert_contains "$(cat "$TMPDIR_TEST/working-tree.diff")" \
   "new file.txt" "review_collect_diff: working-tree includes untracked files"
+assert_contains "$(cat "$TMPDIR_TEST/working-tree.diff")" \
+  "\+changed" "review_collect_diff: working-tree includes tracked content"
+assert_contains "$(cat "$TMPDIR_TEST/working-tree.diff")" \
+  "\+new" "review_collect_diff: working-tree includes untracked content"
 assert_not_contains "$(cat "$TMPDIR_TEST/working-tree.diff")" \
   "noise.ignored" "review_collect_diff: working-tree excludes ignored untracked files"
 

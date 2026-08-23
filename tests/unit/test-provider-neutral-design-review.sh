@@ -89,7 +89,7 @@ octo_provider_identity_label() { printf '%s / fixture\n' "$1"; }
 write_structured_decision() { :; }
 run_agent_sync_consultative() {
   printf '%s|%s|%s\n' "$1" "$4" "$5" >> "$CAPTURE"
-  printf '%s\n' 'planning output'
+  printf '%s\n' '- Architecture: keep boundaries explicit and preserve existing contracts.' '- Risks: validate edge cases, dependency failures, and integration behavior.' '- Testing: run focused unit coverage plus end-to-end verification before delivery.'
 }
 design_review_ceremony "test" >/dev/null
 roles="$(cut -d'|' -f2 "$CAPTURE" | tr '\n' '|')"
@@ -122,6 +122,59 @@ if [[ "$model" == "minimaxai/minimax-m3" ]]; then
   test_pass
 else
   test_fail "expected provider-local MiniMax researcher model, got '$model'"
+fi
+
+test_case "design review retries the same model before falling back"
+CALLS="$TMP_HOME/retry.calls"
+: > "$CALLS"
+log() { :; }
+design_review_candidate_agents() { printf '%s\n' 'commandcode:stealth/ox-alpha' 'codex:gpt-5.6-luna'; }
+run_agent_sync_consultative() {
+  printf '%s\n' "$1" >> "$CALLS"
+  if [[ "$(wc -l < "$CALLS" | tr -d ' ')" == "1" ]]; then
+    printf '%s\n' 'PROJECT_DOCUMENTATION_PATH: /tmp/repo'
+  else
+    printf '%s\n' '- Architecture: preserve current contracts and isolate the change behind a narrow interface.' '- Risks: validate provider failures and malformed outputs without reducing review coverage.' '- Testing: exercise retry, fallback, and successful synthesis paths with deterministic fixtures.'
+  fi
+}
+retry_out=""; retry_agent=""
+design_review_run_seat_with_recovery 'commandcode:minimaxai/minimax-m3' 'code-reviewer' 'prompt' 0   'commandcode:minimaxai/minimax-m3 codex:gpt-5.6-luna' retry_out retry_agent
+if [[ "$retry_agent" == 'commandcode:minimaxai/minimax-m3' ]] && [[ "$(wc -l < "$CALLS" | tr -d ' ')" == "2" ]]; then
+  test_pass
+else
+  test_fail "same-seat retry did not recover: agent=$retry_agent calls=$(tr '\n' '|' < "$CALLS")"
+fi
+
+test_case "design review falls back through the shared council order after retry exhaustion"
+CALLS="$TMP_HOME/fallback.calls"
+: > "$CALLS"
+design_review_candidate_agents() {
+  printf '%s\n'     'commandcode:minimaxai/minimax-m3'     'commandcode:stealth/ox-alpha'     'codex:gpt-5.6-luna'
+}
+run_agent_sync_consultative() {
+  printf '%s\n' "$1" >> "$CALLS"
+  case "$1" in
+    commandcode:minimaxai/minimax-m3) printf '%s\n' 'PROJECT_DOCUMENTATION_PATH: /tmp/repo' ;;
+    commandcode:stealth/ox-alpha)
+      printf '%s\n' '- Architecture: use the existing orchestration path and preserve seat semantics.' '- Risks: recover invalid provider output without silently dropping an independent perspective.' '- Testing: verify model-qualified fallback order and best-effort degradation behavior.' ;;
+    *) printf '%s\n' 'unexpected fallback' ;;
+  esac
+}
+fallback_out=""; fallback_agent=""
+design_review_run_seat_with_recovery 'commandcode:minimaxai/minimax-m3' 'code-reviewer' 'prompt' 0   'commandcode:minimaxai/minimax-m3 codex:gpt-5.6-luna' fallback_out fallback_agent
+if [[ "$fallback_agent" == 'commandcode:stealth/ox-alpha' ]] &&    [[ "$(sed -n '3p' "$CALLS")" == 'commandcode:stealth/ox-alpha' ]]; then
+  test_pass
+else
+  test_fail "fallback order wrong: agent=$fallback_agent calls=$(tr '\n' '|' < "$CALLS")"
+fi
+
+test_case "review order supports multiple models from one provider with Ox Alpha before Luna"
+order="$(OCTOPUS_COUNCIL_DEFAULT_PROVIDERS='commandcode:stealth/ox-alpha,commandcode:minimaxai/minimax-m3,commandcode:deepseek/deepseek-v4-flash,codex:gpt-5.6-luna,codex:gpt-5.6-sol' bash "$PROJECT_ROOT/scripts/helpers/build-fleet.sh" review-order standard test 2>/dev/null)"
+first_four="$(printf '%s\n' "$order" | sed -n '1,4p')"
+if [[ "$first_four" == $'commandcode:stealth/ox-alpha\ncommandcode:minimaxai/minimax-m3\ncommandcode:deepseek/deepseek-v4-flash\ncodex:gpt-5.6-luna' ]]; then
+  test_pass
+else
+  test_fail "model-qualified council order mismatch: $(tr '\n' '|' <<< "$order")"
 fi
 
 test_summary

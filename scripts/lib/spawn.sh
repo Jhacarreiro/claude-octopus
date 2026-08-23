@@ -3,6 +3,7 @@
 # Agent spawning and lifecycle management
 
 _octopus_spawn_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${_octopus_spawn_lib_dir}/agent-spec.sh" 2>/dev/null || true
 if ! type start_quota_watcher >/dev/null 2>&1; then
     source "${_octopus_spawn_lib_dir}/quota-watcher.sh" 2>/dev/null || true
 fi
@@ -34,7 +35,8 @@ _octopus_agent_lifecycle_event() {
     local exit_code="${8:-}"
     local status="${9:-}"
 
-    local provider="${agent_type%%-*}"
+    local provider
+    provider="$(octo_agent_spec_executor "$agent_type")"
     local event_name="agent.${event}"
 
     if declare -f octo_event_emit >/dev/null 2>&1; then
@@ -229,6 +231,8 @@ spawn_agent() {
     local agent_type="$1"
     local prompt="$2"
     local task_id="${3:-$(_octopus_next_spawn_task_id)}"
+    local agent_slug
+    agent_slug="$(octo_agent_spec_slug "$agent_type")"
     local role="${4:-}"         # Optional role override
     local phase="${5:-}"        # Optional phase context
     local use_fork="${6:-false}" # Optional fork context (v2.1.12+)
@@ -505,7 +509,8 @@ ${heuristic_ctx}"
     fi
 
     # v9.13: Circuit breaker check — skip provider if circuit is open
-    local provider_prefix="${agent_type%%-*}"  # codex-standard → codex
+    local provider_prefix
+    provider_prefix="$(octo_agent_spec_executor "$agent_type")"  # codex-standard → codex; provider:model → provider
     if type is_provider_available &>/dev/null && ! is_provider_available "$provider_prefix"; then
         log "WARN" "Circuit open for $provider_prefix — skipping $agent_type (use fallback)"
         record_outcome "$provider_prefix" "$agent_type" "skipped" "${phase:-unknown}" "circuit_open" "0" 2>/dev/null || true
@@ -554,8 +559,8 @@ ${heuristic_ctx}"
         return $?
     fi
 
-    local log_file="${LOGS_DIR}/${agent_type}-${task_id}.log"
-    local result_file="${RESULTS_DIR}/${agent_type}-${task_id}.md"
+    local log_file="${LOGS_DIR}/${agent_slug}-${task_id}.log"
+    local result_file="${RESULTS_DIR}/${agent_slug}-${task_id}.md"
 
     # v8.52: Warn if spawning Claude agent on enterprise without subagent model fix (CC < v2.1.73)
     # Prior to v2.1.73, model: opus/sonnet/haiku in agent frontmatter was silently downgraded on Bedrock/Vertex/Foundry
@@ -810,7 +815,8 @@ ${heuristic_ctx}"
             local _quota_watcher_pid=""
             local _spawn_pid=$BASHPID
             local _provider_prefix
-            _provider_prefix="$(octo_provider_canonical "$agent_type" 2>/dev/null || printf '%s' "${agent_type%%-*}")"
+            _provider_prefix="$(octo_agent_spec_executor "$agent_type")"
+            _provider_prefix="$(octo_provider_canonical "$_provider_prefix" 2>/dev/null || printf '%s' "$_provider_prefix")"
             _quota_watcher_pid=$(start_quota_watcher \
                 "$_spawn_pid" \
                 "$temp_errors" \
@@ -1224,11 +1230,11 @@ ${heuristic_ctx}"
     if command -v flock &>/dev/null; then
         (
             flock -x 200
-            echo "$pid:$agent_type:$task_id" >> "$PID_FILE"
+            echo "$pid:$agent_slug:$task_id" >> "$PID_FILE"
         ) 200>"${PID_FILE}.lock"
     else
         # macOS fallback: simple append (race condition risk is low for our use case)
-        echo "$pid:$agent_type:$task_id" >> "$PID_FILE"
+        echo "$pid:$agent_slug:$task_id" >> "$PID_FILE"
     fi
 
     log INFO "Agent spawned with PID: $pid"

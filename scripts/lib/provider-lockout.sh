@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+_provider_lockout_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${_provider_lockout_dir}/agent-spec.sh" 2>/dev/null || true
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/provider-lockout.sh — single owner of the provider lockout + history protocol
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -150,7 +152,8 @@ read_provider_history() {
 
 build_provider_context() {
     local agent_type="$1"
-    local base_provider="${agent_type%%-*}"  # codex-fast -> codex
+    local base_provider
+    base_provider="$(octo_agent_spec_executor "$agent_type")"  # codex-fast -> codex; provider:model -> provider
     local history
     history=$(read_provider_history "$base_provider")
 

@@ -46,4 +46,14 @@ else
     test_fail "implementation review still reuses execution-role names"
 fi
 
+
+test_case "Round 1 finding events preserve namespaced council role"
+review_file="$PROJECT_ROOT/scripts/lib/review.sh"
+if grep -Fq 'get_agent_model "$atype" "review" "${round1_roles[$idx]}"' "$review_file" && \
+   grep -Fq 'role="${round1_roles[$idx]}" severity=' "$review_file"; then
+    test_pass
+else
+    test_fail "Round 1 finding event still collapses role to generic reviewer"
+fi
+
 test_summary

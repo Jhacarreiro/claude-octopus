@@ -219,4 +219,105 @@ else
   test_fail "substantive prose with colon was rejected as metadata"
 fi
 
+
+test_case "invalid outputs are persisted as bounded diagnostic artifacts"
+RESULTS_DIR="$TMP_HOME/diagnostic-results"
+export RESULTS_DIR
+rm -rf "$RESULTS_DIR"
+mkdir -p "$RESULTS_DIR"
+large_invalid="$(printf 'X%.0s' {1..20000})"
+design_review_write_invalid_diagnostic "seat" "code-reviewer" "commandcode:stealth/ox-alpha" "1" "0" "too_few_words" "$large_invalid"
+diag_file="$(find "$RESULTS_DIR/design-review-diagnostics" -type f -name 'seat-code-reviewer-*.json' | head -1)"
+if [[ -n "$diag_file" ]] && \
+   [[ "$(jq -r '.agent_spec' "$diag_file")" == 'commandcode:stealth/ox-alpha' ]] && \
+   [[ "$(jq -r '.validation_failure' "$diag_file")" == 'too_few_words' ]] && \
+   [[ "$(jq -r '.bytes' "$diag_file")" == '20000' ]] && \
+   [[ "$(jq -r '.raw_truncated' "$diag_file")" == 'true' ]] && \
+   [[ "$(jq -r '.raw_excerpt | length' "$diag_file")" == '16384' ]]; then
+  test_pass
+else
+  test_fail "bounded diagnostic artifact missing or malformed: file=$diag_file"
+fi
+
+test_case "design review synthesis retries the same model before fallback"
+RESULTS_DIR="$TMP_HOME/synthesis-retry-results"
+export RESULTS_DIR
+rm -rf "$RESULTS_DIR"
+mkdir -p "$RESULTS_DIR"
+CALLS="$TMP_HOME/synthesis-retry.calls"
+: > "$CALLS"
+design_review_candidate_agents() { printf '%s\n' 'commandcode:stealth/ox-alpha' 'codex:gpt-5.6-luna'; }
+run_agent_sync_consultative() {
+  printf '%s\n' "$1" >> "$CALLS"
+  if [[ "$(wc -l < "$CALLS" | tr -d ' ')" == "1" ]]; then
+    printf '%s\n' 'PROJECT_DOCUMENTATION_PATH: /tmp/repo'
+  else
+    printf '%s\n' 'CONFLICTS: The reviewers differ on sequencing but agree on preserving the existing orchestration boundary.' 'GAPS: Failure diagnostics and retry semantics need explicit validation before implementation continues.' 'RESOLUTION: Keep the current architecture, retry the same synthesizer once, then use the shared review pool only if the second response is still invalid.'
+  fi
+}
+synth_out=""; synth_agent=""
+design_review_run_synthesis_with_recovery 'commandcode:minimaxai/minimax-m3' 'synthesis prompt' 0 \
+  'commandcode:minimaxai/minimax-m3 codex:gpt-5.6-luna' synth_out synth_agent
+if [[ "$synth_agent" == 'commandcode:minimaxai/minimax-m3' ]] && \
+   [[ "$(wc -l < "$CALLS" | tr -d ' ')" == '2' ]] && \
+   [[ "$synth_out" == *'RESOLUTION:'* ]] && \
+   find "$RESULTS_DIR/design-review-diagnostics" -type f -name 'synthesis-synthesizer-*.json' | grep -q .; then
+  test_pass
+else
+  test_fail "same-model synthesis retry did not recover: agent=$synth_agent calls=$(tr '\n' '|' < "$CALLS")"
+fi
+
+test_case "design review synthesis falls back through the shared review order"
+RESULTS_DIR="$TMP_HOME/synthesis-fallback-results"
+export RESULTS_DIR
+rm -rf "$RESULTS_DIR"
+mkdir -p "$RESULTS_DIR"
+CALLS="$TMP_HOME/synthesis-fallback.calls"
+: > "$CALLS"
+design_review_candidate_agents() {
+  printf '%s\n' 'commandcode:minimaxai/minimax-m3' 'commandcode:stealth/ox-alpha' 'codex:gpt-5.6-luna'
+}
+run_agent_sync_consultative() {
+  printf '%s\n' "$1" >> "$CALLS"
+  case "$1" in
+    commandcode:minimaxai/minimax-m3) printf '%s\n' 'PROJECT_DOCUMENTATION_PATH: /tmp/repo' ;;
+    commandcode:stealth/ox-alpha)
+      printf '%s\n' 'CONFLICTS: The seats disagree on implementation ordering, but not on the desired contract.' 'GAPS: The review needs explicit failure diagnostics and bounded fallback behavior.' 'RESOLUTION: Preserve the admitted review pool, record the failed synthesizer output, and continue with this alternate synthesizer for the final planning summary.' ;;
+    *) printf '%s\n' 'unexpected synthesis candidate' ;;
+  esac
+}
+synth_out=""; synth_agent=""
+design_review_run_synthesis_with_recovery 'commandcode:minimaxai/minimax-m3' 'synthesis prompt' 0 \
+  'commandcode:minimaxai/minimax-m3 codex:gpt-5.6-luna' synth_out synth_agent
+if [[ "$synth_agent" == 'commandcode:stealth/ox-alpha' ]] && \
+   [[ "$(sed -n '3p' "$CALLS")" == 'commandcode:stealth/ox-alpha' ]] && \
+   [[ "$synth_out" == *'RESOLUTION:'* ]]; then
+  test_pass
+else
+  test_fail "synthesis fallback order wrong: agent=$synth_agent calls=$(tr '\n' '|' < "$CALLS")"
+fi
+
+test_case "design review synthesis degrades explicitly after exhausting the pool"
+RESULTS_DIR="$TMP_HOME/synthesis-degraded-results"
+export RESULTS_DIR
+rm -rf "$RESULTS_DIR"
+mkdir -p "$RESULTS_DIR"
+CALLS="$TMP_HOME/synthesis-degraded.calls"
+: > "$CALLS"
+design_review_candidate_agents() { printf '%s\n' 'commandcode:minimaxai/minimax-m3'; }
+run_agent_sync_consultative() {
+  printf '%s\n' "$1" >> "$CALLS"
+  printf '%s\n' 'PROJECT_DOCUMENTATION_PATH: /tmp/repo'
+}
+synth_out="sentinel"; synth_agent=""
+design_review_run_synthesis_with_recovery 'commandcode:minimaxai/minimax-m3' 'synthesis prompt' 0 \
+  'commandcode:minimaxai/minimax-m3' synth_out synth_agent
+if [[ -z "$synth_out" ]] && \
+   [[ "$synth_agent" == 'commandcode:minimaxai/minimax-m3' ]] && \
+   [[ "$(wc -l < "$CALLS" | tr -d ' ')" == '2' ]]; then
+  test_pass
+else
+  test_fail "synthesis did not degrade cleanly after pool exhaustion: agent=$synth_agent output=$synth_out calls=$(tr '\n' '|' < "$CALLS")"
+fi
+
 test_summary

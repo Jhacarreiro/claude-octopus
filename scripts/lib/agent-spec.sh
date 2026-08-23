@@ -8,6 +8,34 @@ octo_agent_spec_executor() {
     printf '%s\n' "${spec%%:*}"
 }
 
+octo_agent_spec_provider() {
+    local executor
+    executor="$(octo_agent_spec_executor "${1:-}")"
+    if declare -f octo_provider_canonical >/dev/null 2>&1; then
+        octo_provider_canonical "$executor" 2>/dev/null && return 0
+    fi
+    case "$executor" in
+        codex|codex-*) echo codex ;;
+        commandcode|commandcode-*) echo commandcode ;;
+        claude-sdk|claude-sdk-*) echo claude-sdk ;;
+        claude|claude-*) echo claude ;;
+        gemini|gemini-*) echo gemini ;;
+        agy|agy-*|antigravity) echo agy ;;
+        perplexity|perplexity-*) echo perplexity ;;
+        openrouter|openrouter-*) echo openrouter ;;
+        opencode|opencode-*) echo opencode ;;
+        openai-compatible|openai-compatible-*) echo openai-compatible ;;
+        atlascloud|atlascloud-*) echo atlascloud ;;
+        qwen|qwen-*) echo qwen ;;
+        grok|grok-*) echo grok ;;
+        cursor-agent|cursor-agent-*) echo cursor-agent ;;
+        copilot|copilot-*) echo copilot ;;
+        vibe|vibe-*) echo vibe ;;
+        ollama|ollama-*) echo ollama ;;
+        *) echo "$executor" ;;
+    esac
+}
+
 octo_agent_spec_explicit_model() {
     local spec="${1:-}"
     [[ "$spec" == *:* ]] || return 1

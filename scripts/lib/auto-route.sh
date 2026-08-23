@@ -518,7 +518,7 @@ Output a structured report with findings and recommendations." ;;
                 # The quota watcher marks the bare provider, so normalize any
                 # agent suffix before checking the session-level dead set.
                 local _bare_provider
-                _bare_provider="$(octo_agent_spec_executor "$agent_type")"
+                _bare_provider="$(octo_agent_spec_provider "$agent_type")"
                 if declare -f octo_quota_is_dead >/dev/null 2>&1 && octo_quota_is_dead "$_bare_provider"; then
                     echo -e "    ├─ skipping ${domain} (${agent_type}): quota/auth dead this session"
                     pids+=("")

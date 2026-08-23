@@ -102,7 +102,7 @@ append_provider_history() {
     esac
 
     local provider
-    provider="$(octo_agent_spec_executor "$1")"
+    provider="$(octo_agent_spec_provider "$1")"
     local phase="$2"
     local task_brief="$3"
     local learned="$4"
@@ -154,7 +154,7 @@ read_provider_history() {
 build_provider_context() {
     local agent_type="$1"
     local base_provider
-    base_provider="$(octo_agent_spec_executor "$agent_type")"  # codex-fast -> codex; provider:model -> provider
+    base_provider="$(octo_agent_spec_provider "$agent_type")"  # codex-fast -> codex; provider:model -> provider
     local history
     history=$(read_provider_history "$base_provider")
 

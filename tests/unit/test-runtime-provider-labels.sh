@@ -182,24 +182,32 @@ else
   test_fail "legacy GEMINI override did not remain the secondary researcher fallback"
 fi
 
+event_has_field() {
+  local event="$1" expected="$2"
+  case "|${event}|" in
+    *"|${expected}|"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 test_case "design review synthesis events carry stable executor and role identity"
 synthesis_dispatch_log="$TEST_TMP_DIR/synthesis-events-dispatch.log"
 synthesis_event_log="$TEST_TMP_DIR/synthesis-events.log"
 run_design_review_dispatch_probe role "$synthesis_dispatch_log" "$synthesis_event_log"
 start_event="$(grep '^synthesis.start|' "$synthesis_event_log" | head -1)"
 end_event="$(grep '^synthesis.end|' "$synthesis_event_log" | head -1)"
-if [[ "$start_event" == *"executor_alias=role-synthesizer"* ]] &&
-   [[ "$start_event" == *"configured_provider=role-synthesizer"* ]] &&
-   [[ "$start_event" == *"configured_model=test-model"* ]] &&
-   [[ "$start_event" == *"runtime_provider=unknown"* ]] &&
-   [[ "$start_event" == *"runtime_model=unknown"* ]] &&
-   [[ "$start_event" == *"role=design-synthesizer"* ]] &&
-   [[ "$end_event" == *"executor_alias=role-synthesizer"* ]] &&
-   [[ "$end_event" == *"configured_provider=role-synthesizer"* ]] &&
-   [[ "$end_event" == *"configured_model=test-model"* ]] &&
-   [[ "$end_event" == *"runtime_provider=unknown"* ]] &&
-   [[ "$end_event" == *"runtime_model=unknown"* ]] &&
-   [[ "$end_event" == *"role=design-synthesizer"* ]]; then
+if event_has_field "$start_event" "executor_alias=role-synthesizer" &&
+   event_has_field "$start_event" "configured_provider=role-synthesizer" &&
+   event_has_field "$start_event" "configured_model=test-model" &&
+   event_has_field "$start_event" "runtime_provider=unknown" &&
+   event_has_field "$start_event" "runtime_model=unknown" &&
+   event_has_field "$start_event" "role=design-synthesizer" &&
+   event_has_field "$end_event" "executor_alias=role-synthesizer" &&
+   event_has_field "$end_event" "configured_provider=role-synthesizer" &&
+   event_has_field "$end_event" "configured_model=test-model" &&
+   event_has_field "$end_event" "runtime_provider=unknown" &&
+   event_has_field "$end_event" "runtime_model=unknown" &&
+   event_has_field "$end_event" "role=design-synthesizer"; then
   test_pass
 else
   test_fail "design review synthesis events lack stable lifecycle identity fields: start=$start_event end=$end_event"

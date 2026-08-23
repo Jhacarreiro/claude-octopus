@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -eo pipefail
 # Agent spec helpers. A spec may be a legacy executor alias (e.g. codex-review)
 # or a model-qualified seat (e.g. commandcode:minimaxai/minimax-m3).
 # Source-safe: defines functions only.

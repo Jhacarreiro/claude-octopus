@@ -185,4 +185,13 @@ else
   test_pass
 fi
 
+test_case "large wrapped degenerate consultative output is rejected"
+large_meta="$(printf 'X%.0s' {1..131072})"
+wrapped_large=$'## UNVERIFIED CONSULTATIVE OUTPUT\n\nThis output came from a disposable workspace. It is advisory and non-deliverable. Claimed file changes, test counts, live probes, or completed implementation are not verified evidence and must not be reported as delivered work.\n\nPROJECT_DOCUMENTATION_PATH: /tmp/repo-'"$large_meta"$'\n\n## END UNVERIFIED CONSULTATIVE OUTPUT'
+if design_review_approach_valid "$wrapped_large"; then
+  test_fail "large wrapper payload bypassed inner-content validation"
+else
+  test_pass
+fi
+
 test_summary

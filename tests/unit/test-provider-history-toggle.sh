@@ -90,4 +90,28 @@ else
     test_fail "provider history path escaped or safe file missing: ${safe_file:-none}"
 fi
 
+
+test_case "concurrent model-qualified seats serialize shared provider history append and trim"
+rm -rf "$WORKSPACE_DIR"
+mkdir -p "$WORKSPACE_DIR" "$RESULTS_DIR"
+source "$PROJECT_ROOT/scripts/lib/provider-lockout.sh"
+unset OCTOPUS_PROVIDER_HISTORY || true
+for i in $(seq 1 48); do
+    append_provider_history 'commandcode:stealth/ox-alpha' tangle "seed-$i" "seed history $i"
+done
+pids=""
+for i in $(seq 49 56); do
+    append_provider_history "commandcode:model-$i" tangle "concurrent-$i" "concurrent history $i" &
+    pids="$pids $!"
+done
+for pid in $pids; do wait "$pid"; done
+history_file="$WORKSPACE_DIR/.octo/providers/commandcode-history.md"
+entry_count="$(grep -c '^### ' "$history_file" 2>/dev/null || true)"
+leftovers="$(find "$WORKSPACE_DIR/.octo/providers" -maxdepth 1 \( -name 'commandcode-history.md.tmp.*' -o -name 'commandcode-history.md.lock' \) -print)"
+if [[ "$entry_count" == '50' ]] && [[ -z "$leftovers" ]]; then
+    test_pass
+else
+    test_fail "concurrent history transaction was not serialized: entries=$entry_count leftovers=${leftovers:-none}"
+fi
+
 test_summary

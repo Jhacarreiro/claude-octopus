@@ -124,7 +124,6 @@ else
   test_fail "expected provider-local MiniMax researcher model, got '$model'"
 fi
 
-
 test_case "design council roles do not inherit execution-role model routes"
 cat >"$TMP_HOME/.claude-octopus/config/providers.json" <<'EOF'
 {
@@ -154,6 +153,17 @@ if [[ "$(resolve_octopus_model commandcode commandcode ceremony design-feasibili
   test_pass
 else
   test_fail "namespaced design roles inherited execution-role routing"
+fi
+
+test_case "build-fleet keeps multiline prompts in one record per provider"
+multiline_prompt=$'line one\r\nPROJECT_DOCUMENTATION_PATH:\r/data/example\nline four'
+fleet_output="$(bash "$PROJECT_ROOT/scripts/helpers/build-fleet.sh" review standard "$multiline_prompt" 2>/dev/null)"
+record_count="$(printf '%s\n' "$fleet_output" | grep -c '|')"
+line_count="$(printf '%s\n' "$fleet_output" | wc -l | tr -d ' ')"
+if [[ "$record_count" -eq 4 && "$line_count" -eq 4 ]] && ! printf '%s\n' "$fleet_output" | grep -q '^PROJECT_DOCUMENTATION_PATH:$' && ! printf '%s' "$fleet_output" | grep -q $'\r'; then
+  test_pass
+else
+  test_fail "multiline prompt escaped fleet record boundaries: records=$record_count lines=$line_count"
 fi
 
 test_summary

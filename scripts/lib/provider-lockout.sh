@@ -93,6 +93,16 @@ reset_provider_lockouts() {
     LOCKED_PROVIDERS=""
 }
 
+provider_history_file_key() {
+    local provider key
+    provider="$(octo_agent_spec_provider "${1:-unknown}")"
+    key="$(octo_agent_spec_slug "$provider")"
+    case "$key" in
+        ""|.|..) key="unknown" ;;
+    esac
+    printf '%s\n' "$key"
+}
+
 # v8.18.0 Feature: Per-Provider History Files
 # Each provider accumulates project-specific knowledge in .octo/providers/{name}-history.md
 
@@ -101,14 +111,15 @@ append_provider_history() {
         off|false|0|no) return 0 ;;
     esac
 
-    local provider
+    local provider history_key
     provider="$(octo_agent_spec_provider "$1")"
+    history_key="$(provider_history_file_key "$provider")"
     local phase="$2"
     local task_brief="$3"
     local learned="$4"
 
     local history_dir="${WORKSPACE_DIR}/.octo/providers"
-    local history_file="$history_dir/${provider}-history.md"
+    local history_file="$history_dir/${history_key}-history.md"
     mkdir -p "$history_dir"
 
     local timestamp
@@ -143,8 +154,10 @@ read_provider_history() {
         off|false|0|no) return 0 ;;
     esac
 
-    local provider="$1"
-    local history_file="${WORKSPACE_DIR}/.octo/providers/${provider}-history.md"
+    local provider history_key
+    provider="$(octo_agent_spec_provider "$1")"
+    history_key="$(provider_history_file_key "$provider")"
+    local history_file="${WORKSPACE_DIR}/.octo/providers/${history_key}-history.md"
 
     if [[ -f "$history_file" ]]; then
         cat "$history_file"

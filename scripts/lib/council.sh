@@ -2626,29 +2626,32 @@ council_detect_providers() {
     local json='{}'
 
     if [[ -n "${OCTOPUS_COUNCIL_PROVIDER_FIXTURE:-}" ]]; then
-        local entry name status
+        local entry name status status_key
         IFS=',' read -r -a fixture_entries <<< "$OCTOPUS_COUNCIL_PROVIDER_FIXTURE"
         for entry in "${fixture_entries[@]}"; do
-            name="${entry%%:*}"
-            status="${entry#*:}"
+            name="${entry%:*}"
+            status="${entry##*:}"
             [[ -n "$name" && -n "$status" && "$name" != "$status" ]] || continue
-            json="$(jq -c --arg name "$name" --arg status "$status" '. + {($name): $status}' <<< "$json")"
+            status_key="$(octo_agent_spec_provider "$name")"
+            json="$(jq -c --arg name "$status_key" --arg status "$status" '. + {($name): $status}' <<< "$json")"
         done
         COUNCIL_PROVIDER_STATUS_JSON="$json"
         return 0
     fi
 
-    local provider cmd status
+    local provider cmd status status_key host_provider
+    host_provider="$(octo_agent_spec_provider "${OCTOPUS_HOST:-}")"
     IFS=',' read -r -a provider_list <<< "$providers"
     for provider in "${provider_list[@]}"; do
+        status_key="$(octo_agent_spec_provider "$provider")"
         # v9.43: When this provider IS the host runtime, spawning it as a subprocess
         # fails (recursive invocation — e.g. codex-within-codex on Windows/Git Bash).
         # Mark as host-native so council_live_response emits an in-context response
         # instead of a broken subprocess call.
-        if [[ "${OCTOPUS_HOST:-}" == "$provider" ]]; then
+        if [[ -n "${OCTOPUS_HOST:-}" && "$host_provider" == "$status_key" ]]; then
             status="host-native"
         else
-            case "$provider" in
+            case "$status_key" in
                 openai-compatible|openai-tools|openai-compatible-agent)
                     if declare -f openai_compatible_is_available >/dev/null 2>&1 && openai_compatible_is_available; then
                         status="available"
@@ -2687,7 +2690,7 @@ council_detect_providers() {
                     ;;
             esac
         fi
-        json="$(jq -c --arg name "$provider" --arg status "$status" '. + {($name): $status}' <<< "$json")"
+        json="$(jq -c --arg name "$status_key" --arg status "$status" '. + {($name): $status}' <<< "$json")"
     done
 
     COUNCIL_PROVIDER_STATUS_JSON="$json"

@@ -73,4 +73,21 @@ else
     test_fail "model-qualified provider history was not normalized to commandcode-history.md"
 fi
 
+
+test_case "provider history filename key cannot escape the providers directory"
+rm -rf "$WORKSPACE_DIR"
+mkdir -p "$WORKSPACE_DIR" "$RESULTS_DIR"
+source "$PROJECT_ROOT/scripts/lib/provider-lockout.sh"
+unset OCTOPUS_PROVIDER_HISTORY || true
+append_provider_history '../../escaped' tangle "task" "safe history"
+safe_file="$(find "$WORKSPACE_DIR/.octo/providers" -maxdepth 1 -type f -name '*escaped*-history.md' | head -1)"
+if [[ -n "$safe_file" ]] && \
+   [[ "$safe_file" == "$WORKSPACE_DIR/.octo/providers/"* ]] && \
+   [[ ! -e "$WORKSPACE_DIR/escaped-history.md" ]] && \
+   [[ ! -e "$WORKSPACE_DIR/.octo/escaped-history.md" ]]; then
+    test_pass
+else
+    test_fail "provider history path escaped or safe file missing: ${safe_file:-none}"
+fi
+
 test_summary

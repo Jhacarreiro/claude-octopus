@@ -619,14 +619,10 @@ ${heuristic_ctx}"
         _estimated_cost=$(estimate_agent_call_cost "$agent_type" "$model" "$enhanced_prompt")
     fi
 
-    # v8.14.0: Track provider usage in persistent state
-    local provider_name
-    case "$agent_type" in
-        codex*) provider_name="codex" ;;
-        gemini*) provider_name="agy" ;;
-        claude*) provider_name="claude" ;;
-        *) provider_name="$agent_type" ;;
-    esac
+    # v8.14.0: Track provider usage in persistent state. provider_prefix is the
+    # canonical provider identity used by circuit-breaker/history/accounting; do
+    # not split metrics by model-qualified agent_spec.
+    local provider_name="$provider_prefix"
     update_metrics "provider" "$provider_name" 2>/dev/null || true
 
     # v8.7.0: Register task in bridge ledger (non-fatal if ledger missing)

@@ -508,11 +508,12 @@ get_role_budget_proportion() {
 # opt in without inflating smaller providers.
 get_provider_context_limit() {
     local agent_type="${1:-}"
-    local provider
+    local provider executor
     provider="$(octo_agent_spec_provider "$agent_type")"
+    executor="$(octo_agent_spec_executor "$agent_type")"
     local default_budget="${OCTOPUS_CONTEXT_BUDGET:-12000}"
 
-    case "$agent_type" in
+    case "$executor" in
         codex-large-context) echo "${OCTOPUS_CODEX_LARGE_CONTEXT_BUDGET:-${default_budget}}" ; return 0 ;;
         claude-sdk*) echo "${OCTOPUS_CLAUDE_SDK_CONTEXT_BUDGET:-1000000}" ; return 0 ;;  # v9.50.0: Agent SDK 1M window
         claude-opus*|claude-sonnet|claude) echo "${OCTOPUS_CLAUDE_CONTEXT_BUDGET:-${default_budget}}" ; return 0 ;;

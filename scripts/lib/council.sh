@@ -826,6 +826,7 @@ council_score_roster_entry() {
     local provider_org="$3"
     local model="$4"
     local seat="$5"
+    local provider_spec="${6:-$2}"
 
     local role_fit availability diversity cost_budget benchmark preference
     role_fit="$(council_role_fit_signal "$persona" "$seat")"
@@ -965,7 +966,7 @@ council_roster_entry_json() {
     permission_mode="$(council_agent_config_value "$persona" "permissionMode" | tr -d '"')"
     [[ -n "$permission_mode" ]] || permission_mode="plan"
     benchmark_signal="$(council_benchmark_signal "$provider_org" "$model")"
-    score="$(council_score_roster_entry "$persona" "$provider" "$provider_org" "$model" "$seat")"
+    score="$(council_score_roster_entry "$persona" "$provider" "$provider_org" "$model" "$seat" "$provider_spec")"
 
     jq -nc \
         --arg seat "$seat" \
@@ -1224,18 +1225,18 @@ council_build_roster() {
 }
 
 council_dedup_vendor_seats() {
-    # OPT-IN (default off): keep at most one non-chair VOTING seat per provider org.
+    # OPT-IN (default off): keep at most one non-chair VOTING seat per model family.
     #
-    # With Gemini sunset, a 2-vendor standard council can seat agy + codex + codex,
-    # which (a) weights the panel 2:1 toward one lab and (b) forces that lab to clear
-    # BOTH of its seats to count as an approver — so an internal split (one seat
+    # A standard council can seat multiple execution providers backed by the same model family,
+    # which (a) overweights one model family and (b) forces that family to clear
+    # all of its seats to count as an approver — so an internal split (one seat
     # APPROVE, one REVISE) can deadlock an otherwise-decidable gate. The
-    # distinct-approving-vendor quorum already guards correctness (a split vendor
+    # distinct-approving-model-family quorum already guards correctness (a split family
     # can't pass on one seat); this addresses the panel *weighting*, which the quorum
     # layer does not. It is a seating-policy preference, so it stays off unless
     # explicitly enabled with OCTOPUS_COUNCIL_ONE_VOTE_PER_VENDOR=1.
     #
-    # When enabled: keep the highest-scoring non-chair seat per org; chair
+    # When enabled: keep the highest-scoring non-chair seat per model family; chair
     # (synthesis) seats are never touched. Default (unset/anything but 1) preserves
     # today's roster exactly.
     [[ "${OCTOPUS_COUNCIL_ONE_VOTE_PER_VENDOR:-}" == "1" ]] || return 0
@@ -1243,7 +1244,7 @@ council_dedup_vendor_seats() {
         [ to_entries[] ] as $e
         | ( [ $e[] | select(.value.seat == "chair") ] ) as $chairs
         | ( [ $e[] | select(.value.seat != "chair") ]
-            | group_by(.value.provider_org)
+            | group_by(.value.model_family)
             | map( max_by( .value.score | tonumber? // 0 ) ) ) as $voters
         | ( $chairs + $voters ) | sort_by(.key) | map(.value)
     ' <<< "$COUNCIL_ROSTER_JSON")"
@@ -2207,7 +2208,7 @@ council_synthesis_capable_persona() {
 
 council_run_chair_fallback() {
     local persona provider member_json slug output_path index
-    local seat_org seat_model resp_bytes verdict seat_status seat_rec existing_response dispatch_rc
+    local seat_agent_spec seat_org seat_model seat_model_family resp_bytes verdict seat_status seat_rec existing_response dispatch_rc
     local dispatch_timeout_provenance
 
     while IFS= read -r persona; do
@@ -2254,18 +2255,21 @@ council_run_chair_fallback() {
             # roster, so persist it as an additional seat execution record. Without
             # this, summary.json claims to expose every seat while silently omitting
             # the chair response that actually made synthesis possible.
+            seat_agent_spec="$(jq -r '.agent_spec // .provider // ""' <<< "$member_json")"
             seat_org="$(jq -r '.provider_org // ""' <<< "$member_json")"
             seat_model="$(jq -r '.model // ""' <<< "$member_json")"
+            seat_model_family="$(jq -r '.model_family // ""' <<< "$member_json")"
+            [[ -n "$seat_model_family" ]] || seat_model_family="$(council_model_family "$seat_agent_spec" "$seat_model")"
             resp_bytes="$(wc -c < "$output_path" 2>/dev/null | tr -d '[:space:]')"
             [[ -z "$resp_bytes" ]] && resp_bytes=0
             verdict="$(council_response_verdict "$output_path")"
             seat_status="responded"
             seat_rec="$(jq -cn --argjson idx "$index" --arg persona "$persona" \
-                --arg provider "$provider" --arg org "$seat_org" --arg model "$seat_model" \
+                --arg agent_spec "$seat_agent_spec" --arg provider "$(octo_agent_spec_executor "$provider")" --arg org "$seat_org" --arg model "$seat_model" --arg model_family "$seat_model_family" \
                 --argjson bytes "${resp_bytes:-0}" --arg verdict "$verdict" --arg status "$seat_status" \
                 --arg timeout_provenance "$dispatch_timeout_provenance" \
-                '{index:$idx, persona:$persona, seat:"chair", provider:$provider,
-                  provider_org:$org, model:$model, response_bytes:$bytes,
+                '{index:$idx, persona:$persona, seat:"chair", agent_spec:$agent_spec, provider:$provider,
+                  provider_org:$org, model:$model, model_family:$model_family, response_bytes:$bytes,
                   payload_kind:"full",
                   verdict:(if $verdict=="" then null else $verdict end),
                   status:$status,

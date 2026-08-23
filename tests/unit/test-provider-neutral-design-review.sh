@@ -169,12 +169,20 @@ else
 fi
 
 test_case "review order supports multiple models from one provider with Ox Alpha before Luna"
-order="$(OCTOPUS_COUNCIL_DEFAULT_PROVIDERS='commandcode:stealth/ox-alpha,commandcode:minimaxai/minimax-m3,commandcode:deepseek/deepseek-v4-flash,codex:gpt-5.6-luna,codex:gpt-5.6-sol' bash "$PROJECT_ROOT/scripts/helpers/build-fleet.sh" review-order standard test 2>/dev/null)"
+order="$(OCTOPUS_PROVIDER_CHECKER="$CHECKER" OCTOPUS_COUNCIL_DEFAULT_PROVIDERS='commandcode:stealth/ox-alpha,commandcode:minimaxai/minimax-m3,commandcode:deepseek/deepseek-v4-flash,codex:gpt-5.6-luna,codex:gpt-5.6-sol' bash "$PROJECT_ROOT/scripts/helpers/build-fleet.sh" review-order standard test 2>/dev/null)"
 first_four="$(printf '%s\n' "$order" | sed -n '1,4p')"
 if [[ "$first_four" == $'commandcode:stealth/ox-alpha\ncommandcode:minimaxai/minimax-m3\ncommandcode:deepseek/deepseek-v4-flash\ncodex:gpt-5.6-luna' ]]; then
   test_pass
 else
   test_fail "model-qualified council order mismatch: $(tr '\n' '|' <<< "$order")"
+fi
+
+test_case "wrapped degenerate consultative output is rejected"
+wrapped_bad=$'## UNVERIFIED CONSULTATIVE OUTPUT\n\nThis output came from a disposable workspace. It is advisory and non-deliverable. Claimed file changes, test counts, live probes, or completed implementation are not verified evidence and must not be reported as delivered work.\n\nPROJECT_DOCUMENTATION_PATH: /tmp/repo\n\n## END UNVERIFIED CONSULTATIVE OUTPUT'
+if design_review_approach_valid "$wrapped_bad"; then
+  test_fail "wrapper/disclaimer masked degenerate inner payload"
+else
+  test_pass
 fi
 
 test_summary

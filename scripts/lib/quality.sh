@@ -390,9 +390,23 @@ design_review_candidate_agents() {
 }
 
 design_review_approach_valid() {
-    local approach="${1:-}"
+    local approach="${1:-}" payload
     local compact chars words
-    compact="$(printf '%s' "$approach" | tr '\r\n\t' '   ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+    payload="$approach"
+    if printf '%s\n' "$payload" | grep -Fq '## UNVERIFIED CONSULTATIVE OUTPUT'; then
+        payload="$(printf '%s\n' "$payload" | awk '
+            /^## UNVERIFIED CONSULTATIVE OUTPUT$/ { inside=1; blank_count=0; next }
+            /^## END UNVERIFIED CONSULTATIVE OUTPUT$/ { exit }
+            inside {
+                if (blank_count < 2) {
+                    if ($0 == "") blank_count++
+                    next
+                }
+                print
+            }
+        ')"
+    fi
+    compact="$(printf '%s' "$payload" | tr '\r\n\t' '   ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
     chars=${#compact}
     words="$(printf '%s\n' "$compact" | awk '{print NF}')"
     [[ "$chars" -ge 80 && "$words" -ge 12 ]] || return 1

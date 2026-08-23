@@ -106,7 +106,7 @@ _review_fleet_from_config() {
                     has_diversity=true
                 fi
                 ;;
-            openai-compatible|openai-tools|openai-compatible-agent)
+            openai-compatible|openai-tools|openai-compatible-agent*)
                 if [[ "$has_logic" == "false" ]]; then
                     fleet+="${provider}:implementation-logic-reviewer:correctness and logic bugs, edge cases, regressions"$'\n'
                     has_logic=true

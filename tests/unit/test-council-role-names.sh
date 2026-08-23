@@ -5,7 +5,9 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/../helpers/test-framework.sh"
 test_suite "Council role namespacing"
 
+log() { :; }
 source "$PROJECT_ROOT/scripts/lib/dispatch.sh"
+source "$PROJECT_ROOT/scripts/lib/review.sh"
 
 test_case "design council roles keep legacy persona semantics"
 if [[ "$(octo_persona_role design-feasibility-reviewer)" == implementer ]] && \
@@ -54,6 +56,25 @@ if grep -Fq 'get_agent_model "$atype" "review" "${round1_roles[$idx]}"' "$review
     test_pass
 else
     test_fail "Round 1 finding event still collapses role to generic reviewer"
+fi
+
+test_case "suffixed OpenAI-compatible participants stay in the configured review fleet"
+fleet_home="$TEST_TMP_DIR/openai-compatible-agent-prefix"
+mkdir -p "$fleet_home/.claude-octopus/config"
+cat > "$fleet_home/.claude-octopus/config/providers.json" <<'EOF'
+{
+  "routing": {
+    "features": {
+      "review": ["openai-compatible-agent-custom"]
+    }
+  }
+}
+EOF
+configured_fleet="$(HOME="$fleet_home" _review_fleet_from_config)"
+if grep -Fq 'openai-compatible-agent-custom:implementation-logic-reviewer:' <<< "$configured_fleet"; then
+    test_pass
+else
+    test_fail "suffixed OpenAI-compatible participant was dropped: $configured_fleet"
 fi
 
 test_summary

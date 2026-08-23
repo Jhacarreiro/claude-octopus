@@ -320,4 +320,37 @@ else
   test_fail "synthesis did not degrade cleanly after pool exhaustion: agent=$synth_agent output=$synth_out calls=$(tr '\n' '|' < "$CALLS")"
 fi
 
+
+test_case "wrapper marker quoted in substantive prose is not unwrapped"
+quoted_marker='Recommendation: document the literal marker ## UNVERIFIED CONSULTATIVE OUTPUT as part of the trust-boundary protocol, but preserve this substantive review response and continue validating architecture, retries, diagnostics, and fallback behavior normally.'
+if [[ "$(design_review_unwrap_consultative_output "$quoted_marker")" == "$quoted_marker" ]] && design_review_approach_valid "$quoted_marker"; then
+  test_pass
+else
+  test_fail "marker quoted in prose was misclassified as a wrapper header"
+fi
+
+test_case "synthesis dispatch scopes supervised execution env without leaking to caller"
+RESULTS_DIR="$TMP_HOME/synthesis-env-results"
+export RESULTS_DIR
+mkdir -p "$RESULTS_DIR"
+export OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED='caller-value'
+CALL_ENV="$TMP_HOME/synthesis-env.calls"
+: > "$CALL_ENV"
+design_review_candidate_agents() { printf '%s\n' 'commandcode:stealth/ox-alpha'; }
+run_agent_sync_consultative() {
+  printf '%s\n' "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-unset}" >> "$CALL_ENV"
+  printf '%s\n' 'CONFLICTS: The approaches differ only in sequencing and all preserve the established runtime boundaries.' 'GAPS: Diagnostics and retry behavior need explicit regression coverage across provider failures.' 'RESOLUTION: Keep the existing architecture, validate the bounded diagnostic artifacts, and use the shared fallback pool only after retrying the same synthesizer.'
+}
+synth_out=""; synth_agent=""
+design_review_run_synthesis_with_recovery 'commandcode:stealth/ox-alpha' 'synthesis prompt' 0 \
+  'commandcode:stealth/ox-alpha' synth_out synth_agent
+if [[ "$(head -1 "$CALL_ENV")" == 'design-review-ceremony' ]] && \
+   [[ "$OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED" == 'caller-value' ]] && \
+   [[ -n "$synth_out" ]]; then
+  test_pass
+else
+  test_fail "synthesis env scope leaked or was not applied"
+fi
+unset OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED
+
 test_summary

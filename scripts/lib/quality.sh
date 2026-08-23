@@ -391,7 +391,9 @@ design_review_candidate_agents() {
 
 design_review_unwrap_consultative_output() {
     local payload="${1:-}"
-    if [[ "$payload" == *'## UNVERIFIED CONSULTATIVE OUTPUT'* ]]; then
+    local first_line="${payload%%$'\n'*}"
+    first_line="${first_line%$'\r'}"
+    if [[ "$first_line" == '## UNVERIFIED CONSULTATIVE OUTPUT' ]]; then
         printf '%s\n' "$payload" | awk '
             /^## UNVERIFIED CONSULTATIVE OUTPUT$/ { inside=1; blank_count=0; next }
             /^## END UNVERIFIED CONSULTATIVE OUTPUT$/ { exit }
@@ -568,7 +570,12 @@ design_review_run_synthesis_with_recovery() {
     local output="" candidate="" attempt rc=0 candidates="" tried=" $initial_agent " pass reason
 
     for attempt in 1 2; do
-        output="$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="design-review-ceremony" run_agent_sync_consultative "$initial_agent" "$synthesis_prompt" "$timeout" "synthesizer" "ceremony" 2>/dev/null)" || rc=$?
+        output="$(
+            (
+                export "OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED=design-review-ceremony"
+                run_agent_sync_consultative "$initial_agent" "$synthesis_prompt" "$timeout" "synthesizer" "ceremony"
+            ) 2>/dev/null
+        )" || rc=$?
         if design_review_synthesis_valid "$output"; then
             printf -v "$synthesis_var" '%s' "$output"
             printf -v "$agent_var" '%s' "$initial_agent"
@@ -594,7 +601,12 @@ design_review_run_synthesis_with_recovery() {
             fi
             tried="${tried}${candidate} "
             log WARN "Design review synthesis falling back from $initial_agent to $candidate"
-            output="$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="design-review-ceremony" run_agent_sync_consultative "$candidate" "$synthesis_prompt" "$timeout" "synthesizer" "ceremony" 2>/dev/null)" || rc=$?
+            output="$(
+                (
+                    export "OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED=design-review-ceremony"
+                    run_agent_sync_consultative "$candidate" "$synthesis_prompt" "$timeout" "synthesizer" "ceremony"
+                ) 2>/dev/null
+            )" || rc=$?
             if design_review_synthesis_valid "$output"; then
                 printf -v "$synthesis_var" '%s' "$output"
                 printf -v "$agent_var" '%s' "$candidate"

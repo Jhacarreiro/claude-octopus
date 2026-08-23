@@ -88,4 +88,28 @@ case_b='[{"persona":"strategy-analyst","seat":"chair","agent_spec":"claude-sonne
 run_quorum_case "$case_b"
 if [[ "$COUNCIL_QUORUM_MET" == false && "$COUNCIL_DISTINCT_APPROVING_MODEL_FAMILIES" == 1 && "$COUNCIL_DISTINCT_APPROVING_PROVIDERS" == 2 ]]; then test_pass; else test_fail "same-family quorum mismatch"; fi
 
+
+test_case "model-qualified large-context Codex keeps the large context budget"
+OCTOPUS_CONTEXT_BUDGET=12000
+OCTOPUS_CODEX_CONTEXT_BUDGET=24000
+OCTOPUS_CODEX_LARGE_CONTEXT_BUDGET=77777
+if [[ "$(get_provider_context_limit 'codex-large-context:gpt-5')" == 77777 ]]; then
+  test_pass
+else
+  test_fail "qualified codex-large-context lost its special budget"
+fi
+
+test_case "Council provider status canonicalizes model-qualified provider keys"
+COUNCIL_PROVIDERS='commandcode:stealth/ox-alpha'
+OCTOPUS_COUNCIL_PROVIDER_FIXTURE='commandcode:stealth/ox-alpha:available'
+council_detect_providers
+if [[ "$(jq -r '.commandcode // "missing"' <<< "$COUNCIL_PROVIDER_STATUS_JSON")" == available ]] && \
+   [[ "$(jq -r 'has("commandcode:stealth/ox-alpha")' <<< "$COUNCIL_PROVIDER_STATUS_JSON")" == false ]] && \
+   council_provider_is_available 'commandcode:stealth/ox-alpha'; then
+  test_pass
+else
+  test_fail "provider status map was not canonicalized: $COUNCIL_PROVIDER_STATUS_JSON"
+fi
+unset OCTOPUS_COUNCIL_PROVIDER_FIXTURE
+
 test_summary

@@ -411,7 +411,7 @@ design_review_approach_valid() {
     # case in Bash so lowercase keys work, and recognize POSIX, relative, Windows,
     # and file:// paths without treating ordinary prose containing ':' as metadata.
     local compact_lc
-    compact_lc="${compact,,}"
+    compact_lc="$(printf '%s' "$compact" | tr '[:upper:]' '[:lower:]')"
     if [[ "$compact_lc" =~ ^[[:space:]]*[a-z0-9_\ -]*(path|file|dir|root)[a-z0-9_\ -]*:[[:space:]]*(/|\./|\.\./|[a-z]:[\/]|file://).*$ ]]; then
         return 1
     fi

@@ -407,14 +407,17 @@ design_review_approach_valid() {
         ')"
     fi
     compact="$(printf '%s' "$payload" | tr '\r\n\t' '   ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+    # Reject metadata/path fragments before the general substance gates. Normalize
+    # case in Bash so lowercase keys work, and recognize POSIX, relative, Windows,
+    # and file:// paths without treating ordinary prose containing ':' as metadata.
+    local compact_lc
+    compact_lc="${compact,,}"
+    if [[ "$compact_lc" =~ ^[[:space:]]*[a-z0-9_\ -]*(path|file|dir|root)[a-z0-9_\ -]*:[[:space:]]*(/|\./|\.\./|[a-z]:[\/]|file://).*$ ]]; then
+        return 1
+    fi
     chars=${#compact}
     words="$(printf '%s\n' "$compact" | awk '{print NF}')"
     [[ "$chars" -ge 80 && "$words" -ge 12 ]] || return 1
-    # Reject path/metadata fragments that technically contain text but do not form
-    # a substantive review contribution (the production incident was one of these).
-    if printf '%s\n' "$compact" | grep -Eq '^[A-Z0-9_ -]*(PATH|FILE|DIR|ROOT)[A-Z0-9_ -]*:[[:space:]]*[^.!?]*$'; then
-        return 1
-    fi
     return 0
 }
 

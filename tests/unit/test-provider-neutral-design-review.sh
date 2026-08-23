@@ -203,4 +203,20 @@ else
   test_pass
 fi
 
+test_case "lowercase metadata key with dotted path is rejected"
+lowercase_path='project_documentation_path: /tmp/repo/README.md with additional metadata words that should never count as substantive review content for this seat'
+if design_review_approach_valid "$lowercase_path"; then
+  test_fail "lowercase dotted path metadata passed validation"
+else
+  test_pass
+fi
+
+test_case "ordinary prose containing a colon is not treated as path metadata"
+prose='Recommendation: preserve the existing orchestration contract, validate fallback behavior carefully, and add regression coverage for provider failures before merging the implementation.'
+if design_review_approach_valid "$prose"; then
+  test_pass
+else
+  test_fail "substantive prose with colon was rejected as metadata"
+fi
+
 test_summary

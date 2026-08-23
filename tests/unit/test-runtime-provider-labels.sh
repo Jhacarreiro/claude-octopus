@@ -194,12 +194,12 @@ test_case "design review synthesis events carry stable executor and role identit
 synthesis_dispatch_log="$TEST_TMP_DIR/synthesis-events-dispatch.log"
 synthesis_event_log="$TEST_TMP_DIR/synthesis-events.log"
 run_design_review_dispatch_probe role "$synthesis_dispatch_log" "$synthesis_event_log"
-start_count="$(grep -c '^synthesis.start|' "$synthesis_event_log" || true)"
-end_count="$(grep -c '^synthesis.end|' "$synthesis_event_log" || true)"
-start_line="$(grep -n '^synthesis.start|' "$synthesis_event_log" | cut -d: -f1)"
-end_line="$(grep -n '^synthesis.end|' "$synthesis_event_log" | cut -d: -f1)"
-start_event="$(grep '^synthesis.start|' "$synthesis_event_log")"
-end_event="$(grep '^synthesis.end|' "$synthesis_event_log")"
+start_count="$(grep -Fc 'synthesis.start|' "$synthesis_event_log" || true)"
+end_count="$(grep -Fc 'synthesis.end|' "$synthesis_event_log" || true)"
+start_line="$(grep -Fn 'synthesis.start|' "$synthesis_event_log" | cut -d: -f1)"
+end_line="$(grep -Fn 'synthesis.end|' "$synthesis_event_log" | cut -d: -f1)"
+start_event="$(grep -F 'synthesis.start|' "$synthesis_event_log")"
+end_event="$(grep -F 'synthesis.end|' "$synthesis_event_log")"
 if [[ "$start_count" == 1 ]] &&
    [[ "$end_count" == 1 ]] &&
    [[ "$start_line" =~ ^[0-9]+$ ]] && [[ "$end_line" =~ ^[0-9]+$ ]] &&

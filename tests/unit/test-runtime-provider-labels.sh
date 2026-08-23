@@ -122,6 +122,8 @@ run_design_review_dispatch_probe() {
       export "OCTOPUS_DESIGN_REVIEW_SYNTH_AGENT=legacy-synth"
     fi
     : > "$DISPATCH_LOG"
+    # Probe fake seat aliases without inheriting repository/user allowlist policy.
+    octo_provider_allowed() { return 0; }
     run_agent_sync_consultative() {
       printf "%s|%s|%s\n" "$1" "$4" "$5" >> "$DISPATCH_LOG"
       printf "approach\n"
@@ -139,10 +141,10 @@ run_design_review_dispatch_probe() {
 test_case "design review role overrides win over legacy provider-named overrides at runtime"
 role_log="$TEST_TMP_DIR/role-precedence.log"
 run_design_review_dispatch_probe role "$role_log"
-if grep -q '^role-implementer|implementer|ceremony$' "$role_log" &&
-   grep -q '^role-researcher|researcher|ceremony$' "$role_log" &&
-   grep -q '^role-reviewer|code-reviewer|ceremony$' "$role_log" &&
-   grep -q '^role-synthesizer|synthesizer|ceremony$' "$role_log" &&
+if grep -q '^role-implementer|design-feasibility-reviewer|ceremony$' "$role_log" &&
+   grep -q '^role-researcher|design-research-reviewer|ceremony$' "$role_log" &&
+   grep -q '^role-reviewer|design-code-reviewer|ceremony$' "$role_log" &&
+   grep -q '^role-synthesizer|design-synthesizer|ceremony$' "$role_log" &&
    ! grep -q 'legacy-' "$role_log"; then
   test_pass
 else
@@ -152,10 +154,10 @@ fi
 test_case "legacy provider-named design review overrides remain runtime fallbacks"
 legacy_log="$TEST_TMP_DIR/legacy-fallback.log"
 run_design_review_dispatch_probe legacy "$legacy_log"
-if grep -q '^legacy-codex|implementer|ceremony$' "$legacy_log" &&
-   grep -q '^legacy-agy|researcher|ceremony$' "$legacy_log" &&
-   grep -q '^legacy-claude|code-reviewer|ceremony$' "$legacy_log" &&
-   grep -q '^legacy-synth|synthesizer|ceremony$' "$legacy_log"; then
+if grep -q '^legacy-codex|design-feasibility-reviewer|ceremony$' "$legacy_log" &&
+   grep -q '^legacy-agy|design-research-reviewer|ceremony$' "$legacy_log" &&
+   grep -q '^legacy-claude|design-code-reviewer|ceremony$' "$legacy_log" &&
+   grep -q '^legacy-synth|design-synthesizer|ceremony$' "$legacy_log"; then
   test_pass
 else
   test_fail "legacy provider override did not remain a functional fallback"
@@ -164,8 +166,8 @@ fi
 test_case "legacy GEMINI design review override remains secondary researcher fallback"
 gemini_log="$TEST_TMP_DIR/gemini-fallback.log"
 run_design_review_dispatch_probe gemini "$gemini_log"
-if grep -q '^legacy-gemini|researcher|ceremony$' "$gemini_log" &&
-   ! grep -q '^legacy-agy|researcher|ceremony$' "$gemini_log"; then
+if grep -q '^legacy-gemini|design-research-reviewer|ceremony$' "$gemini_log" &&
+   ! grep -q '^legacy-agy|design-research-reviewer|ceremony$' "$gemini_log"; then
   test_pass
 else
   test_fail "legacy GEMINI override did not remain the secondary researcher fallback"
@@ -178,13 +180,13 @@ if grep -A9 'octo_event_emit "synthesis.start"' "$quality" | grep -q 'executor_a
    grep -A9 'octo_event_emit "synthesis.start"' "$quality" | grep -q 'configured_model=' &&
    grep -A9 'octo_event_emit "synthesis.start"' "$quality" | grep -q 'runtime_provider=' &&
    grep -A9 'octo_event_emit "synthesis.start"' "$quality" | grep -q 'runtime_model=' &&
-   grep -A9 'octo_event_emit "synthesis.start"' "$quality" | grep -q 'role="synthesizer"' &&
+   grep -A9 'octo_event_emit "synthesis.start"' "$quality" | grep -q 'role="design-synthesizer"' &&
    grep -A10 'octo_event_emit "synthesis.end"' "$quality" | grep -q 'executor_alias=' &&
    grep -A10 'octo_event_emit "synthesis.end"' "$quality" | grep -q 'configured_provider=' &&
    grep -A10 'octo_event_emit "synthesis.end"' "$quality" | grep -q 'configured_model=' &&
    grep -A10 'octo_event_emit "synthesis.end"' "$quality" | grep -q 'runtime_provider=' &&
    grep -A10 'octo_event_emit "synthesis.end"' "$quality" | grep -q 'runtime_model=' &&
-   grep -A10 'octo_event_emit "synthesis.end"' "$quality" | grep -q 'role="synthesizer"'; then
+   grep -A10 'octo_event_emit "synthesis.end"' "$quality" | grep -q 'role="design-synthesizer"'; then
   test_pass
 else
   test_fail "design review synthesis events lack stable lifecycle identity fields"

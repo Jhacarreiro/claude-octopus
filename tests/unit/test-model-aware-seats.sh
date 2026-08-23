@@ -15,6 +15,15 @@ if [[ "$(octo_agent_spec_executor 'commandcode:stealth/ox-alpha')" == commandcod
 test_case "agent spec slug is path-safe"
 [[ "$(octo_agent_spec_slug 'commandcode:stealth/ox-alpha')" == commandcode_stealth_ox-alpha ]] && test_pass || test_fail "unexpected slug"
 
+test_case "legacy executor aliases stay intact while provider identity is canonicalized"
+if [[ "$(octo_agent_spec_executor 'codex-standard')" == codex-standard ]] && \
+   [[ "$(octo_agent_spec_provider 'codex-standard')" == codex ]] && \
+   [[ "$(octo_agent_spec_provider 'commandcode:stealth/ox-alpha')" == commandcode ]]; then
+  test_pass
+else
+  test_fail "executor alias and provider identity were conflated"
+fi
+
 test_case "model family distinguishes MiniMax and OpenAI"
 if [[ "$(octo_model_family 'commandcode:minimaxai/minimax-m3')" == minimax ]] && \
    [[ "$(octo_model_family 'codex:gpt-5.6-luna')" == openai ]]; then test_pass; else test_fail "model family mismatch"; fi

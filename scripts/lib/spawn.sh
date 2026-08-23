@@ -36,7 +36,7 @@ _octopus_agent_lifecycle_event() {
     local status="${9:-}"
 
     local provider
-    provider="$(octo_agent_spec_executor "$agent_type")"
+    provider="$(octo_agent_spec_provider "$agent_type")"
     local event_name="agent.${event}"
 
     if declare -f octo_event_emit >/dev/null 2>&1; then
@@ -510,7 +510,7 @@ ${heuristic_ctx}"
 
     # v9.13: Circuit breaker check — skip provider if circuit is open
     local provider_prefix
-    provider_prefix="$(octo_agent_spec_executor "$agent_type")"  # codex-standard → codex; provider:model → provider
+    provider_prefix="$(octo_agent_spec_provider "$agent_type")"  # codex-standard → codex; provider:model → provider
     if type is_provider_available &>/dev/null && ! is_provider_available "$provider_prefix"; then
         log "WARN" "Circuit open for $provider_prefix — skipping $agent_type (use fallback)"
         record_outcome "$provider_prefix" "$agent_type" "skipped" "${phase:-unknown}" "circuit_open" "0" 2>/dev/null || true
@@ -815,7 +815,7 @@ ${heuristic_ctx}"
             local _quota_watcher_pid=""
             local _spawn_pid=$BASHPID
             local _provider_prefix
-            _provider_prefix="$(octo_agent_spec_executor "$agent_type")"
+            _provider_prefix="$(octo_agent_spec_provider "$agent_type")"
             _provider_prefix="$(octo_provider_canonical "$_provider_prefix" 2>/dev/null || printf '%s' "$_provider_prefix")"
             _quota_watcher_pid=$(start_quota_watcher \
                 "$_spawn_pid" \

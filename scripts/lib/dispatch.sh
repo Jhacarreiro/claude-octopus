@@ -509,7 +509,7 @@ get_role_budget_proportion() {
 get_provider_context_limit() {
     local agent_type="${1:-}"
     local provider
-    provider="$(octo_agent_spec_executor "$agent_type")"
+    provider="$(octo_agent_spec_provider "$agent_type")"
     local default_budget="${OCTOPUS_CONTEXT_BUDGET:-12000}"
 
     case "$agent_type" in

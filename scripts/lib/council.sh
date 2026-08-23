@@ -535,13 +535,13 @@ council_check_cost_cap() {
 
 council_provider_command() {
     local provider
-    provider="$(octo_agent_spec_executor "$1")"
+    provider="$(octo_agent_spec_provider "$1")"
     octo_provider_command "$provider" 2>/dev/null || echo "$provider"
 }
 
 council_provider_org() {
     local provider
-    provider="$(octo_agent_spec_executor "$1")"
+    provider="$(octo_agent_spec_provider "$1")"
     octo_provider_org "$provider" 2>/dev/null || echo "$provider"
 }
 
@@ -816,8 +816,19 @@ council_roster_has_provider_org() {
 }
 
 council_roster_has_model_family() {
-    local model_family="$1"
-    jq -e --arg family "$model_family" 'any(.[]; .model_family == $family)' <<< "$COUNCIL_ROSTER_JSON" >/dev/null
+    local model_family="$1" member explicit_family spec model
+    if jq -e --arg family "$model_family" 'any(.[]; (.model_family // "") == $family)' <<< "$COUNCIL_ROSTER_JSON" >/dev/null; then
+        return 0
+    fi
+    while IFS= read -r member; do
+        [[ -n "$member" ]] || continue
+        explicit_family="$(jq -r '.model_family // ""' <<< "$member")"
+        [[ -n "$explicit_family" ]] && continue
+        spec="$(jq -r '.agent_spec // .provider // ""' <<< "$member")"
+        model="$(jq -r '.model // ""' <<< "$member")"
+        [[ "$(council_model_family "$spec" "$model")" == "$model_family" ]] && return 0
+    done < <(jq -c '.[]' <<< "$COUNCIL_ROSTER_JSON")
+    return 1
 }
 
 council_score_roster_entry() {
@@ -884,7 +895,7 @@ council_persona_seat() {
 
 council_provider_is_available() {
     local provider
-    provider="$(octo_agent_spec_executor "$1")"
+    provider="$(octo_agent_spec_provider "$1")"
     local status
     status="$(jq -r --arg provider "$provider" '.[$provider] // "missing"' <<< "$COUNCIL_PROVIDER_STATUS_JSON")"
     [[ "$status" == "available" || "$status" == "host-native" ]]
@@ -931,7 +942,7 @@ council_roster_entry_json() {
 
     preferred_provider="$(council_persona_default_provider "$persona")"
     [[ -n "$provider_spec" ]] || provider_spec="$(council_pick_provider "$preferred_provider")"
-    provider="$(octo_agent_spec_executor "$provider_spec")"
+    provider="$(octo_agent_spec_provider "$provider_spec")"
     explicit_model="$(octo_agent_spec_explicit_model "$provider_spec" 2>/dev/null || true)"
     provider_org="$(council_provider_org "$provider")"
     model="$(council_persona_model "$persona")"
@@ -1570,7 +1581,7 @@ council_live_response() {
     local prompt="$3"
     local dispatch_phase="${4:-}"
     local status_provider
-    status_provider="$(octo_agent_spec_executor "$provider")"
+    status_provider="$(octo_agent_spec_provider "$provider")"
 
     # v9.43: Host-native path — provider IS the active host runtime (e.g. Codex CLI
     # running council from within Codex). Spawning an external subprocess of the same
@@ -1936,7 +1947,7 @@ council_seat_timeout() {
     #   3. OCTOPUS_COUNCIL_AGENT_TIMEOUT        (legacy global env)
     #   4. built-in default
     local provider pvar candidate
-    provider="$(octo_agent_spec_executor "$1")"
+    provider="$(octo_agent_spec_provider "$1")"
     pvar="OCTOPUS_COUNCIL_TIMEOUT_$(printf '%s' "$provider" | tr '[:lower:]-' '[:upper:]_')"
     candidate="${!pvar:-}"
     if [[ "$candidate" =~ ^[1-9][0-9]*$ ]]; then printf '%s' "$candidate"; return 0; fi
@@ -2032,7 +2043,7 @@ council_run_advice_phase() {
         persona="$(jq -r '.persona' <<< "$member")"
         seat="$(jq -r '.seat' <<< "$member")"
         mprovider_spec="$(jq -r '.agent_spec // .provider' <<< "$member")"
-        mprovider="$(octo_agent_spec_executor "$mprovider_spec")"
+        mprovider="$(octo_agent_spec_provider "$mprovider_spec")"
         seat_org="$(jq -r '.provider_org // ""' <<< "$member")"
         seat_model="$(jq -r '.model // ""' <<< "$member")"
         seat_model_family="$(jq -r '.model_family // ""' <<< "$member")"
@@ -2267,7 +2278,7 @@ council_run_chair_fallback() {
             verdict="$(council_response_verdict "$output_path")"
             seat_status="responded"
             seat_rec="$(jq -cn --argjson idx "$index" --arg persona "$persona" \
-                --arg agent_spec "$seat_agent_spec" --arg provider "$(octo_agent_spec_executor "$provider")" --arg org "$seat_org" --arg model "$seat_model" --arg model_family "$seat_model_family" \
+                --arg agent_spec "$seat_agent_spec" --arg provider "$(octo_agent_spec_provider "$provider")" --arg org "$seat_org" --arg model "$seat_model" --arg model_family "$seat_model_family" \
                 --argjson bytes "${resp_bytes:-0}" --arg verdict "$verdict" --arg status "$seat_status" \
                 --arg timeout_provenance "$dispatch_timeout_provenance" \
                 '{index:$idx, persona:$persona, seat:"chair", agent_spec:$agent_spec, provider:$provider,

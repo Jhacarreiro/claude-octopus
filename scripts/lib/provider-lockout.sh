@@ -149,14 +149,17 @@ append_provider_history() {
     fi
 
     local history_rc=0 tmp_file=""
-    {
-        cat >> "$history_file" << HISTEOF
+    if ! cat >> "$history_file" << HISTEOF
 ### ${phase} | ${timestamp}
 **Task:** ${task_brief:0:100}
 **Learned:** ${learned:0:200}
 ---
 HISTEOF
+    then
+        history_rc=$?
+    fi
 
+    if [[ "$history_rc" -eq 0 ]]; then
         # Cap at 50 entries: count entries and trim oldest if exceeded.
         local entry_count
         entry_count=$(grep -c "^### " "$history_file" 2>/dev/null) || entry_count=0
@@ -170,7 +173,7 @@ HISTEOF
                 fi
             fi
         fi
-    } || history_rc=$?
+    fi
 
     [[ -z "$tmp_file" || ! -e "$tmp_file" ]] || rm -f "$tmp_file" 2>/dev/null || true
     provider_history_unlock "$history_file"

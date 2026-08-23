@@ -108,10 +108,14 @@ for pid in $pids; do wait "$pid"; done
 history_file="$WORKSPACE_DIR/.octo/providers/commandcode-history.md"
 entry_count="$(grep -c '^### ' "$history_file" 2>/dev/null || true)"
 leftovers="$(find "$WORKSPACE_DIR/.octo/providers" -maxdepth 1 \( -name 'commandcode-history.md.tmp.*' -o -name 'commandcode-history.md.lock' \) -print)"
-if [[ "$entry_count" == '50' ]] && [[ -z "$leftovers" ]]; then
+missing=""
+for i in $(seq 49 56); do
+    grep -Fq "**Task:** concurrent-$i" "$history_file" || missing="$missing $i"
+done
+if [[ "$entry_count" == '50' ]] && [[ -z "$leftovers" ]] && [[ -z "$missing" ]]; then
     test_pass
 else
-    test_fail "concurrent history transaction was not serialized: entries=$entry_count leftovers=${leftovers:-none}"
+    test_fail "concurrent history transaction was not serialized: entries=$entry_count leftovers=${leftovers:-none} missing=${missing:-none}"
 fi
 
 test_summary

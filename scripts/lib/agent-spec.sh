@@ -50,7 +50,7 @@ octo_model_family() {
 
     case "$executor" in
         codex|codex-*) echo openai ;;
-        claude|claude-*|claude-sdk|claude-sdk-*) echo anthropic ;;
+        claude|claude-*) echo anthropic ;;
         gemini|gemini-*|agy|agy-*|antigravity) echo google ;;
         qwen|qwen-*) echo alibaba ;;
         grok|grok-*|cursor-agent|cursor-agent-*) echo xai ;;

@@ -133,6 +133,8 @@ if [[ "$record_count" -eq 4 && "$line_count" -eq 4 ]] && ! printf '%s\n' "$fleet
   test_pass
 else
   test_fail "multiline prompt escaped fleet record boundaries: records=$record_count lines=$line_count"
+fi
+
 test_case "design review retries the same model before falling back"
 CALLS="$TMP_HOME/retry.calls"
 : > "$CALLS"

@@ -393,7 +393,7 @@ design_review_approach_valid() {
     local approach="${1:-}" payload
     local compact chars words
     payload="$approach"
-    if printf '%s\n' "$payload" | grep -Fq '## UNVERIFIED CONSULTATIVE OUTPUT'; then
+    if [[ "$payload" == *'## UNVERIFIED CONSULTATIVE OUTPUT'* ]]; then
         payload="$(printf '%s\n' "$payload" | awk '
             /^## UNVERIFIED CONSULTATIVE OUTPUT$/ { inside=1; blank_count=0; next }
             /^## END UNVERIFIED CONSULTATIVE OUTPUT$/ { exit }

@@ -1569,6 +1569,8 @@ council_live_response() {
     local persona="$2"
     local prompt="$3"
     local dispatch_phase="${4:-}"
+    local status_provider
+    status_provider="$(octo_agent_spec_executor "$provider")"
 
     # v9.43: Host-native path — provider IS the active host runtime (e.g. Codex CLI
     # running council from within Codex). Spawning an external subprocess of the same
@@ -1579,7 +1581,7 @@ council_live_response() {
     # falls through to its built-in fallback — a placeholder note is not shaped like
     # a valid synthesis and would break downstream gates.
     local _provider_status
-    _provider_status="$(jq -r --arg p "$provider" '.[$p] // "missing"' <<< "$COUNCIL_PROVIDER_STATUS_JSON")"
+    _provider_status="$(jq -r --arg p "$status_provider" '.[$p] // "missing"' <<< "$COUNCIL_PROVIDER_STATUS_JSON")"
     if [[ "$_provider_status" == "host-native" ]]; then
         if [[ "$dispatch_phase" == "chair-synthesis" ]]; then
             return 1
@@ -1600,7 +1602,7 @@ EOF
         return 0
     fi
 
-    if ! council_provider_is_available "$provider"; then
+    if ! council_provider_is_available "$status_provider"; then
         return 1
     fi
 

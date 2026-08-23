@@ -194,9 +194,17 @@ test_case "design review synthesis events carry stable executor and role identit
 synthesis_dispatch_log="$TEST_TMP_DIR/synthesis-events-dispatch.log"
 synthesis_event_log="$TEST_TMP_DIR/synthesis-events.log"
 run_design_review_dispatch_probe role "$synthesis_dispatch_log" "$synthesis_event_log"
-start_event="$(grep '^synthesis.start|' "$synthesis_event_log" | head -1)"
-end_event="$(grep '^synthesis.end|' "$synthesis_event_log" | head -1)"
-if event_has_field "$start_event" "executor_alias=role-synthesizer" &&
+start_count="$(grep -c '^synthesis.start|' "$synthesis_event_log" || true)"
+end_count="$(grep -c '^synthesis.end|' "$synthesis_event_log" || true)"
+start_line="$(grep -n '^synthesis.start|' "$synthesis_event_log" | cut -d: -f1)"
+end_line="$(grep -n '^synthesis.end|' "$synthesis_event_log" | cut -d: -f1)"
+start_event="$(grep '^synthesis.start|' "$synthesis_event_log")"
+end_event="$(grep '^synthesis.end|' "$synthesis_event_log")"
+if [[ "$start_count" == 1 ]] &&
+   [[ "$end_count" == 1 ]] &&
+   [[ "$start_line" =~ ^[0-9]+$ ]] && [[ "$end_line" =~ ^[0-9]+$ ]] &&
+   [[ "$start_line" -lt "$end_line" ]] &&
+   event_has_field "$start_event" "executor_alias=role-synthesizer" &&
    event_has_field "$start_event" "configured_provider=role-synthesizer" &&
    event_has_field "$start_event" "configured_model=test-model" &&
    event_has_field "$start_event" "runtime_provider=unknown" &&

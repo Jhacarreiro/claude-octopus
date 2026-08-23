@@ -59,4 +59,18 @@ else
     test_fail "quality.sh provider history toggle behavior regressed"
 fi
 
+test_case "model-qualified provider history writes to the normalized executor file"
+rm -rf "$WORKSPACE_DIR"
+mkdir -p "$WORKSPACE_DIR" "$RESULTS_DIR"
+source "$PROJECT_ROOT/scripts/lib/provider-lockout.sh"
+unset OCTOPUS_PROVIDER_HISTORY || true
+append_provider_history 'commandcode:stealth/ox-alpha' tangle "task" "model-aware history"
+if [[ -f "$WORKSPACE_DIR/.octo/providers/commandcode-history.md" ]] && \
+   [[ ! -e "$WORKSPACE_DIR/.octo/providers/commandcode:stealth/ox-alpha-history.md" ]] && \
+   grep -Fq 'model-aware history' "$WORKSPACE_DIR/.octo/providers/commandcode-history.md"; then
+    test_pass
+else
+    test_fail "model-qualified provider history was not normalized to commandcode-history.md"
+fi
+
 test_summary

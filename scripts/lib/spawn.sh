@@ -1017,7 +1017,7 @@ ${heuristic_ctx}"
                 # v8.18.0: Record provider learning
                 local result_summary
                 result_summary=$(head -c 200 "$result_file" 2>/dev/null | tr '\n' ' ')
-                append_provider_history "$agent_type" "${phase:-unknown}" "${enhanced_prompt:0:100}" "$result_summary" 2>/dev/null || true
+                append_provider_history "$provider_prefix" "${phase:-unknown}" "${enhanced_prompt:0:100}" "$result_summary" 2>/dev/null || true
                 # v8.20.0: Record outcome for provider intelligence
                 record_outcome "$agent_type" "$agent_type" "${task_type:-unknown}" "${phase:-unknown}" "success" "$elapsed_ms" 2>/dev/null || true
                 # v9.13: Reset circuit breaker on success

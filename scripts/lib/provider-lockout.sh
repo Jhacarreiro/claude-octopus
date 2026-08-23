@@ -101,7 +101,8 @@ append_provider_history() {
         off|false|0|no) return 0 ;;
     esac
 
-    local provider="$1"
+    local provider
+    provider="$(octo_agent_spec_executor "$1")"
     local phase="$2"
     local task_brief="$3"
     local learned="$4"

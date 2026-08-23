@@ -94,7 +94,7 @@ run_agent_sync_consultative() {
 design_review_ceremony "test" >/dev/null
 roles="$(cut -d'|' -f2 "$CAPTURE" | tr '\n' '|')"
 providers="$(cut -d'|' -f1 "$CAPTURE" | tr '\n' '|')"
-expected_calls=$'claude-sonnet|implementer|ceremony\ncodex|researcher|ceremony\ncommandcode|code-reviewer|ceremony\nclaude-sonnet|synthesizer|ceremony'
+expected_calls=$'claude-sonnet|design-feasibility-reviewer|ceremony\ncodex|design-research-reviewer|ceremony\ncommandcode|design-code-reviewer|ceremony\nclaude-sonnet|design-synthesizer|ceremony'
 if [[ "$(<"$CAPTURE")" == "$expected_calls" ]]; then
   test_pass
 else
@@ -149,7 +149,7 @@ run_agent_sync_consultative() {
   fi
 }
 retry_out=""; retry_agent=""
-design_review_run_seat_with_recovery 'commandcode:minimaxai/minimax-m3' 'code-reviewer' 'prompt' 0   'commandcode:minimaxai/minimax-m3 codex:gpt-5.6-luna' retry_out retry_agent
+design_review_run_seat_with_recovery 'commandcode:minimaxai/minimax-m3' 'design-code-reviewer' 'prompt' 0   'commandcode:minimaxai/minimax-m3 codex:gpt-5.6-luna' retry_out retry_agent
 if [[ "$retry_agent" == 'commandcode:minimaxai/minimax-m3' ]] && [[ "$(wc -l < "$CALLS" | tr -d ' ')" == "2" ]]; then
   test_pass
 else
@@ -172,7 +172,7 @@ run_agent_sync_consultative() {
   esac
 }
 fallback_out=""; fallback_agent=""
-design_review_run_seat_with_recovery 'commandcode:minimaxai/minimax-m3' 'code-reviewer' 'prompt' 0   'commandcode:minimaxai/minimax-m3 codex:gpt-5.6-luna' fallback_out fallback_agent
+design_review_run_seat_with_recovery 'commandcode:minimaxai/minimax-m3' 'design-code-reviewer' 'prompt' 0   'commandcode:minimaxai/minimax-m3 codex:gpt-5.6-luna' fallback_out fallback_agent
 if [[ "$fallback_agent" == 'commandcode:stealth/ox-alpha' ]] &&    [[ "$(sed -n '3p' "$CALLS")" == 'commandcode:stealth/ox-alpha' ]]; then
   test_pass
 else
@@ -228,8 +228,8 @@ export RESULTS_DIR
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 large_invalid="$(printf 'X%.0s' {1..20000})"
-design_review_write_invalid_diagnostic "seat" "code-reviewer" "commandcode:stealth/ox-alpha" "1" "0" "too_few_words" "$large_invalid"
-diag_file="$(find "$RESULTS_DIR/design-review-diagnostics" -type f -name 'seat-code-reviewer-*.json' | head -1)"
+design_review_write_invalid_diagnostic "seat" "design-code-reviewer" "commandcode:stealth/ox-alpha" "1" "0" "too_few_words" "$large_invalid"
+diag_file="$(find "$RESULTS_DIR/design-review-diagnostics" -type f -name 'seat-design-code-reviewer-*.json' | head -1)"
 if [[ -n "$diag_file" ]] && \
    [[ "$(jq -r '.agent_spec' "$diag_file")" == 'commandcode:stealth/ox-alpha' ]] && \
    [[ "$(jq -r '.validation_failure' "$diag_file")" == 'too_few_words' ]] && \
@@ -263,7 +263,7 @@ design_review_run_synthesis_with_recovery 'commandcode:minimaxai/minimax-m3' 'sy
 if [[ "$synth_agent" == 'commandcode:minimaxai/minimax-m3' ]] && \
    [[ "$(wc -l < "$CALLS" | tr -d ' ')" == '2' ]] && \
    [[ "$synth_out" == *'RESOLUTION:'* ]] && \
-   find "$RESULTS_DIR/design-review-diagnostics" -type f -name 'synthesis-synthesizer-*.json' | grep -q .; then
+   find "$RESULTS_DIR/design-review-diagnostics" -type f -name 'synthesis-design-synthesizer-*.json' | grep -q .; then
   test_pass
 else
   test_fail "same-model synthesis retry did not recover: agent=$synth_agent calls=$(tr '\n' '|' < "$CALLS")"
@@ -354,5 +354,37 @@ else
   test_fail "synthesis env scope leaked or was not applied"
 fi
 unset OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED
+
+
+test_case "design council roles do not inherit execution-role model routes"
+cat >"$TMP_HOME/.claude-octopus/config/providers.json" <<'EOF'
+{
+  "version":"3.0",
+  "providers": {
+    "codex": {"default":"gpt-5.6-sol"},
+    "commandcode": {"default":"deepseek/deepseek-v4-flash"},
+    "claude": {"default":"claude-sonnet-5"}
+  },
+  "routing": {
+    "phases": {},
+    "roles": {
+      "implementer": {"provider":"commandcode","model":"deepseek/deepseek-v4-flash"},
+      "researcher": {"provider":"commandcode","model":"minimaxai/minimax-m3"},
+      "code-reviewer": {"provider":"commandcode","model":"deepseek/deepseek-v4-pro"},
+      "synthesizer": {"provider":"commandcode","model":"deepseek/deepseek-v4-pro"}
+    }
+  },
+  "tiers":{},
+  "overrides":{}
+}
+EOF
+source "$PROJECT_ROOT/scripts/lib/model-resolver.sh"
+if [[ "$(resolve_octopus_model commandcode commandcode ceremony design-feasibility-reviewer)" == "deepseek/deepseek-v4-flash" ]] && \
+   [[ "$(resolve_octopus_model commandcode commandcode ceremony design-research-reviewer)" == "deepseek/deepseek-v4-flash" ]] && \
+   [[ "$(resolve_octopus_model commandcode commandcode ceremony design-code-reviewer)" == "deepseek/deepseek-v4-flash" ]]; then
+  test_pass
+else
+  test_fail "namespaced design roles inherited execution-role routing"
+fi
 
 test_summary

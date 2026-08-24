@@ -93,12 +93,12 @@ run_agent_sync_consultative() {
 }
 design_review_ceremony "test" >/dev/null
 roles="$(cut -d'|' -f2 "$CAPTURE" | tr '\n' '|')"
-providers="$(cut -d'|' -f1 "$CAPTURE" | tr '\n' '|')"
-expected_calls=$'claude-sonnet|implementer|ceremony\ncodex|researcher|ceremony\ncommandcode|code-reviewer|ceremony\nclaude-sonnet|synthesizer|ceremony'
+captured_providers="$(cut -d'|' -f1 "$CAPTURE" | tr '\n' '|')"
+expected_calls=$'claude-sonnet|design-feasibility-reviewer|ceremony\ncodex|design-research-reviewer|ceremony\ncommandcode|design-code-reviewer|ceremony\nclaude-sonnet|design-synthesizer|ceremony'
 if [[ "$(<"$CAPTURE")" == "$expected_calls" ]]; then
   test_pass
 else
-  test_fail "expected exact provider/role ceremony sequence; roles=$roles providers=$providers calls=$(tr '\n' ';' < "$CAPTURE")"
+  test_fail "expected exact provider/role ceremony sequence; roles=$roles providers=$captured_providers calls=$(tr '\n' ';' < "$CAPTURE")"
 fi
 
 test_case "explicit design-review override cannot bypass the provider allowlist"
@@ -252,7 +252,7 @@ design_review_run_synthesis_with_recovery 'commandcode:minimaxai/minimax-m3' 'sy
 if [[ "$synth_agent" == 'commandcode:minimaxai/minimax-m3' ]] && \
    [[ "$(wc -l < "$CALLS" | tr -d ' ')" == '2' ]] && \
    [[ "$synth_out" == *'RESOLUTION:'* ]] && \
-   find "$RESULTS_DIR/design-review-diagnostics" -type f -name 'synthesis-synthesizer-*.json' | grep -q .; then
+   find "$RESULTS_DIR/design-review-diagnostics" -type f -name 'synthesis-design-synthesizer-*.json' | grep -q .; then
   test_pass
 else
   test_fail "same-model synthesis retry did not recover: agent=$synth_agent calls=$(tr '\n' '|' < "$CALLS")"
@@ -343,5 +343,47 @@ else
   test_fail "synthesis env scope leaked or was not applied"
 fi
 unset OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED
+
+test_case "design council roles do not inherit execution-role model routes"
+cat >"$TMP_HOME/.claude-octopus/config/providers.json" <<'EOF'
+{
+  "version":"3.0",
+  "providers": {
+    "codex": {"default":"gpt-5.6-sol"},
+    "commandcode": {"default":"deepseek/deepseek-v4-flash"},
+    "claude": {"default":"claude-sonnet-5"}
+  },
+  "routing": {
+    "phases": {},
+    "roles": {
+      "implementer": {"provider":"commandcode","model":"deepseek/deepseek-v4-flash"},
+      "researcher": {"provider":"commandcode","model":"minimaxai/minimax-m3"},
+      "code-reviewer": {"provider":"commandcode","model":"deepseek/deepseek-v4-pro"},
+      "synthesizer": {"provider":"commandcode","model":"deepseek/deepseek-v4-pro"}
+    }
+  },
+  "tiers":{},
+  "overrides":{}
+}
+EOF
+source "$PROJECT_ROOT/scripts/lib/model-resolver.sh"
+if [[ "$(resolve_octopus_model commandcode commandcode ceremony design-feasibility-reviewer)" == "deepseek/deepseek-v4-flash" ]] && \
+   [[ "$(resolve_octopus_model commandcode commandcode ceremony design-research-reviewer)" == "deepseek/deepseek-v4-flash" ]] && \
+   [[ "$(resolve_octopus_model commandcode commandcode ceremony design-code-reviewer)" == "deepseek/deepseek-v4-flash" ]]; then
+  test_pass
+else
+  test_fail "namespaced design roles inherited execution-role routing"
+fi
+
+test_case "build-fleet keeps multiline prompts in one record per provider"
+multiline_prompt=$'line one\r\nPROJECT_DOCUMENTATION_PATH:\r/data/example\nline four'
+fleet_output="$(bash "$PROJECT_ROOT/scripts/helpers/build-fleet.sh" review standard "$multiline_prompt" 2>/dev/null)"
+record_count="$(printf '%s\n' "$fleet_output" | grep -c '|')"
+line_count="$(printf '%s\n' "$fleet_output" | wc -l | tr -d ' ')"
+if [[ "$record_count" -eq 4 && "$line_count" -eq 4 ]] && ! printf '%s\n' "$fleet_output" | grep -q '^PROJECT_DOCUMENTATION_PATH:$' && ! printf '%s' "$fleet_output" | grep -q $'\r'; then
+  test_pass
+else
+  test_fail "multiline prompt escaped fleet record boundaries: records=$record_count lines=$line_count"
+fi
 
 test_summary

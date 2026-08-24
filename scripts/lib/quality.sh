@@ -573,7 +573,7 @@ design_review_run_synthesis_with_recovery() {
         output="$(
             (
                 export "OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED=design-review-ceremony"
-                run_agent_sync_consultative "$initial_agent" "$synthesis_prompt" "$timeout" "synthesizer" "ceremony"
+                run_agent_sync_consultative "$initial_agent" "$synthesis_prompt" "$timeout" "design-synthesizer" "ceremony"
             ) 2>/dev/null
         )" || rc=$?
         if design_review_synthesis_valid "$output"; then
@@ -583,7 +583,7 @@ design_review_run_synthesis_with_recovery() {
             return 0
         fi
         reason="$(design_review_synthesis_validation_reason "$output")"
-        design_review_write_invalid_diagnostic "synthesis" "synthesizer" "$initial_agent" "$attempt" "$rc" "$reason" "$output"
+        design_review_write_invalid_diagnostic "synthesis" "design-synthesizer" "$initial_agent" "$attempt" "$rc" "$reason" "$output"
         log WARN "Design review synthesis returned invalid output from $initial_agent (attempt $attempt/2, rc=$rc, bytes=${#output}, reason=$reason)"
         rc=0
     done
@@ -604,7 +604,7 @@ design_review_run_synthesis_with_recovery() {
             output="$(
                 (
                     export "OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED=design-review-ceremony"
-                    run_agent_sync_consultative "$candidate" "$synthesis_prompt" "$timeout" "synthesizer" "ceremony"
+                    run_agent_sync_consultative "$candidate" "$synthesis_prompt" "$timeout" "design-synthesizer" "ceremony"
                 ) 2>/dev/null
             )" || rc=$?
             if design_review_synthesis_valid "$output"; then
@@ -614,7 +614,7 @@ design_review_run_synthesis_with_recovery() {
                 return 0
             fi
             reason="$(design_review_synthesis_validation_reason "$output")"
-            design_review_write_invalid_diagnostic "synthesis-fallback" "synthesizer" "$candidate" "fallback" "$rc" "$reason" "$output"
+            design_review_write_invalid_diagnostic "synthesis-fallback" "design-synthesizer" "$candidate" "fallback" "$rc" "$reason" "$output"
             log WARN "Design review synthesis fallback '$candidate' returned invalid output (rc=$rc, bytes=${#output}, reason=$reason)"
             rc=0
         done <<EOF
@@ -706,29 +706,29 @@ Be concise and specific. This is a planning exercise, not implementation."
     [[ "$design_synth_timeout" != "0" ]] && _synth_timeout_label="${design_synth_timeout}s"
 
     local seat_1_label seat_2_label seat_3_label synthesis_label
-    seat_1_label="$(octo_provider_identity_label "$design_implementer_agent" "implementer")"
-    seat_2_label="$(octo_provider_identity_label "$design_researcher_agent" "researcher")"
-    seat_3_label="$(octo_provider_identity_label "$design_code_reviewer_agent" "code-reviewer")"
-    synthesis_label="$(octo_provider_identity_label "$design_synthesizer_agent" "synthesizer")"
+    seat_1_label="$(octo_provider_identity_label "$design_implementer_agent" "design-feasibility-reviewer")"
+    seat_2_label="$(octo_provider_identity_label "$design_researcher_agent" "design-research-reviewer")"
+    seat_3_label="$(octo_provider_identity_label "$design_code_reviewer_agent" "design-code-reviewer")"
+    synthesis_label="$(octo_provider_identity_label "$design_synthesizer_agent" "design-synthesizer")"
 
     log INFO "Design review: gathering role approaches..."
     log INFO "Design review seats: seat_1=${seat_1_label}, seat_2=${seat_2_label}, seat_3=${seat_3_label}, synthesis=${synthesis_label}, timeout=${_design_timeout_label}, synth_timeout=${_synth_timeout_label}"
 
     local design_reserved
     design_reserved="$design_implementer_agent $design_researcher_agent $design_code_reviewer_agent $design_synthesizer_agent"
-    design_review_run_seat_with_recovery "$design_implementer_agent" "implementer" "$ceremony_prompt" "$design_timeout" \
+    design_review_run_seat_with_recovery "$design_implementer_agent" "design-feasibility-reviewer" "$ceremony_prompt" "$design_timeout" \
         "$design_reserved" seat_1_approach design_implementer_agent
     design_reserved="$design_implementer_agent $design_researcher_agent $design_code_reviewer_agent $design_synthesizer_agent"
-    design_review_run_seat_with_recovery "$design_researcher_agent" "researcher" "$ceremony_prompt" "$design_timeout" \
+    design_review_run_seat_with_recovery "$design_researcher_agent" "design-research-reviewer" "$ceremony_prompt" "$design_timeout" \
         "$design_reserved" seat_2_approach design_researcher_agent
     design_reserved="$design_implementer_agent $design_researcher_agent $design_code_reviewer_agent $design_synthesizer_agent"
-    design_review_run_seat_with_recovery "$design_code_reviewer_agent" "code-reviewer" "$ceremony_prompt" "$design_timeout" \
+    design_review_run_seat_with_recovery "$design_code_reviewer_agent" "design-code-reviewer" "$ceremony_prompt" "$design_timeout" \
         "$design_reserved" seat_3_approach design_code_reviewer_agent
 
     # Labels must reflect the effective seat after any recovery/fallback.
-    seat_1_label="$(octo_provider_identity_label "$design_implementer_agent" "implementer")"
-    seat_2_label="$(octo_provider_identity_label "$design_researcher_agent" "researcher")"
-    seat_3_label="$(octo_provider_identity_label "$design_code_reviewer_agent" "code-reviewer")"
+    seat_1_label="$(octo_provider_identity_label "$design_implementer_agent" "design-feasibility-reviewer")"
+    seat_2_label="$(octo_provider_identity_label "$design_researcher_agent" "design-research-reviewer")"
+    seat_3_label="$(octo_provider_identity_label "$design_code_reviewer_agent" "design-code-reviewer")"
     log INFO "Design review effective seats: seat_1=${seat_1_label}, seat_2=${seat_2_label}, seat_3=${seat_3_label}"
 
     # Synthesize conflicts and resolution.
@@ -742,8 +742,8 @@ Be concise and specific. This is a planning exercise, not implementation."
             provider="$design_synthesizer_agent" provider_label_kind="legacy-alias" \
             executor_alias="$design_synthesizer_agent" \
             configured_provider="$(octo_provider_identity_from_agent_type "$design_synthesizer_agent")" \
-            configured_model="$(get_agent_model "$design_synthesizer_agent" "ceremony" "synthesizer" 2>/dev/null || echo unresolved)" \
-            runtime_provider="unknown" runtime_model="unknown" role="synthesizer" inputs="3" || true
+            configured_model="$(get_agent_model "$design_synthesizer_agent" "ceremony" "design-synthesizer" 2>/dev/null || echo unresolved)" \
+            runtime_provider="unknown" runtime_model="unknown" role="design-synthesizer" inputs="3" || true
     fi
 
     local synthesis="" synthesis_prompt
@@ -771,8 +771,7 @@ Be brief and actionable."
     design_reserved="$design_implementer_agent $design_researcher_agent $design_code_reviewer_agent $design_synthesizer_agent"
     design_review_run_synthesis_with_recovery "$design_synthesizer_agent" "$synthesis_prompt" "$design_synth_timeout" \
         "$design_reserved" synthesis design_synthesizer_agent
-    synthesis_label="$(octo_provider_identity_label "$design_synthesizer_agent" "synthesizer")"
-
+    synthesis_label="$(octo_provider_identity_label "$design_synthesizer_agent" "design-synthesizer")"
 
     if declare -f octo_event_emit >/dev/null 2>&1; then
         local _synth_now _synth_elapsed="unknown"
@@ -783,8 +782,8 @@ Be brief and actionable."
             provider="$design_synthesizer_agent" provider_label_kind="legacy-alias" \
             executor_alias="$design_synthesizer_agent" \
             configured_provider="$(octo_provider_identity_from_agent_type "$design_synthesizer_agent")" \
-            configured_model="$(get_agent_model "$design_synthesizer_agent" "ceremony" "synthesizer" 2>/dev/null || echo unresolved)" \
-            runtime_provider="unknown" runtime_model="unknown" role="synthesizer" \
+            configured_model="$(get_agent_model "$design_synthesizer_agent" "ceremony" "design-synthesizer" 2>/dev/null || echo unresolved)" \
+            runtime_provider="unknown" runtime_model="unknown" role="design-synthesizer" \
             status="$([[ -n "$synthesis" ]] && echo produced || echo degraded)" \
             bytes="${#synthesis}" elapsed_s="$_synth_elapsed" || true
     fi

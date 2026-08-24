@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 _provider_lockout_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${_provider_lockout_dir}/agent-spec.sh" 2>/dev/null || true
+_provider_lockout_agent_spec_ready=false
+if source "${_provider_lockout_dir}/agent-spec.sh" 2>/dev/null \
+    && declare -F octo_agent_spec_provider >/dev/null 2>&1 \
+    && declare -F octo_agent_spec_slug >/dev/null 2>&1; then
+    _provider_lockout_agent_spec_ready=true
+fi
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/provider-lockout.sh — single owner of the provider lockout + history protocol
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -95,8 +100,9 @@ reset_provider_lockouts() {
 
 provider_history_file_key() {
     local provider key
-    provider="$(octo_agent_spec_provider "${1:-unknown}")"
-    key="$(octo_agent_spec_slug "$provider")"
+    [[ "${_provider_lockout_agent_spec_ready:-false}" == true ]] || return 127
+    provider="$(octo_agent_spec_provider "${1:-unknown}")" || return $?
+    key="$(octo_agent_spec_slug "$provider")" || return $?
     case "$key" in
         ""|.|..) key="unknown" ;;
     esac
@@ -126,8 +132,9 @@ append_provider_history() {
     esac
 
     local provider history_key
-    provider="$(octo_agent_spec_provider "$1")"
-    history_key="$(provider_history_file_key "$provider")"
+    [[ "${_provider_lockout_agent_spec_ready:-false}" == true ]] || return 127
+    provider="$(octo_agent_spec_provider "$1")" || return $?
+    history_key="$(provider_history_file_key "$provider")" || return $?
     local phase="$2"
     local task_brief="$3"
     local learned="$4"
@@ -149,13 +156,15 @@ append_provider_history() {
     fi
 
     local history_rc=0 tmp_file=""
-    if ! cat >> "$history_file" << HISTEOF
+    if cat >> "$history_file" << HISTEOF
 ### ${phase} | ${timestamp}
 **Task:** ${task_brief:0:100}
 **Learned:** ${learned:0:200}
 ---
 HISTEOF
     then
+        :
+    else
         history_rc=$?
     fi
 
@@ -192,8 +201,9 @@ read_provider_history() {
     esac
 
     local provider history_key
-    provider="$(octo_agent_spec_provider "$1")"
-    history_key="$(provider_history_file_key "$provider")"
+    [[ "${_provider_lockout_agent_spec_ready:-false}" == true ]] || return 127
+    provider="$(octo_agent_spec_provider "$1")" || return $?
+    history_key="$(provider_history_file_key "$provider")" || return $?
     local history_file="${WORKSPACE_DIR}/.octo/providers/${history_key}-history.md"
 
     if [[ -f "$history_file" ]]; then
@@ -204,7 +214,8 @@ read_provider_history() {
 build_provider_context() {
     local agent_type="$1"
     local base_provider
-    base_provider="$(octo_agent_spec_provider "$agent_type")"  # codex-fast -> codex; provider:model -> provider
+    [[ "${_provider_lockout_agent_spec_ready:-false}" == true ]] || return 127
+    base_provider="$(octo_agent_spec_provider "$agent_type")" || return $?  # codex-fast -> codex; provider:model -> provider
     local history
     history=$(read_provider_history "$base_provider")
 

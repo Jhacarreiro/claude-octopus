@@ -477,7 +477,8 @@ Focus on:
                 local domain_file="$audit_dir/$domain.md"
                 local agent_type="agy"
                 local task_id="audit-${domain}-${audit_group}"
-                local agent_result_file="${RESULTS_DIR}/$(octo_agent_spec_slug "$agent_type")-${task_id}.md"
+                local agent_result_file
+                agent_result_file="${RESULTS_DIR}/$(octo_agent_spec_slug "$agent_type")-${task_id}.md"
                 domain_files+=("$domain_file")
                 agent_result_files+=("$agent_result_file")
 

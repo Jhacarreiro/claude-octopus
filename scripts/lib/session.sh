@@ -247,7 +247,8 @@ display_rich_progress() {
             local task_id="probe-${task_group}-${i}"
             local agent_type="${agent_types[$i]}"
             local agent_name="${agent_names[$i]}"
-            local result_file="${RESULTS_DIR}/$(octo_agent_spec_slug "$agent_type")-${task_id}.md"
+            local result_file
+            result_file="${RESULTS_DIR}/$(octo_agent_spec_slug "$agent_type")-${task_id}.md"
             local pid="${pids[$i]}"
 
             # Check if agent is still running

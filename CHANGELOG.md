@@ -56,6 +56,11 @@
 
 ### Fixed
 
+- Contextual code review now accepts explicit `provider:model` overrides for
+  logic, security, architecture, CVE research, diversity, verification, debate,
+  and synthesis seats. Seat overrides remain allowlist-gated, preserve the
+  global `OCTOPUS_REVIEW_SINGLE_PROVIDER` precedence, and support CommandCode
+  providers without falling back to hardcoded Codex/Claude executors.
 - Migrate legacy generated `codex-mini` pins such as `gpt-5-codex-mini` to
   `gpt-5.6-luna`, preventing quick workflows from selecting a model that is
   unsupported for ChatGPT-authenticated Codex CLI sessions. Agent help now

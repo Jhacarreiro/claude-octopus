@@ -170,15 +170,96 @@ review_single_provider_override() {
     printf '%s\n' "$provider"
 }
 
-review_phase_provider() {
-    local default_provider="$1"
-    local override=""
-    if [[ -n "${OCTOPUS_REVIEW_SINGLE_PROVIDER:-}" ]]; then
-        override="$(review_single_provider_override)" || return $?
-        printf '%s\n' "$override"
-    else
-        printf '%s\n' "$default_provider"
+review_seat_override_env_name() {
+    case "${1:-}" in
+        implementation-logic-reviewer) echo "OCTOPUS_REVIEW_LOGIC_AGENT" ;;
+        implementation-security-reviewer) echo "OCTOPUS_REVIEW_SECURITY_AGENT" ;;
+        implementation-architecture-reviewer) echo "OCTOPUS_REVIEW_ARCHITECTURE_AGENT" ;;
+        implementation-cve-reviewer) echo "OCTOPUS_REVIEW_CVE_AGENT" ;;
+        implementation-diversity-reviewer) echo "OCTOPUS_REVIEW_DIVERSITY_AGENT" ;;
+        implementation-verifier) echo "OCTOPUS_REVIEW_VERIFIER_AGENT" ;;
+        implementation-debater) echo "OCTOPUS_REVIEW_DEBATER_AGENT" ;;
+        implementation-synthesizer) echo "OCTOPUS_REVIEW_SYNTHESIZER_AGENT" ;;
+        *) return 1 ;;
+    esac
+}
+
+review_seat_specialty() {
+    case "${1:-}" in
+        implementation-logic-reviewer) echo "correctness and logic bugs, edge cases, regressions" ;;
+        implementation-security-reviewer) echo "OWASP vulnerabilities, injection, auth flaws, data exposure" ;;
+        implementation-architecture-reviewer) echo "architecture, integration, API contracts, breaking changes" ;;
+        implementation-cve-reviewer) echo "known CVEs, library advisories, live web search" ;;
+        implementation-diversity-reviewer) echo "cross-family perspective on logic, missed assumptions, and training-data divergence" ;;
+        *) return 1 ;;
+    esac
+}
+
+review_seat_agent_override() {
+    local role="${1:-}" env_name="" agent=""
+    env_name="$(review_seat_override_env_name "$role" 2>/dev/null || true)"
+    [[ -n "$env_name" ]] || return 1
+    agent="${!env_name:-}"
+    [[ -n "$agent" ]] || return 1
+
+    if ! declare -f octo_provider_allowed >/dev/null 2>&1 || ! octo_provider_allowed "$agent"; then
+        log ERROR "Review seat override ${env_name}='${agent}' is not admitted by the active allowlist"
+        return 2
     fi
+
+    printf '%s\n' "$agent"
+}
+
+review_agent_for_seat() {
+    local default_agent="$1"
+    local role="${2:-}"
+    local override="" rc=0
+
+    if [[ -n "${OCTOPUS_REVIEW_SINGLE_PROVIDER:-}" ]]; then
+        review_single_provider_override
+        return $?
+    fi
+
+    override="$(review_seat_agent_override "$role")" || rc=$?
+    case "$rc" in
+        0) printf '%s\n' "$override" ;;
+        1) printf '%s\n' "$default_agent" ;;
+        *) return "$rc" ;;
+    esac
+}
+
+review_fleet_with_override_seats() {
+    local fleet="${1:-}"
+    local role="" env_name="" override="" executor="" specialty="" rc=0
+    local roles=(
+        implementation-logic-reviewer
+        implementation-security-reviewer
+        implementation-architecture-reviewer
+        implementation-cve-reviewer
+        implementation-diversity-reviewer
+    )
+
+    for role in "${roles[@]}"; do
+        env_name="$(review_seat_override_env_name "$role")" || continue
+        [[ -n "${!env_name:-}" ]] || continue
+
+        rc=0
+        override="$(review_seat_agent_override "$role")" || rc=$?
+        [[ "$rc" -eq 0 ]] || return "$rc"
+
+        if ! grep -Fq ":${role}:" <<< "$fleet"; then
+            executor="$(octo_agent_spec_executor "$override")"
+            specialty="$(review_seat_specialty "$role")"
+            fleet+="${executor}:${role}:${specialty}"$'\n'
+        fi
+    done
+
+    printf '%s' "$fleet"
+}
+
+# Backward-compatible wrapper for callers/tests that only choose a phase provider.
+review_phase_provider() {
+    review_agent_for_seat "$1" "${2:-}"
 }
 
 build_review_fleet() {
@@ -197,8 +278,8 @@ build_review_fleet() {
     # v9.31.0: honor wizard-configured participants if present
     fleet=$(_review_fleet_from_config)
     if [[ -n "$fleet" ]]; then
-        echo "$fleet"
-        return 0
+        review_fleet_with_override_seats "$fleet"
+        return $?
     fi
 
     # ── Cascade fallback (original behavior — no config or empty config) ──
@@ -246,7 +327,7 @@ build_review_fleet() {
         log WARN "CVE lookup: no dedicated web-search provider, using Claude WebSearch (degraded)"
     fi
 
-    echo "$fleet"
+    review_fleet_with_override_seats "$fleet"
 }
 
 review_file_mtime_epoch() {
@@ -604,6 +685,7 @@ review_provider_key_from_agent_type() {
         claude*) echo "claude" ;;
         copilot*) echo "copilot" ;;
         codex*) echo "codex" ;;
+        commandcode*) echo "commandcode" ;;
         agy*|antigravity|gemini*) echo "agy" ;;
         perplexity*) echo "perplexity" ;;
         *) printf '%s\n' "${1%%[-_]*}" ;;
@@ -949,8 +1031,8 @@ print_provider_report() {
     fi
 
     # Determine status per provider
-    local codex_status="not used" agy_status="not used" claude_status="not used" perplexity_status="not used" compatible_status="not used" copilot_status="not used"
-    local codex_detail="" agy_detail="" claude_detail="" perplexity_detail="" compatible_detail="" copilot_detail=""
+    local codex_status="not used" agy_status="not used" claude_status="not used" perplexity_status="not used" compatible_status="not used" copilot_status="not used" commandcode_status="not used"
+    local codex_detail="" agy_detail="" claude_detail="" perplexity_detail="" compatible_detail="" copilot_detail="" commandcode_detail=""
     local had_fallback=false
 
     while IFS='|' read -r provider status detail; do
@@ -1012,6 +1094,19 @@ print_provider_report() {
                     had_fallback=true
                 fi
                 ;;
+            commandcode)
+                if [[ "$status" == "ok" ]]; then
+                    commandcode_status="✓ OK"
+                elif [[ "$status" == "fallback" ]]; then
+                    commandcode_status="✗ FALLBACK"
+                    commandcode_detail="$detail"
+                    had_fallback=true
+                elif [[ "$status" == "auth-failed" ]]; then
+                    commandcode_status="✗ AUTH FAILED"
+                    commandcode_detail="$detail"
+                    had_fallback=true
+                fi
+                ;;
             copilot)
                 if [[ "$status" == "ok" ]]; then
                     copilot_status="✓ OK"
@@ -1045,6 +1140,8 @@ print_provider_report() {
     [[ -n "$compatible_detail" ]] && printf "│    → %-38.38s│\n" "$compatible_detail"
     printf "│ 🟡 Copilot:     %-27s│\n" "$copilot_status"
     [[ -n "$copilot_detail" ]] && printf "│    → %-38.38s│\n" "$copilot_detail"
+    printf "│ 🟠 CommandCode: %-27s│\n" "$commandcode_status"
+    [[ -n "$commandcode_detail" ]] && printf "│    → %-38.38s│\n" "$commandcode_detail"
     if [[ "$had_fallback" == "true" ]]; then
         echo "│                                             │"
         echo "│ ⚠ Some providers failed — run octopus doctor│"
@@ -1363,6 +1460,7 @@ CRITICAL OUTPUT FORMAT: Return ONLY a valid JSON object. No markdown, no prose, 
     fleet_dispatch_begin
     while IFS=: read -r agent_type role specialty; do
         [[ -z "$agent_type" ]] && continue
+        agent_type="$(review_agent_for_seat "$agent_type" "$role")" || return 1
         local task_id="review-r1-${role}-${timestamp}"
         # Use spawn_agent's actual output path convention: ${RESULTS_DIR}/$(octo_agent_spec_slug "$agent_type")-${task_id}.md
         local result_file
@@ -1575,10 +1673,10 @@ $(echo "$all_findings" | jq -c '.')
 Return ONLY valid JSON with 'findings' array including verdict field."
 
     local verified_findings verifier_provider verifier_provider_key
-    verifier_provider="$(review_phase_provider "codex")" || return 1
+    verifier_provider="$(review_phase_provider "codex" "implementation-verifier")" || return 1
     verifier_provider_key="$(review_provider_key_from_agent_type "$verifier_provider")"
-    if [[ -n "${OCTOPUS_REVIEW_SINGLE_PROVIDER:-}" ]]; then
-        verified_findings=$(review_run_agent_sync_progress "$verifier_provider" "$verifier_prompt" "implementation-verifier" "review" "verifier-${verifier_provider}") && {
+    if [[ -n "${OCTOPUS_REVIEW_SINGLE_PROVIDER:-}" || -n "${OCTOPUS_REVIEW_VERIFIER_AGENT:-}" ]]; then
+        verified_findings=$(review_run_agent_sync_progress "$verifier_provider" "$verifier_prompt" "implementation-verifier" "review" "verifier-$(octo_agent_spec_slug "$verifier_provider")") && {
             echo "${verifier_provider_key}|ok|Round 2 verification" >> "$provider_status_file"
         } || {
             log WARN "review_run: ${verifier_provider} verification failed, using all findings as confirmed"
@@ -1636,9 +1734,9 @@ Return ONLY valid JSON with 'findings' array including verdict field."
 Findings: $(echo "$debate_candidates" | jq -c '.')
 Return JSON: {\"include\": [...finding titles...], \"exclude\": [...finding titles...]}"
             local debate_result debate_provider debate_provider_key
-            debate_provider="$(review_phase_provider "codex")" || return 1
+            debate_provider="$(review_phase_provider "codex" "implementation-debater")" || return 1
             debate_provider_key="$(review_provider_key_from_agent_type "$debate_provider")"
-            debate_result=$(review_run_agent_sync_progress "$debate_provider" "$debate_prompt" "implementation-debater" "review" "debate-${debate_provider}") && {
+            debate_result=$(review_run_agent_sync_progress "$debate_provider" "$debate_prompt" "implementation-debater" "review" "debate-$(octo_agent_spec_slug "$debate_provider")") && {
                 echo "${debate_provider_key}|ok|Round 3 debate" >> "$provider_status_file"
             } || {
                 log WARN "review_run: ${debate_provider} debate agent failed, including all contested findings"
@@ -1670,9 +1768,9 @@ Findings: $(echo "$confirmed_findings" | jq -c '.')
 Return ONLY JSON: {\"findings\": [...ranked, deduplicated findings...]}"
 
     local final_json synth_ok="true" synthesis_provider synthesis_provider_key
-    synthesis_provider="$(review_phase_provider "claude-sonnet")" || return 1
+    synthesis_provider="$(review_phase_provider "claude-sonnet" "implementation-synthesizer")" || return 1
     synthesis_provider_key="$(review_provider_key_from_agent_type "$synthesis_provider")"
-    final_json=$(review_run_agent_sync_progress "$synthesis_provider" "$synthesis_prompt" "implementation-synthesizer" "review" "synthesis-${synthesis_provider}") || {
+    final_json=$(review_run_agent_sync_progress "$synthesis_provider" "$synthesis_prompt" "implementation-synthesizer" "review" "synthesis-$(octo_agent_spec_slug "$synthesis_provider")") || {
         synth_ok="false"
         log WARN "review_run: ${synthesis_provider} synthesis failed, using confirmed findings sorted as-is"
         echo "${synthesis_provider_key}|fallback|Round 3 synthesis failed; using local deterministic fallback" >> "$provider_status_file"

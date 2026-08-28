@@ -75,9 +75,12 @@ run_agent_sync() {
             printf '%s\n' '1. [CODING] Create requested application — Reads: scripts/lib/ — Creates: web/package.json, web/src/main.tsx — Task: Materialize the requested externally observable application.'
             ;;
         tangle-decomposition-reconsideration)
-            counter_next "$RECONSIDER_COUNT_FILE" >/dev/null
+            local reconsider_n
+            reconsider_n=$(counter_next "$RECONSIDER_COUNT_FILE")
             printf '%s' "$prompt" > "$RECONSIDER_PROMPT_FILE"
-            if [[ "$scenario" == "planner-reject" ]]; then
+            if [[ "$scenario" == "reconsider-fallback" && "$reconsider_n" -eq 1 ]]; then
+                printf '%s\n' "I'll ground-check the reviewer claims before deciding."
+            elif [[ "$scenario" == "planner-reject" ]]; then
                 cat <<'EOF'
 DECISIONS:
 - REJECT MOVE_TO_READS: package.json — package.json must be modified to add the build/start scripts required by the requested app.
@@ -101,7 +104,7 @@ EOF
                 second-fail)
                     printf '%s\n' 'VERDICT: FAIL' 'REASONS: scopes still cannot materialize the requested deliverable' 'SCOPE_REVIEW:' '- MOVE_TO_READS: scripts/lib/workflows.sh — context only'
                     ;;
-                adequacy-repair)
+                adequacy-repair|reconsider-fallback)
                     if [[ "$n" -eq 1 ]]; then
                         printf '%s\n' 'VERDICT: FAIL' 'REASONS: existing workflow file is context-only and the app artifact is missing' 'SCOPE_REVIEW:' '- MOVE_TO_READS: scripts/lib/workflows.sh — context only; create the app in a new tree'
                     else
@@ -202,6 +205,14 @@ if [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]] && [[ "$(cat "$RECONSIDER_COUNT_F
     test_pass
 else
     test_fail "planner rejection was not preserved as advisory adjudication for second review"
+fi
+
+test_case "unusable planner reconsideration retries once with fallback before spawn"
+run_case "reconsider-fallback"
+if [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]] && [[ "$(cat "$RECONSIDER_COUNT_FILE")" -eq 2 ]] && [[ -s "$SPAWN_FILE" ]] && grep -q 'fallback planner' "$LOG_FILE" && grep -q 'STRICT RETRY' "$RECONSIDER_PROMPT_FILE"; then
+    test_pass
+else
+    test_fail "unusable planner success did not trigger one structured fallback retry"
 fi
 
 test_case "second semantic FAIL aborts before implementation spawn"

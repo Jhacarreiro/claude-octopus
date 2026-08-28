@@ -1600,6 +1600,16 @@ ${subtasks}
     OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-adequacy" run_agent_sync "$primary" "$prompt" 0 "architect" "tangle" ||     OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-adequacy" run_agent_sync "$fallback" "$prompt" 0 "architect" "tangle"
 }
 
+tangle_reconsideration_response_valid() {
+    local response="$1"
+    local decisions subtasks
+    decisions=$(tangle_reconsideration_decisions "$response")
+    subtasks=$(tangle_reconsideration_subtasks "$response")
+    [[ -n "$decisions" && -n "$subtasks" ]] || return 1
+    [[ $(tangle_parseable_subtask_count "$subtasks") -gt 0 ]] || return 1
+    [[ $(tangle_parseable_coding_subtask_count "$subtasks") -gt 0 ]] || return 1
+}
+
 tangle_reconsider_decomposition() {
     local original_task="$1"
     local previous_decomposition="$2"
@@ -1642,12 +1652,35 @@ ${previous_decomposition}
 Independent review:
 ${adequacy_review}
 "
-    local primary="agy" fallback="codex"
+    local primary="agy" fallback="codex" response=""
     if declare -f octopus_agent_override >/dev/null 2>&1; then
         primary=$(octopus_execution_profile_provider "tangle" "decompose" "researcher" "agy")
         fallback=$(octopus_execution_profile_provider "tangle" "decompose_fallback" "implementer" "codex")
     fi
-    OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-reconsideration" run_agent_sync "$primary" "$prompt" 0 "researcher" "tangle" ||     OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-reconsideration" run_agent_sync "$fallback" "$prompt" 0 "researcher" "tangle"
+
+    if response=$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-reconsideration" run_agent_sync "$primary" "$prompt" 0 "researcher" "tangle"); then
+        if tangle_reconsideration_response_valid "$response"; then
+            printf '%s\n' "$response"
+            return 0
+        fi
+        log WARN "Planner reconsideration returned success but no usable DECISIONS+DECOMPOSITION; retrying once with fallback planner"
+    else
+        log WARN "Planner reconsideration primary provider failed; retrying once with fallback planner"
+    fi
+
+    local retry_prompt="${prompt}
+
+STRICT RETRY: the prior planner attempt was unusable. Do not inspect, narrate, explain intent, or announce tool use. Start the first output line with exactly 'DECISIONS:' and include a 'DECOMPOSITION:' section with numbered subtasks."
+    response=""
+    if response=$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-reconsideration" run_agent_sync "$fallback" "$retry_prompt" 0 "researcher" "tangle"); then
+        if tangle_reconsideration_response_valid "$response"; then
+            printf '%s\n' "$response"
+            return 0
+        fi
+    fi
+
+    log ERROR "Planner reconsideration fallback also returned no usable DECISIONS+DECOMPOSITION"
+    return 1
 }
 
 tangle_reconsideration_decisions() {

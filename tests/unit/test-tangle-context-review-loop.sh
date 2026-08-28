@@ -34,6 +34,25 @@ make_test_dir() {
     printf '%s\n' "$dir"
 }
 
+test_case "review warning does not fabricate an actionable blocker"
+warning_only="$TEST_TMP_DIR/review-warning-only.json"
+printf '%s\n' '{"findings":[],"warning":"Round 1 was partial"}' > "$warning_only"
+if [[ "$(tangle_review_blocking_count "$warning_only")" == "0" ]] &&
+   [[ "$(tangle_review_warning_text "$warning_only")" == "Round 1 was partial" ]]; then
+    test_pass
+else
+    test_fail "warning-only review must remain blocking through review_rc without becoming severity=normal"
+fi
+
+test_case "review warning preserves the count of real actionable blockers"
+warning_with_blocker="$TEST_TMP_DIR/review-warning-with-blocker.json"
+printf '%s\n' '{"findings":[{"severity":"normal","title":"real blocker"}],"warning":"Round 1 was partial"}' > "$warning_with_blocker"
+if [[ "$(tangle_review_blocking_count "$warning_with_blocker")" == "1" ]]; then
+    test_pass
+else
+    test_fail "warning must not alter the number of severity=normal findings"
+fi
+
 assert_contains "$WORKFLOWS" "tangle_build_develop_review_context" "tangle builds review context"
 assert_contains "$WORKFLOWS" "tangle_run_context_code_review" "tangle runs contextual code review"
 assert_contains "$WORKFLOWS" "contextFile" "review profile passes contextFile"

@@ -1948,12 +1948,6 @@ tangle_review_warning_text() {
 tangle_review_blocking_count() {
     local findings_file="$1"
     [[ -f "$findings_file" ]] || { echo 0; return 0; }
-    local review_warning
-    review_warning=$(tangle_review_warning_text "$findings_file")
-    if [[ -n "$review_warning" ]]; then
-        echo 1
-        return 0
-    fi
     local count
     if ! count=$(jq '[.findings[]? | select((.severity // "") == "normal")] | length' "$findings_file" 2>/dev/null); then
         # fail closed: malformed/truncated findings must block delivery.

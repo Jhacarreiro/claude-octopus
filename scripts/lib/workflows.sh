@@ -3763,7 +3763,7 @@ Every [CODING] line must include at least one same-line Files: or Creates: claus
     log INFO "Step 3: Validation gate..."
     local validation_file="${RESULTS_DIR:-${HOME}/.claude-octopus/results}/tangle-validation-${task_group}.md"
     local validation_rc=0
-    validate_tangle_results "$task_group" "$resolved_prompt" "$worktree_before_file" || validation_rc=$?
+    tangle_validate_results_with_scope_contract "$task_group" "$resolved_prompt" "$worktree_before_file" "$subtasks" || validation_rc=$?
 
     if ! tangle_should_attempt_contextual_review "$validation_rc" "$worktree_before_state_file"; then
         log ERROR "Tangle validation failed with status ${validation_rc}; no recoverable worktree progress detected, stopping before contextual review and corrections"
@@ -3782,6 +3782,141 @@ Every [CODING] line must include at least one same-line Files: or Creates: claus
 # A normal validation pass always continues to the existing review path. A failed
 # validation only enters recovery when Tangle produced new worktree changes since
 # its pre-run snapshot; otherwise preserve the historical fail-fast behavior.
+tangle_authorized_write_scopes() {
+    local subtasks="$1"
+    local line subtask
+
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        tangle_line_is_numbered_subtask "$line" || continue
+        [[ "$line" =~ \[CODING\] ]] || continue
+        subtask=$(printf '%s\n' "$line" | sed -E 's/^[[:space:]]*(\*\*)?[0-9]+[\.\)][[:space:]]*//; s/^[[:space:]]+//; s/\[CODING\][[:space:]]*//')
+        tangle_extract_write_scopes "$subtask"
+    done <<< "$subtasks" | sed '/^$/d' | sort -u
+}
+
+tangle_authorized_read_scopes() {
+    local subtasks="$1"
+    local line subtask
+
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        tangle_line_is_numbered_subtask "$line" || continue
+        [[ "$line" =~ \[CODING\] ]] || continue
+        subtask=$(printf '%s\n' "$line" | sed -E 's/^[[:space:]]*(\*\*)?[0-9]+[\.\)][[:space:]]*//; s/^[[:space:]]+//; s/\[CODING\][[:space:]]*//')
+        tangle_extract_read_scopes "$subtask"
+    done <<< "$subtasks" | sed '/^$/d' | sort -u
+}
+
+tangle_changed_paths_outside_write_scopes() {
+    local subtasks="$1"
+    local worktree_before_file="$2"
+    local authorized_scopes changed_paths path scope matched
+
+    authorized_scopes=$(tangle_authorized_write_scopes "$subtasks")
+    changed_paths=$(check_tangle_worktree_changes "$worktree_before_file")
+
+    while IFS= read -r path; do
+        [[ -n "$path" ]] || continue
+        matched=false
+        while IFS= read -r scope; do
+            [[ -n "$scope" ]] || continue
+            if tangle_scopes_overlap "$scope" "$path"; then
+                matched=true
+                break
+            fi
+        done <<< "$authorized_scopes"
+        if [[ "$matched" != "true" ]]; then
+            printf '%s\n' "$path"
+        fi
+    done <<< "$changed_paths" | sed '/^$/d' | sort -u
+}
+
+tangle_validate_results_with_scope_contract() {
+    local task_group="$1"
+    local original_prompt="$2"
+    local worktree_before_file="$3"
+    local subtasks="$4"
+    local validation_file="${RESULTS_DIR:-${HOME}/.claude-octopus/results}/tangle-validation-${task_group}.md"
+    local base_rc=0 violations="" authorized="" read_only=""
+
+    # Preserve all existing quality-gate behavior first. The deterministic scope
+    # contract is an additional hard gate over the actual worktree delta.
+    validate_tangle_results "$task_group" "$original_prompt" "$worktree_before_file" || base_rc=$?
+
+    authorized=$(tangle_authorized_write_scopes "$subtasks")
+    read_only=$(tangle_authorized_read_scopes "$subtasks")
+    violations=$(tangle_changed_paths_outside_write_scopes "$subtasks" "$worktree_before_file")
+
+    {
+        echo ""
+        echo "### Write Scope Contract"
+        echo "Authorized write scopes (Files:/Creates:):"
+        if [[ -n "$authorized" ]]; then
+            printf '%s\n' "$authorized" | sed '/^$/d; s/^/- /'
+        else
+            echo "- <none>"
+        fi
+        echo ""
+        echo "Declared read-only scopes (Reads:):"
+        if [[ -n "$read_only" ]]; then
+            printf '%s\n' "$read_only" | sed '/^$/d; s/^/- /'
+        else
+            echo "- <none>"
+        fi
+        echo ""
+        if [[ -n "$violations" ]]; then
+            echo "#### FAILED: Out-of-Scope Worktree Changes"
+            echo "The following changed paths are outside every authorized Files:/Creates: scope. Reads: never grants write permission."
+            printf '%s\n' "$violations" | sed '/^$/d; s/^/- /'
+        else
+            echo "PASS: every changed path produced by this Tangle run is inside an authorized Files:/Creates: scope."
+        fi
+    } >> "$validation_file"
+
+    TANGLE_SCOPE_CONTRACT_VIOLATIONS="$violations"
+    export TANGLE_SCOPE_CONTRACT_VIOLATIONS
+
+    if [[ -n "$violations" ]]; then
+        log ERROR "Tangle write-scope contract violated by changed path(s): $(printf '%s' "$violations" | tr '\n' ' ')"
+        return 1
+    fi
+    return "$base_rc"
+}
+
+tangle_ensure_scope_contract_finding() {
+    local findings_file="$1"
+    local violations="${2:-${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}}"
+    [[ -n "$violations" ]] || return 0
+    [[ -n "$findings_file" ]] || return 1
+
+    local first_path detail tmp
+    first_path=$(printf '%s\n' "$violations" | sed '/^$/d' | head -n 1)
+    detail="Implementation changed paths outside the final authorized Files:/Creates: write scopes. Reads: is context only and never grants write permission. Revert or relocate these writes inside the authorized contract; do not silently widen scope: $(printf '%s' "$violations" | tr '\n' ' ')"
+    tmp=$(mktemp "${TMPDIR:-/tmp}/octo-scope-findings.XXXXXX") || return 1
+
+    if [[ -f "$findings_file" ]] && jq -e '.findings | type == "array"' "$findings_file" >/dev/null 2>&1; then
+        if jq -e '.findings[]? | select(.category == "scope-contract")' "$findings_file" >/dev/null 2>&1; then
+            rm -f "$tmp"
+            return 0
+        fi
+        if ! jq --arg file "${first_path:-<scope-contract>}" --arg detail "$detail" \
+            '.findings += [{file:$file,line:1,severity:"normal",category:"scope-contract",title:"Implementation changed paths outside authorized write scope",detail:$detail,confidence:1,verdict:"confirmed"}]' \
+            "$findings_file" > "$tmp"; then
+            rm -f "$tmp"
+            return 1
+        fi
+    else
+        if ! jq -n --arg file "${first_path:-<scope-contract>}" --arg detail "$detail" \
+            '{findings:[{file:$file,line:1,severity:"normal",category:"scope-contract",title:"Implementation changed paths outside authorized write scope",detail:$detail,confidence:1,verdict:"confirmed"}]}' > "$tmp"; then
+            rm -f "$tmp"
+            return 1
+        fi
+    fi
+    mv "$tmp" "$findings_file"
+    log WARN "Injected deterministic scope-contract finding for out-of-scope worktree changes"
+}
+
 tangle_should_attempt_contextual_review() {
     local validation_rc="${1:-0}"
     local worktree_before_state_file="${2:-}"
@@ -3828,6 +3963,7 @@ tangle_contextual_review_gate() {
     local review_rc=0
     tangle_run_context_code_review "$task_group" "$review_context_file" "initial" || review_rc=$?
     local findings_file="$TANGLE_REVIEW_FINDINGS_FILE"
+    tangle_ensure_scope_contract_finding "$findings_file" "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" || return 1
     local normal_count
     normal_count=$(tangle_review_blocking_count "$findings_file")
 
@@ -3904,12 +4040,13 @@ tangle_contextual_review_gate() {
         OCTOPUS_TANGLE_VALIDATION_CORRECTION_ROUND="$correction_round" \
         OCTOPUS_TANGLE_VALIDATION_CORRECTION_STATUS="${TANGLE_CORRECTION_STATUS:-}" \
         OCTOPUS_TANGLE_VALIDATION_CORRECTION_CHANGED="${TANGLE_CORRECTION_CHANGED:-0}" \
-            validate_tangle_results "$task_group" "$resolved_prompt" "$worktree_before_file" || validation_rc=$?
+            tangle_validate_results_with_scope_contract "$task_group" "$resolved_prompt" "$worktree_before_file" "$subtasks" || validation_rc=$?
 
         review_context_file=$(tangle_build_develop_review_context "$task_group" "$resolved_prompt" "$context" "$subtasks" "$validation_file" "$worktree_before_file" "correction-${correction_round}")
         review_rc=0
         tangle_run_context_code_review "$task_group" "$review_context_file" "correction-${correction_round}" || review_rc=$?
         findings_file="$TANGLE_REVIEW_FINDINGS_FILE"
+        tangle_ensure_scope_contract_finding "$findings_file" "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" || return 1
         normal_count=$(tangle_review_blocking_count "$findings_file")
         local current_signature
         current_signature=$(tangle_findings_signature "$findings_file")

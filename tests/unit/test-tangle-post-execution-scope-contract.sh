@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT_SRC="$(cd "$SCRIPT_DIR/../.." && pwd)"
+source "$SCRIPT_DIR/../helpers/test-framework.sh"
+source "$PROJECT_ROOT_SRC/scripts/lib/testing.sh"
+source "$PROJECT_ROOT_SRC/scripts/lib/workflows.sh"
+
+test_suite "tangle post-execution write scope contract"
+
+TMP_ROOT=$(mktemp -d)
+TMP_REPO="$TMP_ROOT/repo"
+TMP_RESULTS="$TMP_ROOT/results"
+trap 'rm -rf "$TMP_ROOT"' EXIT
+mkdir -p "$TMP_REPO/src" "$TMP_RESULTS"
+git -C "$TMP_REPO" init -q
+git -C "$TMP_REPO" config user.email test@example.com
+git -C "$TMP_REPO" config user.name Test
+printf '%s\n' 'export const baseline = true;' > "$TMP_REPO/src/existing.ts"
+printf '%s\n' '{"name":"fixture"}' > "$TMP_REPO/package.json"
+git -C "$TMP_REPO" add src/existing.ts package.json
+git -C "$TMP_REPO" commit -qm baseline
+
+PROJECT_ROOT="$TMP_REPO"
+RESULTS_DIR="$TMP_RESULTS"
+export PROJECT_ROOT RESULTS_DIR
+BEFORE="$RESULTS_DIR/before.txt"
+snapshot_tangle_worktree_paths > "$BEFORE" || true
+
+SUBTASKS='1. [CODING] Build UI — Reads: src/existing.ts — Files: package.json — Creates: web/ — Task: build the new UI without modifying the read-only source module.'
+
+mkdir -p "$TMP_REPO/web/js"
+printf '%s\n' 'console.log("ok")' > "$TMP_REPO/web/js/app.js"
+printf '%s\n' '{"name":"fixture","scripts":{"build":"true"}}' > "$TMP_REPO/package.json"
+printf '%s\n' 'export const baseline = false;' > "$TMP_REPO/src/existing.ts"
+
+test_case "Reads paths are excluded from authorized write scopes"
+write_scopes=$(tangle_authorized_write_scopes "$SUBTASKS")
+read_scopes=$(tangle_authorized_read_scopes "$SUBTASKS")
+if [[ "$write_scopes" == *"package.json"* ]] && [[ "$write_scopes" == *"web"* ]] && [[ "$write_scopes" != *"src/existing.ts"* ]] && [[ "$read_scopes" == "src/existing.ts" ]]; then
+    test_pass
+else
+    test_fail "unexpected scope extraction: writes=[$write_scopes] reads=[$read_scopes]"
+fi
+
+test_case "post-execution scope check flags writes to Reads paths"
+violations=$(tangle_changed_paths_outside_write_scopes "$SUBTASKS" "$BEFORE")
+if [[ "$violations" == "src/existing.ts" ]]; then
+    test_pass
+else
+    test_fail "expected only src/existing.ts violation; got: $violations"
+fi
+
+test_case "nested Creates and exact Files paths remain authorized"
+if [[ "$violations" != *"web/js/app.js"* ]] && [[ "$violations" != *"package.json"* ]]; then
+    test_pass
+else
+    test_fail "authorized paths were incorrectly reported: $violations"
+fi
+
+# Isolate the wrapper from the existing quality gate; this suite specifically
+# verifies the additive deterministic scope contract.
+validate_tangle_results() {
+    local task_group="$1"
+    printf '%s\n' '# baseline validation' > "$RESULTS_DIR/tangle-validation-${task_group}.md"
+    return 0
+}
+log() { :; }
+
+test_case "validation wrapper fails and records out-of-scope changed paths"
+status=0
+tangle_validate_results_with_scope_contract fixture 'Build UI' "$BEFORE" "$SUBTASKS" || status=$?
+report="$RESULTS_DIR/tangle-validation-fixture.md"
+if [[ "$status" -ne 0 ]] && grep -q 'FAILED: Out-of-Scope Worktree Changes' "$report" && grep -q -- '- src/existing.ts' "$report" && grep -q 'Reads: never grants write permission' "$report"; then
+    test_pass
+else
+    test_fail "scope violation did not hard-fail validation/report"
+fi
+
+test_case "scope violation is surfaced as one deterministic blocking finding"
+findings="$TMP_ROOT/findings.json"
+printf '%s\n' '{"findings":[]}' > "$findings"
+tangle_ensure_scope_contract_finding "$findings" "$violations"
+tangle_ensure_scope_contract_finding "$findings" "$violations"
+count=$(jq '[.findings[] | select(.category == "scope-contract" and .severity == "normal" and .verdict == "confirmed")] | length' "$findings")
+file=$(jq -r '.findings[] | select(.category == "scope-contract") | .file' "$findings")
+if [[ "$count" -eq 1 ]] && [[ "$file" == "src/existing.ts" ]]; then
+    test_pass
+else
+    test_fail "expected one deterministic scope-contract finding; count=$count file=$file"
+fi
+
+test_case "validation wrapper passes after illegal write is reverted"
+git -C "$TMP_REPO" checkout -- src/existing.ts
+status=0
+tangle_validate_results_with_scope_contract repaired 'Build UI' "$BEFORE" "$SUBTASKS" || status=$?
+report="$RESULTS_DIR/tangle-validation-repaired.md"
+if [[ "$status" -eq 0 ]] && grep -q 'PASS: every changed path' "$report" && [[ -z "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" ]]; then
+    test_pass
+else
+    test_fail "scope contract did not clear after reverting illegal write"
+fi
+
+test_summary

@@ -9,6 +9,7 @@
   and synthesis seats. Seat overrides remain allowlist-gated, preserve the
   global `OCTOPUS_REVIEW_SINGLE_PROVIDER` precedence, and support CommandCode
   providers without falling back to hardcoded Codex/Claude executors.
+- Keep contextual review warnings fatal without fabricating a severity=normal blocker. Warning-only or partial-review results with zero actionable findings now stop cleanly instead of entering no-op correction loops, while warnings with real normal findings still allow bounded correction attempts.
 - Migrate legacy generated `codex-mini` pins such as `gpt-5-codex-mini` to
   `gpt-5.6-luna`, preventing quick workflows from selecting a model that is
   unsupported for ChatGPT-authenticated Codex CLI sessions. Agent help now

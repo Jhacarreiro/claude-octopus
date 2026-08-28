@@ -54,6 +54,10 @@ fleet_dispatch_begin() { :; }
 fleet_dispatch_end() { :; }
 validate_tangle_results() { :; }
 run_agent_sync() {
+    if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
+        printf '%s\n' 'VERDICT: PASS' 'REASONS: fixture decomposition is adequate'
+        return 0
+    fi
     printf '%s\n' "1. [CODING] failed marker task. Files: scripts/lib/workflows.sh"
 }
 spawn_agent_capture_pid() {

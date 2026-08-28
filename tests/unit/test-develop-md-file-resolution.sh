@@ -105,6 +105,10 @@ reset_provider_lockouts() { :; }
 fleet_dispatch_begin() { :; }
 fleet_dispatch_end() { :; }
 run_agent_sync() {
+    if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
+        printf '%s\n' 'VERDICT: PASS' 'REASONS: fixture decomposition is adequate'
+        return 0
+    fi
     printf '%s' "$2" > "$DECOMPOSE_CAPTURE_FILE"
     printf '%s\n' "1. [CODING] Validate resolved plan context. Files: scripts/lib/workflows.sh"
 }
@@ -225,6 +229,10 @@ log() {
     printf '%s %s\n' "${1:-}" "${2:-}" >> "$LOG_CAPTURE_FILE"
 }
 run_agent_sync() {
+    if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
+        printf '%s\n' 'VERDICT: PASS' 'REASONS: stalled fixture decomposition is adequate'
+        return 0
+    fi
     printf '%s\n' "1. [CODING] stalled implementation. Files: scripts/lib/workflows.sh"
 }
 spawn_agent_capture_pid() {

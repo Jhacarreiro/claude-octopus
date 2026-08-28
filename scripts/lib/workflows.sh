@@ -1198,7 +1198,7 @@ Execution instructions:
 - Treat the original task as authoritative for requirements, explicit file targets, acceptance criteria, and forbidden changes.
 - Complete the assigned subtask without dropping original constraints that apply to it.
 - For [CODING] work, edit the repository files directly in the current worktree. Do not only describe a plan or paste code snippets.
-- For [CODING] work, treat file paths/directories named in the assigned subtask as approximate exclusive write scope intent. Use the resolved repository context files above as the concrete targets. Do not edit files clearly owned by another subtask; report a blocker if the required change crosses scopes.
+- For [CODING] work, treat paths in Files: as approximate exclusive write scope intent for existing/anchored paths, and paths in Creates: as explicit exclusive scope for new artifacts. Use resolved repository context for Files: targets, but preserve intentional Creates: paths. Do not edit files clearly owned by another subtask; report a blocker if the required change crosses scopes.
 - If the subtask creates a new exported component, command, event type, route, hook, or helper, wire it into at least one production call site unless the original task explicitly asks for an isolated artifact.
 - Tests alone are not integration evidence. User-facing features must be reachable from the relevant user flow or the subtask must report a blocker.
 Migration safety:
@@ -1208,21 +1208,54 @@ ${migration_safety}
 EOF
 }
 
-tangle_extract_write_scopes() {
+tangle_raw_scope_clause() {
     local text="$1"
-    local files_text
+    local clause="$2"
+    local clause_text
 
-    files_text=$(printf '%s\n' "$text" | sed -nE 's/.*Files:[[:space:]]*//p' | head -n 1)
-    files_text=$(printf '%s\n' "$files_text" | sed -E 's/[[:space:]]+[—-][[:space:]]+Task:.*$//; s/[[:space:]]+Task:.*$//')
-    [[ -n "$files_text" ]] || return 0
+    clause_text=$(printf '%s\n' "$text" | sed -nE "s/.*${clause}:[[:space:]]*//p" | head -n 1)
+    printf '%s\n' "$clause_text" | sed -E 's/[[:space:]]+[—-][[:space:]]+(Files|Creates|Task):.*$//; s/[[:space:]]+(Files|Creates|Task):.*$//'
+}
 
-    printf '%s\n' "$files_text" \
+tangle_scope_clause_has_parenthetical_prose() {
+    local text="$1"
+    local clause="$2"
+    local clause_text
+    clause_text=$(tangle_raw_scope_clause "$text" "$clause")
+    [[ "$clause_text" == *"("* || "$clause_text" == *")"* ]]
+}
+
+tangle_extract_scope_clause() {
+    local text="$1"
+    local clause="$2"
+    local clause_text
+
+    clause_text=$(tangle_raw_scope_clause "$text" "$clause")
+    clause_text=$(printf '%s\n' "$clause_text" | sed -E 's/[[:space:]]*\([^)]*\)//g')
+    [[ -n "$clause_text" ]] || return 0
+
+    printf '%s\n' "$clause_text" \
         | tr ' `",;()[]{}' '\n' \
         | sed -nE '/^([A-Za-z0-9_.@%+-]+(\/[A-Za-z0-9_.@%+\/-]+)?)(\*|\/)?(:[0-9]+)?$/p' \
         | sed -E 's/:([0-9]+)$//; s/[[:punct:]]+$//' \
         | sed -E 's#^\./##; s#/\*$#/#; s#//+#/#g' \
         | sed '/^$/d' \
         | sort -u
+}
+
+tangle_extract_file_scopes() {
+    tangle_extract_scope_clause "$1" "Files"
+}
+
+tangle_extract_create_scopes() {
+    tangle_extract_scope_clause "$1" "Creates"
+}
+
+tangle_extract_write_scopes() {
+    {
+        tangle_extract_file_scopes "$1"
+        tangle_extract_create_scopes "$1"
+    } | sed '/^$/d' | sort -u
 }
 
 tangle_scope_is_directory() {
@@ -1345,8 +1378,9 @@ tangle_build_repo_context_block() {
     cat <<EOF
 Repository context for this subtask:
 - The worktree is the source of truth. Do not invent repository layout from generic names.
-- Treat the decomposer's Files clause as approximate intent. Prefer the resolved files below when they conflict with invented paths.
-- If none of the resolved files fit, inspect the tracked file list and report the blocker.
+- Treat the decomposer's Files clause as approximate intent for existing/anchored paths. Prefer the resolved files below when they conflict with invented existing paths.
+- Treat an explicit Creates clause as authorization to create those new files/directories when they are required by the assigned deliverable; do not replace them with unrelated existing files merely because they appear in the tracked file list.
+- If an existing-path Files scope cannot be reconciled with the repository and no Creates scope covers the required artifact, inspect the tracked file list and report the blocker.
 
 Tracked files, first 200:
 $(git -C "$repo_root" ls-files 2>/dev/null | sed -n '1,200p')
@@ -1467,6 +1501,117 @@ tangle_parseable_coding_subtask_count() {
     echo "$count"
 }
 
+tangle_redecompose() {
+    local original_task="$1"
+    local previous_output="$2"
+    local reason="$3"
+    local repo_file_map="${4:-}"
+    local design_resolution="${5:-}"
+    local prompt="The previous attempt did not produce a usable Octopus task decomposition. Decompose the original task again from first principles; do not reformat or preserve the previous structure merely for continuity.
+
+Required output format, exactly one subtask per line:
+1. [CODING] Short title — Files: existing/anchored/path.js — Creates: new/path/if-needed — Task: specific coding work
+2. [REASONING] Short title — Task: specific reasoning/review work
+
+Rules:
+- Output only numbered lines. No Markdown headings, no code fences, no prose before or after.
+- Every [CODING] line must include at least one same-line Files: or Creates: clause.
+- Files: is for existing repository files/directories or new files anchored below an existing repository directory.
+- Creates: is for intentionally new artifacts or source trees required by the deliverable.
+- Coding write scopes must be disjoint; merge overlapping coding work.
+- Preserve the original deliverable and acceptance criteria; repository layout is evidence, not a substitute for the requested output.
+- Keep 1-6 total subtasks; fewer is better for tightly coupled work.
+
+${repo_file_map}
+Design-review resolution (planning guidance; original task remains authoritative):
+${design_resolution:-[none]}
+
+Original task:
+${original_task}
+
+Previous attempt failed because: ${reason}
+Previous non-usable output:
+${previous_output}
+"
+    local primary="agy" fallback="codex"
+    if declare -f octopus_agent_override >/dev/null 2>&1; then
+        primary=$(octopus_execution_profile_provider "tangle" "decompose" "researcher" "agy")
+        fallback=$(octopus_execution_profile_provider "tangle" "decompose_fallback" "implementer" "codex")
+    fi
+    OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-redecompose-validation" run_agent_sync "$primary" "$prompt" 0 "researcher" "tangle" ||     OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-redecompose-validation" run_agent_sync "$fallback" "$prompt" 0 "researcher" "tangle"
+}
+
+tangle_decomposition_adequacy_review() {
+    local original_task="$1"
+    local subtasks="$2"
+    local repo_file_map="${3:-}"
+    local design_resolution="${4:-}"
+    local prompt="Review this proposed Octopus decomposition before any implementation agents are spawned.
+
+Judge only whether the proposed subtasks/scopes can collectively materialize the original requested deliverable. Do not redesign the product and do not implement anything.
+
+Check three dimensions:
+1. COVERAGE — the subtasks collectively cover the essential requested outputs and acceptance criteria, not merely supporting/internal work.
+2. SCOPE_COHERENCE — each coding Task is plausibly implementable inside its declared Files:/Creates: write scopes.
+3. ARTIFACT_CREATION — when the original task requires a capability/artifact not present in the repository map, the decomposition explicitly permits creating the necessary paths via Creates: rather than silently substituting unrelated existing work.
+
+Repository layout is evidence, not the deliverable. The original task is authoritative. Design-review resolution is planning guidance only.
+
+Return exactly:
+VERDICT: PASS
+REASONS: concise reason
+
+or:
+VERDICT: FAIL
+REASONS: concise actionable reasons for redecomposition
+
+${repo_file_map}
+Design-review resolution:
+${design_resolution:-[none]}
+
+Original task:
+${original_task}
+
+Proposed decomposition:
+${subtasks}
+"
+    local primary="codex" fallback="claude-sonnet"
+    if declare -f octopus_agent_override >/dev/null 2>&1; then
+        primary=$(octopus_execution_profile_provider "tangle" "decomposition_review" "architect" "codex")
+        fallback=$(octopus_execution_profile_provider "tangle" "decomposition_review_fallback" "code-reviewer" "claude-sonnet")
+    fi
+    OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-adequacy" run_agent_sync "$primary" "$prompt" 0 "architect" "tangle" ||     OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-adequacy" run_agent_sync "$fallback" "$prompt" 0 "architect" "tangle"
+}
+
+tangle_decomposition_adequacy_verdict() {
+    local review="$1"
+    local verdict
+    verdict=$(printf '%s\n' "$review" | sed -nE 's/^[[:space:]]*VERDICT:[[:space:]]*(PASS|FAIL)[[:space:]]*$/\1/p' | head -n 1)
+    [[ "$verdict" == "PASS" ]]
+}
+
+tangle_decomposition_adequacy_reasons() {
+    local review="$1"
+    local inline
+    inline=$(printf '%s\n' "$review" | sed -nE 's/^[[:space:]]*REASONS:[[:space:]]+(.+)$/\1/p' | head -n 1)
+    if [[ -n "$inline" ]]; then
+        printf '%s\n' "$inline"
+        return 0
+    fi
+
+    printf '%s\n' "$review" | awk '
+        BEGIN { capture=0; count=0 }
+        /^[[:space:]]*REASONS:[[:space:]]*$/ { capture=1; next }
+        capture && /^[[:space:]]*VERDICT:/ { exit }
+        capture && /^## END UNVERIFIED CONSULTATIVE OUTPUT/ { exit }
+        capture && NF {
+            print
+            count++
+            if (count >= 12) exit
+        }
+    '
+}
+
 tangle_reformat_decomposition() {
     local original_task="$1"
     local previous_decomposition="$2"
@@ -1475,15 +1620,16 @@ tangle_reformat_decomposition() {
     local reformat_prompt="Reformat the previous Octopus task decomposition. Do not add analysis.
 
 Required output format, exactly one subtask per line:
-1. [CODING] Short title — Files: relative/file.js, another/file.js — Task: specific coding work
+1. [CODING] Short title — Files: existing/anchored/path.js — Creates: new/path/if-needed — Task: specific coding work
 2. [REASONING] Short title — Task: specific reasoning/review work
 
 Rules:
 - Output only numbered lines. No Markdown headings, no code fences, no prose before or after.
-- Every [CODING] line must include a same-line 'Files:' clause.
-- Use relative file or directory scopes from the repository file map when possible.
-- Prefer concrete paths from the repository file map; invented/generic paths will be resolved against the actual worktree before dispatch.
-- New files should be explicit filenames whose parent directory already exists, or root-level files; avoid creating new source trees unless explicitly required.
+- Every [CODING] line must include at least one same-line Files: or Creates: clause.
+- Preserve the previous decomposition's semantic task boundaries; this function repairs formatting/scope syntax rather than inventing a different implementation plan.
+- Files: is for existing repository files/directories or anchored new files. Prefer concrete paths from the repository file map for Files:.
+- Creates: is for intentionally new artifacts/source trees already implied by the task/decomposition.
+- Files: and Creates: clauses must contain paths only. Move descriptions, screen names, component lists, and parenthetical notes into Task: so semantic requirements are preserved during scope validation/consolidation.
 - Coding write scopes must be disjoint. If scopes overlap, merge those items into one [CODING] line.
 - If all coding work touches the same files, output one [CODING] line with those files rather than pretending it can be parallelized.
 - Keep 1-6 total subtasks.
@@ -1531,10 +1677,19 @@ tangle_validate_parallel_write_scopes() {
         ((coding_count++)) || true
         subtask=$(echo "$subtask" | sed 's/\[CODING\]\s*//; s/\[REASONING\]\s*//')
 
-        local scopes
-        scopes=$(tangle_extract_write_scopes "$subtask")
-        if [[ -z "$scopes" ]]; then
-            echo "coding subtask ${task_index} has no explicit file or directory write scope"
+        local clause_name
+        for clause_name in Files Creates; do
+            if tangle_scope_clause_has_parenthetical_prose "$subtask" "$clause_name"; then
+                echo "coding subtask ${task_index} has descriptive prose inside ${clause_name}: scope; move descriptions into Task: and keep scope clauses path-only"
+                return 1
+            fi
+        done
+
+        local file_scopes create_scopes
+        file_scopes=$(tangle_extract_file_scopes "$subtask")
+        create_scopes=$(tangle_extract_create_scopes "$subtask")
+        if [[ -z "$file_scopes" && -z "$create_scopes" ]]; then
+            echo "coding subtask ${task_index} has no explicit Files: or Creates: write scope"
             return 1
         fi
 
@@ -1555,7 +1710,21 @@ tangle_validate_parallel_write_scopes() {
 "
                 fi
             fi
-        done <<< "$scopes"
+        done <<< "$file_scopes"
+
+        # Creates: is the explicit opt-in for genuinely new repository paths,
+        # including a new top-level source tree. Keep Files: conservative so a
+        # typo in an existing-path scope does not silently become authorization
+        # to invent layout.
+        while IFS= read -r scope; do
+            [[ -z "$scope" ]] && continue
+            if ! tangle_scope_is_safe_relative_path "$scope"; then
+                echo "coding subtask ${task_index} has unsafe Creates scope '${scope}'"
+                return 1
+            fi
+            effective_scopes="${effective_scopes}${scope}
+"
+        done <<< "$create_scopes"
         effective_scopes=$(printf '%s
 ' "$effective_scopes" | sed '/^$/d' | sort -u)
 
@@ -1584,6 +1753,8 @@ tangle_consolidate_overlapping_subtasks() {
     local lines=()
     local coding_lines=()
     local coding_scopes=()
+    local coding_file_scopes=()
+    local coding_create_scopes=()
     local parent=()
     local line
 
@@ -1592,26 +1763,31 @@ tangle_consolidate_overlapping_subtasks() {
         tangle_line_is_numbered_subtask "$line" || continue
         lines+=("$line")
         if [[ "$line" =~ \[CODING\] ]]; then
-            local subtask scopes effective_scopes=""
+            local subtask file_scopes create_scopes effective_file_scopes="" effective_scopes=""
             subtask=$(printf '%s\n' "$line" | sed -E 's/^[[:space:]]*(\*\*)?[0-9]+[\.\)][[:space:]]*//; s/^[[:space:]]+//')
-            scopes=$(tangle_extract_write_scopes "$subtask")
+            file_scopes=$(tangle_extract_file_scopes "$subtask")
+            create_scopes=$(tangle_extract_create_scopes "$subtask")
             while IFS= read -r scope; do
                 [[ -z "$scope" ]] && continue
                 if tangle_scope_is_known_or_explicit_new_file "$scope"; then
-                    effective_scopes="${effective_scopes}${scope}"$'\n'
+                    effective_file_scopes="${effective_file_scopes}${scope}"$'\n'
                 else
                     local resolved_scopes
                     resolved_scopes=$(tangle_resolve_repo_context_files "$subtask")
                     if [[ -n "$resolved_scopes" ]]; then
-                        effective_scopes="${effective_scopes}${resolved_scopes}"$'\n'
+                        effective_file_scopes="${effective_file_scopes}${resolved_scopes}"$'\n'
                     else
-                        effective_scopes="${effective_scopes}${scope}"$'\n'
+                        effective_file_scopes="${effective_file_scopes}${scope}"$'\n'
                     fi
                 fi
-            done <<< "$scopes"
-            effective_scopes=$(printf '%s\n' "$effective_scopes" | sed '/^$/d' | sort -u)
+            done <<< "$file_scopes"
+            effective_file_scopes=$(printf '%s\n' "$effective_file_scopes" | sed '/^$/d' | sort -u)
+            create_scopes=$(printf '%s\n' "$create_scopes" | sed '/^$/d' | sort -u)
+            effective_scopes=$(printf '%s\n%s\n' "$effective_file_scopes" "$create_scopes" | sed '/^$/d' | sort -u)
             coding_lines+=("$line")
             coding_scopes+=("$effective_scopes")
+            coding_file_scopes+=("$effective_file_scopes")
+            coding_create_scopes+=("$create_scopes")
             parent+=("$((${#parent[@]}))")
         fi
     done <<< "$subtasks"
@@ -1667,11 +1843,12 @@ tangle_consolidate_overlapping_subtasks() {
             continue
         fi
 
-        local member_count=0 merged_scopes="" merged_tasks="" member
+        local member_count=0 merged_file_scopes="" merged_create_scopes="" merged_tasks="" member
         for ((member=0; member<coding_count; member++)); do
             [[ ${parent[$member]} -eq $root_i ]] || continue
             ((member_count++)) || true
-            merged_scopes="${merged_scopes}${coding_scopes[$member]}"$'\n'
+            merged_file_scopes="${merged_file_scopes}${coding_file_scopes[$member]}"$'\n'
+            merged_create_scopes="${merged_create_scopes}${coding_create_scopes[$member]}"$'\n'
             local task_text
             task_text=$(printf '%s\n' "${coding_lines[$member]}" | sed -nE 's/.*[[:space:]]Task:[[:space:]]*//p')
             if [[ -z "$task_text" ]]; then
@@ -1687,9 +1864,15 @@ tangle_consolidate_overlapping_subtasks() {
             coding_body=$(printf '%s\n' "$line" | sed -E 's/^[[:space:]]*(\*\*)?[0-9]+[\.\)][[:space:]]*//')
             output="${output}${output_index}. ${coding_body}"$'\n'
         else
-            local scopes_csv
-            scopes_csv=$(printf '%s\n' "$merged_scopes" | sed '/^$/d' | sort -u | awk 'BEGIN { first=1 } { if (!first) printf ", "; printf "%s", $0; first=0 } END { print "" }')
-            output="${output}${output_index}. [CODING] Consolidated parallel-safe scope — Files: ${scopes_csv} — Task: ${merged_tasks}"$'\n'
+            local files_csv creates_csv scope_clauses=""
+            files_csv=$(printf '%s\n' "$merged_file_scopes" | sed '/^$/d' | sort -u | awk 'BEGIN { first=1 } { if (!first) printf ", "; printf "%s", $0; first=0 } END { print "" }')
+            creates_csv=$(printf '%s\n' "$merged_create_scopes" | sed '/^$/d' | sort -u | awk 'BEGIN { first=1 } { if (!first) printf ", "; printf "%s", $0; first=0 } END { print "" }')
+            [[ -z "$files_csv" ]] || scope_clauses="Files: ${files_csv}"
+            if [[ -n "$creates_csv" ]]; then
+                [[ -z "$scope_clauses" ]] || scope_clauses="${scope_clauses} — "
+                scope_clauses="${scope_clauses}Creates: ${creates_csv}"
+            fi
+            output="${output}${output_index}. [CODING] Consolidated parallel-safe scope — ${scope_clauses} — Task: ${merged_tasks}"$'\n'
         fi
         ((coding_index++)) || true
     done
@@ -3033,7 +3216,8 @@ ${plan_block}"
 
     # v8.18.0: Pre-work design review ceremony. Use resolved_prompt so reviewers
     # receive plan content instead of an unreadable cross-workspace file path.
-    design_review_ceremony "$resolved_prompt" "$context"
+    local design_review_synthesis=""
+    design_review_ceremony "$resolved_prompt" "$context" design_review_synthesis
 
     # Step 1: Decompose into validated subtasks
     log INFO "Step 1: Task decomposition..."
@@ -3051,19 +3235,25 @@ Each subtask should be:
 - Self-contained and independently verifiable
 - Clear about inputs and expected outputs
 - Assignable to either a coding agent [CODING] or reasoning agent [REASONING]
-- For every [CODING] subtask, include an explicit 'Files:' clause listing the exact files or directories that subtask owns and may edit
-- Coding write scopes must be disjoint. If two subtasks need the same file or directory, merge them into one [CODING] subtask instead of splitting them.
+- For every [CODING] subtask, include explicit write scope using Files:, Creates:, or both
+- Files: is for existing repository files/directories or new files anchored below an existing directory
+- Creates: is for intentionally new artifacts/source trees required to materialize the requested deliverable
+- Coding write scopes must be disjoint. If two subtasks need the same path/tree, merge them into one [CODING] subtask instead of splitting them.
+- Do not substitute internal/supporting changes for a requested externally observable deliverable merely because existing repository paths are easier to assign.
 
-**Cohesion rule:** If the task produces a single deliverable (one file, one script, one page, one config), keep it as ONE subtask — do not split it. Only decompose when subtasks are truly independent with no cross-file references between them. Aim for 2-6 subtasks; fewer is better when the work is tightly coupled.
+**Cohesion rule:** If the task produces a single tightly coupled deliverable, keep it as ONE subtask when parallel ownership would fragment the implementation. Only decompose when subtasks are truly independent. Aim for 2-6 subtasks; fewer is better when the work is tightly coupled.
 
 ${context}${repo_file_map}
+Design-review resolution (planning guidance; the original task remains authoritative):
+${design_review_synthesis:-[none]}
+
 Task: $resolved_prompt
 
 Output only numbered subtask lines, with no headings, no analysis, no Markdown fences, and no prose before or after.
 Required format:
-1. [CODING] Short title — Files: relative/file.js, relative/dir/ — Task: specific coding work
+1. [CODING] Short title — Files: relative/existing.js — Creates: new/path/if-needed — Task: specific coding work
 2. [REASONING] Short title — Task: specific reasoning work
-Every [CODING] line must include a same-line Files: clause."
+Every [CODING] line must include at least one same-line Files: or Creates: clause."
 
     # Tangle decomposition agents are overridable (OCTOPUS_TANGLE_DECOMPOSE_AGENT,
     # OCTOPUS_TANGLE_DECOMPOSE_FALLBACK_AGENT, OCTOPUS_TANGLE_AGENT). Override only
@@ -3091,14 +3281,25 @@ Every [CODING] line must include a same-line Files: clause."
     parseable_coding_subtask_count=$(tangle_parseable_coding_subtask_count "$subtasks")
 
     local parallel_safety_reason=""
-    if [[ $parseable_subtask_count -eq 0 ]] || [[ $parseable_coding_subtask_count -eq 0 ]] || ! parallel_safety_reason=$(tangle_validate_parallel_write_scopes "$subtasks"); then
-        local retry_reason="${parallel_safety_reason:-no parseable subtasks}"
-        if [[ $parseable_subtask_count -eq 0 ]]; then
-            retry_reason="no parseable subtasks"
-        elif [[ $parseable_coding_subtask_count -eq 0 ]]; then
-            retry_reason="no parseable [CODING] subtasks"
+    if [[ $parseable_subtask_count -eq 0 ]] || [[ $parseable_coding_subtask_count -eq 0 ]]; then
+        local retry_reason="no parseable subtasks"
+        [[ $parseable_subtask_count -gt 0 ]] && retry_reason="no parseable [CODING] subtasks"
+        log WARN "Decomposition failed validation (${retry_reason}); redecomposing from first principles"
+        local redecomposed_subtasks
+        if redecomposed_subtasks=$(tangle_redecompose "$resolved_prompt" "$subtasks" "$retry_reason" "$repo_file_map" "$design_review_synthesis"); then
+            subtasks="$redecomposed_subtasks"
+            echo -e "${CYAN}Redecomposed subtasks:${NC}"
+            echo "$subtasks"
+            echo ""
+            parseable_subtask_count=$(tangle_parseable_subtask_count "$subtasks")
+            parseable_coding_subtask_count=$(tangle_parseable_coding_subtask_count "$subtasks")
+        else
+            log ERROR "Decomposition retry failed; refusing monolithic direct fallback"
+            return 1
         fi
-        log WARN "Decomposition failed validation (${retry_reason}); retrying with strict one-line Files format"
+    elif ! parallel_safety_reason=$(tangle_validate_parallel_write_scopes "$subtasks"); then
+        local retry_reason="$parallel_safety_reason"
+        log WARN "Decomposition has repairable scope/format issues (${retry_reason}); repairing without changing semantic task boundaries"
         local reformatted_subtasks
         if reformatted_subtasks=$(tangle_reformat_decomposition "$resolved_prompt" "$subtasks" "$retry_reason" "$repo_file_map"); then
             subtasks="$reformatted_subtasks"
@@ -3107,9 +3308,8 @@ Every [CODING] line must include a same-line Files: clause."
             echo ""
             parseable_subtask_count=$(tangle_parseable_subtask_count "$subtasks")
             parseable_coding_subtask_count=$(tangle_parseable_coding_subtask_count "$subtasks")
-            parallel_safety_reason=""
         else
-            log ERROR "Decomposition reformat retry failed; refusing monolithic direct fallback"
+            log ERROR "Decomposition repair retry failed; refusing monolithic direct fallback"
             return 1
         fi
     fi
@@ -3123,13 +3323,9 @@ Every [CODING] line must include a same-line Files: clause."
         return 1
     fi
 
-    if [[ $parseable_coding_subtask_count -eq 0 ]]; then
-        log ERROR "Decomposition still produced no parseable [CODING] subtasks after retry; refusing monolithic direct fallback"
-        return 1
-    fi
-
+    parallel_safety_reason=""
     if ! parallel_safety_reason=$(tangle_validate_parallel_write_scopes "$subtasks"); then
-        log WARN "Reformatted decomposition still overlaps (${parallel_safety_reason}); consolidating connected coding scopes"
+        log WARN "Decomposition still overlaps or has unsafe scopes (${parallel_safety_reason}); consolidating connected coding scopes"
         subtasks=$(tangle_consolidate_overlapping_subtasks "$subtasks")
         echo -e "${CYAN}Consolidated subtasks:${NC}"
         echo "$subtasks"
@@ -3139,6 +3335,45 @@ Every [CODING] line must include a same-line Files: clause."
         parallel_safety_reason=""
         if [[ $parseable_subtask_count -eq 0 || $parseable_coding_subtask_count -eq 0 ]] || ! parallel_safety_reason=$(tangle_validate_parallel_write_scopes "$subtasks"); then
             log ERROR "Unsafe parallel decomposition after deterministic consolidation: ${parallel_safety_reason:-no parseable coding subtasks}; refusing direct fallback"
+            return 1
+        fi
+    fi
+
+    # Structural safety is necessary but insufficient: a decomposition can be
+    # disjoint yet assign scopes incapable of materializing the requested output.
+    local adequacy_review=""
+    if ! adequacy_review=$(tangle_decomposition_adequacy_review "$resolved_prompt" "$subtasks" "$repo_file_map" "$design_review_synthesis"); then
+        log ERROR "Decomposition adequacy review failed with all providers; refusing implementation spawn"
+        return 1
+    fi
+    if ! tangle_decomposition_adequacy_verdict "$adequacy_review"; then
+        local adequacy_reason
+        adequacy_reason=$(tangle_decomposition_adequacy_reasons "$adequacy_review")
+        [[ -n "$adequacy_reason" ]] || adequacy_reason="review returned FAIL or malformed verdict"
+        log WARN "Decomposition failed semantic adequacy (${adequacy_reason}); redecomposing once before spawn"
+        local adequacy_redecomposed
+        if ! adequacy_redecomposed=$(tangle_redecompose "$resolved_prompt" "$subtasks" "semantic adequacy: ${adequacy_reason}" "$repo_file_map" "$design_review_synthesis"); then
+            log ERROR "Adequacy-triggered redecomposition failed; refusing implementation spawn"
+            return 1
+        fi
+        subtasks="$adequacy_redecomposed"
+        parseable_subtask_count=$(tangle_parseable_subtask_count "$subtasks")
+        parseable_coding_subtask_count=$(tangle_parseable_coding_subtask_count "$subtasks")
+        parallel_safety_reason=""
+        if [[ $parseable_subtask_count -eq 0 || $parseable_coding_subtask_count -eq 0 ]] || ! parallel_safety_reason=$(tangle_validate_parallel_write_scopes "$subtasks"); then
+            log ERROR "Adequacy-triggered redecomposition is structurally invalid (${parallel_safety_reason:-no parseable coding subtasks}); refusing implementation spawn"
+            return 1
+        fi
+        echo -e "${CYAN}Adequacy-redecomposed subtasks:${NC}"
+        echo "$subtasks"
+        echo ""
+        if ! adequacy_review=$(tangle_decomposition_adequacy_review "$resolved_prompt" "$subtasks" "$repo_file_map" "$design_review_synthesis"); then
+            log ERROR "Second decomposition adequacy review failed with all providers; refusing implementation spawn"
+            return 1
+        fi
+        if ! tangle_decomposition_adequacy_verdict "$adequacy_review"; then
+            adequacy_reason=$(tangle_decomposition_adequacy_reasons "$adequacy_review")
+            log ERROR "Decomposition remains semantically inadequate after one redecomposition (${adequacy_reason:-malformed FAIL verdict}); refusing implementation spawn"
             return 1
         fi
     fi

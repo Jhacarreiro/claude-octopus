@@ -631,6 +631,7 @@ EOF
 design_review_ceremony() {
     local prompt="$1"
     local context="${2:-}"
+    local synthesis_out_var="${3:-}"
 
     # Skip in dry-run or when ceremonies disabled
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -789,6 +790,9 @@ Be brief and actionable."
     fi
 
     if [[ -n "$synthesis" ]]; then
+        if [[ -n "$synthesis_out_var" ]]; then
+            printf -v "$synthesis_out_var" '%s' "$synthesis"
+        fi
         echo -e "${GREEN}Design Review Summary (planning only; no implementation evidence):${NC}"
         echo "$synthesis" | head -20
         echo ""

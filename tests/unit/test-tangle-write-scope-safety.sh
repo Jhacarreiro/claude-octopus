@@ -47,6 +47,10 @@ design_review_ceremony() { :; }
 fleet_dispatch_begin() { :; }
 fleet_dispatch_end() { :; }
 run_agent_sync() {
+    if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
+        printf '%s\n' 'VERDICT: PASS' 'REASONS: decomposition remains adequate after structural repair'
+        return 0
+    fi
     cat <<'EOF'
 1. [CODING] Add the reference prefix. Files: src/lib/templates/NA02_REQUEST_REPORT.ts
 2. [CODING] Add legal wording to the same template. Files: src/lib/templates/NA02_REQUEST_REPORT.ts, src/lib/legal/legalReferenceCatalog.ts
@@ -101,6 +105,72 @@ if [[ "$scopes" == *"Makefile"* ]] && \
     test_pass
 else
     test_fail "write scope extraction rejected root-level filenames; got: $scopes"
+fi
+
+test_case "write scope extraction includes explicit Creates clause"
+scopes=$(tangle_extract_write_scopes "[CODING] Add a new app — Files: package.json — Creates: web/package.json, web/src/main.tsx — Task: build the app")
+if [[ "$scopes" == *"package.json"* ]] && [[ "$scopes" == *"web/package.json"* ]] && [[ "$scopes" == *"web/src/main.tsx"* ]]; then
+    test_pass
+else
+    test_fail "write scope extraction did not include Creates clause; got: $scopes"
+fi
+
+test_case "scope extraction ignores parenthetical descriptions"
+scopes=$(tangle_extract_create_scopes "[CODING] Build app — Creates: frontend/ (app shell, transport adapter, shared state + error components) — Task: build the UI")
+if [[ "$scopes" == "frontend" ]]; then
+    test_pass
+else
+    test_fail "parenthetical prose leaked into create scopes; got: $scopes"
+fi
+
+test_case "parallel scope validation rejects parenthetical prose before semantic details are lost"
+annotated='1. [CODING] Build app — Creates: frontend/ (product detail, basket screen) — Task: build the UI'
+reason=""
+if reason=$(tangle_validate_parallel_write_scopes "$annotated"); then
+    test_fail "annotated Creates scope was accepted"
+elif [[ "$reason" == *"descriptive prose inside Creates:"* ]] && [[ "$reason" == *"move descriptions into Task:"* ]]; then
+    test_pass
+else
+    test_fail "unexpected annotated-scope validation reason: $reason"
+fi
+
+test_case "Creates permits an intentional new top-level source tree"
+creates_subtask='1. [CODING] Add a new app — Creates: web/package.json, web/src/main.tsx — Task: build a new application'
+if tangle_validate_parallel_write_scopes "$creates_subtask" >/dev/null; then
+    test_pass
+else
+    test_fail "explicit Creates scope for a new top-level tree was rejected"
+fi
+
+test_case "Files remains conservative for an unanchored invented top-level tree"
+files_subtask='1. [CODING] Add a new app — Files: totally-invented-tree/deep/file.js — Task: build a new application'
+if tangle_scope_is_known_or_explicit_new_file "totally-invented-tree/deep/file.js"; then
+    test_fail "Files scope unexpectedly accepted an unanchored invented tree"
+else
+    test_pass
+fi
+
+test_case "Creates rejects traversal and git metadata paths"
+if tangle_validate_parallel_write_scopes '1. [CODING] Unsafe — Creates: ../outside.js — Task: unsafe' >/dev/null 2>&1 || \
+   tangle_validate_parallel_write_scopes '1. [CODING] Unsafe — Creates: .GIT/hooks/pre-commit — Task: unsafe' >/dev/null 2>&1; then
+    test_fail "unsafe Creates scope was accepted"
+else
+    test_pass
+fi
+
+test_case "overlapping Creates scopes are detected and consolidated without becoming Files"
+create_overlap=$'1. [CODING] App shell — Creates: web/ — Task: create application shell\n2. [CODING] App entry — Creates: web/src/main.tsx — Task: create application entry'
+if overlap_reason=$(tangle_validate_parallel_write_scopes "$create_overlap"); then
+    test_fail "overlapping Creates scopes were accepted"
+elif [[ "$overlap_reason" != *"overlaps"* ]]; then
+    test_fail "unexpected Creates overlap reason: $overlap_reason"
+else
+    consolidated=$(tangle_consolidate_overlapping_subtasks "$create_overlap")
+    if [[ "$consolidated" == *"Creates: web, web/src/main.tsx"* ]] && [[ "$consolidated" != *"Files: web"* ]] && tangle_validate_parallel_write_scopes "$consolidated" >/dev/null; then
+        test_pass
+    else
+        test_fail "Creates scopes were not preserved through consolidation: $consolidated"
+    fi
 fi
 
 test_case "known scope lookup falls back to pwd when PROJECT_ROOT is invalid"

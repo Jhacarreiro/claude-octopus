@@ -33,6 +33,10 @@ design_review_ceremony(){ :; }
 fleet_dispatch_begin(){ :; }
 fleet_dispatch_end(){ :; }
 run_agent_sync(){
+if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
+  printf '%s\n' 'VERDICT: PASS' 'REASONS: fixture decomposition is adequate after consolidation'
+  return 0
+fi
 cat <<'EOF'
 1. [CODING] Baseline contracts and test scaffolding — Files: package.json, .env.example, .gitignore, README.md, apps/web/package.json, apps/server/package.json, docs/PRODUCT.md — Task: Audit existing scaffold, lock npm workspace layout (apps/web + apps/server), add repository scripts (test, build, check, lint), define documented API contract section, deterministic synthetic fixtures, and confirm runtime files are gitignored under apps/server/data.
 2. [CODING] Server foundation, invitation, consent, prompts, recording, and memory-card — Files: apps/server/src/index.js, apps/server/data/ — Task: Implement HTTP server with health/readiness, JSON error envelope, MIME allowlist, upload limits, MediaStorage interface with local filesystem implementation, file-backed persistence for FamilySpace/Invitation/ConsentRecord/StoryPrompt/Recording/MemoryCard, invitation lifecycle, versioned consent, one-prompt-at-a-time gating, deterministic next-topic suggestion, multipart upload with validation, playback retrieval, deterministic memory-card generation behind interface, idempotent deletion with safe-repeat semantics, and invalid-transition guard tests.

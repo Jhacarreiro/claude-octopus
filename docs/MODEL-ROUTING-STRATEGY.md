@@ -39,6 +39,33 @@ does not count as independent provider diversity.
 4. Model choice never changes permissions, repository rules, or quality gates.
 5. User and project configuration always beats release defaults.
 
+### Contextual review seat overrides
+
+The contextual code-review pipeline supports explicit model-qualified seat identities
+using the same `provider:model` convention as the design-review ceremony. These
+overrides are useful when a curated lineup must preserve semantic roles across
+providers instead of inheriting the review fleet's provider defaults:
+
+| Review seat | Environment override |
+|---|---|
+| Logic | `OCTOPUS_REVIEW_LOGIC_AGENT` |
+| Security | `OCTOPUS_REVIEW_SECURITY_AGENT` |
+| Architecture | `OCTOPUS_REVIEW_ARCHITECTURE_AGENT` |
+| CVE research | `OCTOPUS_REVIEW_CVE_AGENT` |
+| Diversity / independent perspective | `OCTOPUS_REVIEW_DIVERSITY_AGENT` |
+| Verifier | `OCTOPUS_REVIEW_VERIFIER_AGENT` |
+| Debater | `OCTOPUS_REVIEW_DEBATER_AGENT` |
+| Synthesizer | `OCTOPUS_REVIEW_SYNTHESIZER_AGENT` |
+
+For example, `OCTOPUS_REVIEW_SYNTHESIZER_AGENT=commandcode:thinkingmachines/inkling-small`
+keeps the synthesis seat on that exact provider and model. Explicit seat overrides
+remain subject to the active provider allowlist and fail closed when the requested
+provider is not admitted. `OCTOPUS_REVIEW_SINGLE_PROVIDER` remains the global
+compatibility override and takes precedence over individual seat overrides.
+
+Round-1 seat overrides are additive when their semantic role is absent from the
+configured review fleet; unconfigured seats retain the existing fleet behavior.
+
 ## Eval-backed routing in v10
 
 V10 exposes deterministic routing decisions through

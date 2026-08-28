@@ -60,6 +60,7 @@ gemini:reviewer2:style"'
         echo 'log() { :; }'
         echo 'fleet_dispatch_begin() { :; }'
         echo 'fleet_dispatch_end() { :; }'
+        echo 'review_agent_for_seat() { printf "%s\n" "$1"; }'
         # First fleet member fails PID capture (the #736 scenario); second succeeds.
         echo 'spawn_agent_capture_pid() {'
         echo '    if [[ "$1" == "codex" ]]; then'

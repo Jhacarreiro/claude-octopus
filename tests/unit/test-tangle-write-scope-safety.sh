@@ -115,6 +115,26 @@ else
     test_fail "write scope extraction did not include Creates clause; got: $scopes"
 fi
 
+test_case "Reads is parsed separately and never grants write scope"
+line="[CODING] Build app — Reads: src/, backend/ — Files: package.json — Creates: web/ — Task: inspect existing contracts but only modify manifest and new app"
+reads=$(tangle_extract_read_scopes "$line")
+writes=$(tangle_extract_write_scopes "$line")
+if [[ "$reads" == *"src"* ]] && [[ "$reads" == *"backend"* ]] && [[ "$writes" == *"package.json"* ]] && [[ "$writes" == *"web"* ]] && [[ "$writes" != *"src"* ]] && [[ "$writes" != *"backend"* ]]; then
+    test_pass
+else
+    test_fail "Reads leaked into write scope; reads=$reads writes=$writes"
+fi
+
+test_case "unsafe Reads scopes are rejected"
+reason=""
+if reason=$(tangle_validate_parallel_write_scopes '1. [CODING] Unsafe read — Reads: ../secret — Creates: web/ — Task: build app'); then
+    test_fail "unsafe Reads scope was accepted"
+elif [[ "$reason" == *"unsafe Reads scope"* ]]; then
+    test_pass
+else
+    test_fail "unexpected unsafe Reads validation reason: $reason"
+fi
+
 test_case "scope extraction ignores parenthetical descriptions"
 scopes=$(tangle_extract_create_scopes "[CODING] Build app — Creates: frontend/ (app shell, transport adapter, shared state + error components) — Task: build the UI")
 if [[ "$scopes" == "frontend" ]]; then
@@ -171,6 +191,15 @@ else
     else
         test_fail "Creates scopes were not preserved through consolidation: $consolidated"
     fi
+fi
+
+test_case "consolidation preserves Reads as read-only context"
+read_overlap=$'1. [CODING] App shell — Reads: src/ — Creates: web/ — Task: create application shell\n2. [CODING] App entry — Reads: backend/ — Creates: web/src/main.tsx — Task: create application entry'
+consolidated=$(tangle_consolidate_overlapping_subtasks "$read_overlap")
+if [[ "$consolidated" == *"Reads: backend, src"* ]] && [[ "$consolidated" == *"Creates: web, web/src/main.tsx"* ]] && [[ "$consolidated" != *"Files: backend"* ]] && [[ "$consolidated" != *"Files: src"* ]]; then
+    test_pass
+else
+    test_fail "Reads were not preserved as read-only during consolidation: $consolidated"
 fi
 
 test_case "known scope lookup falls back to pwd when PROJECT_ROOT is invalid"

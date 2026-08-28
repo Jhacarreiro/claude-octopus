@@ -22,9 +22,12 @@ trap 'rm -rf "$RESULTS_DIR"' EXIT
 SCENARIO_FILE="$RESULTS_DIR/scenario"
 ADEQUACY_COUNT_FILE="$RESULTS_DIR/adequacy-count"
 REDECOMPOSE_COUNT_FILE="$RESULTS_DIR/redecompose-count"
+RECONSIDER_COUNT_FILE="$RESULTS_DIR/reconsider-count"
 SPAWN_FILE="$RESULTS_DIR/spawns"
 DECOMPOSE_PROMPT_FILE="$RESULTS_DIR/decompose-prompt"
 REDECOMPOSE_PROMPT_FILE="$RESULTS_DIR/redecompose-prompt"
+RECONSIDER_PROMPT_FILE="$RESULTS_DIR/reconsider-prompt"
+ADEQUACY_PROMPT_FILE="$RESULTS_DIR/adequacy-prompt"
 LOG_FILE="$RESULTS_DIR/tangle.log"
 
 log() { printf '%s %s\n' "${1:-}" "${2:-}" >> "$LOG_FILE"; }
@@ -60,6 +63,8 @@ run_agent_sync() {
             printf '%s' "$prompt" > "$DECOMPOSE_PROMPT_FILE"
             if [[ "$scenario" == "no-parseable" ]]; then
                 printf '%s\n' "I'll explore the repository structure first."
+            elif [[ "$scenario" == "planner-reject" ]]; then
+                printf '%s\n' '1. [CODING] Build requested application — Files: package.json — Creates: web/ — Task: Create the app and update package.json build scripts required to run it.'
             else
                 printf '%s\n' '1. [CODING] Build requested application — Files: scripts/lib/workflows.sh — Task: Build the requested externally observable application.'
             fi
@@ -67,24 +72,53 @@ run_agent_sync() {
         tangle-redecompose-validation)
             counter_next "$REDECOMPOSE_COUNT_FILE" >/dev/null
             printf '%s' "$prompt" > "$REDECOMPOSE_PROMPT_FILE"
-            printf '%s\n' '1. [CODING] Create requested application — Creates: web/package.json, web/src/main.tsx — Task: Materialize the requested externally observable application.'
+            printf '%s\n' '1. [CODING] Create requested application — Reads: scripts/lib/ — Creates: web/package.json, web/src/main.tsx — Task: Materialize the requested externally observable application.'
+            ;;
+        tangle-decomposition-reconsideration)
+            counter_next "$RECONSIDER_COUNT_FILE" >/dev/null
+            printf '%s' "$prompt" > "$RECONSIDER_PROMPT_FILE"
+            if [[ "$scenario" == "planner-reject" ]]; then
+                cat <<'EOF'
+DECISIONS:
+- REJECT MOVE_TO_READS: package.json — package.json must be modified to add the build/start scripts required by the requested app.
+DECOMPOSITION:
+1. [CODING] Build requested application — Files: package.json — Creates: web/ — Task: Create the app and modify package.json with the required build/start scripts.
+EOF
+            else
+                cat <<'EOF'
+DECISIONS:
+- ACCEPT MOVE_TO_READS: scripts/lib/workflows.sh — the existing workflow is context only; the requested application belongs in a new web tree.
+DECOMPOSITION:
+1. [CODING] Create requested application — Reads: scripts/lib/workflows.sh — Creates: web/package.json, web/src/main.tsx — Task: Materialize the requested externally observable application.
+EOF
+            fi
             ;;
         tangle-decomposition-adequacy)
             local n
             n=$(counter_next "$ADEQUACY_COUNT_FILE")
+            printf '%s' "$prompt" > "$ADEQUACY_PROMPT_FILE"
             case "$scenario" in
                 second-fail)
-                    printf '%s\n' 'VERDICT: FAIL' 'REASONS: scopes still cannot materialize the requested deliverable'
+                    printf '%s\n' 'VERDICT: FAIL' 'REASONS: scopes still cannot materialize the requested deliverable' 'SCOPE_REVIEW:' '- MOVE_TO_READS: scripts/lib/workflows.sh — context only'
                     ;;
                 adequacy-repair)
                     if [[ "$n" -eq 1 ]]; then
-                        printf '%s\n' 'VERDICT: FAIL' 'REASONS: task promises an application but Files only permits an unrelated existing workflow file'
+                        printf '%s\n' 'VERDICT: FAIL' 'REASONS: existing workflow file is context-only and the app artifact is missing' 'SCOPE_REVIEW:' '- MOVE_TO_READS: scripts/lib/workflows.sh — context only; create the app in a new tree'
                     else
-                        printf '%s\n' 'VERDICT: PASS' 'REASONS: Creates explicitly permits the missing application artifacts'
+                        printf '%s\n' 'VERDICT: PASS' 'REASONS: write scope is limited to the new application artifacts' 'SCOPE_REVIEW: NONE'
+                    fi
+                    ;;
+                planner-reject)
+                    if [[ "$n" -eq 1 ]]; then
+                        printf '%s\n' 'VERDICT: FAIL' 'REASONS: package.json may only be context' 'SCOPE_REVIEW:' '- MOVE_TO_READS: package.json — verify whether a manifest edit is truly required'
+                    elif [[ "$prompt" == *"REJECT MOVE_TO_READS: package.json"* ]]; then
+                        printf '%s\n' 'VERDICT: PASS' 'REASONS: planner justified the package.json modification with a concrete build-script requirement' 'SCOPE_REVIEW: NONE'
+                    else
+                        printf '%s\n' 'VERDICT: FAIL' 'REASONS: planner rejection rationale was not supplied to second review' 'SCOPE_REVIEW:' '- MOVE_TO_READS: package.json — unresolved'
                     fi
                     ;;
                 *)
-                    printf '%s\n' 'VERDICT: PASS' 'REASONS: decomposition is adequate'
+                    printf '%s\n' 'VERDICT: PASS' 'REASONS: decomposition is adequate' 'SCOPE_REVIEW: NONE'
                     ;;
             esac
             ;;
@@ -106,9 +140,12 @@ reset_scenario() {
     printf '%s' "$1" > "$SCENARIO_FILE"
     printf '0' > "$ADEQUACY_COUNT_FILE"
     printf '0' > "$REDECOMPOSE_COUNT_FILE"
+    printf '0' > "$RECONSIDER_COUNT_FILE"
     : > "$SPAWN_FILE"
     : > "$DECOMPOSE_PROMPT_FILE"
     : > "$REDECOMPOSE_PROMPT_FILE"
+    : > "$RECONSIDER_PROMPT_FILE"
+    : > "$ADEQUACY_PROMPT_FILE"
     : > "$LOG_FILE"
 }
 
@@ -151,19 +188,27 @@ else
     test_fail "unparseable output was not routed through first-principles redecomposition"
 fi
 
-test_case "semantic FAIL triggers exactly one redecomposition and then spawns"
+test_case "semantic FAIL triggers one planner reconsideration and then spawns"
 run_case "adequacy-repair"
-if [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]] && [[ "$(cat "$REDECOMPOSE_COUNT_FILE")" -eq 1 ]] && [[ -s "$SPAWN_FILE" ]] && grep -q 'semantic adequacy:' "$REDECOMPOSE_PROMPT_FILE"; then
+if [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]] && [[ "$(cat "$RECONSIDER_COUNT_FILE")" -eq 1 ]] && [[ "$(cat "$REDECOMPOSE_COUNT_FILE")" -eq 0 ]] && [[ -s "$SPAWN_FILE" ]] && grep -q 'ACCEPT MOVE_TO_READS: scripts/lib/workflows.sh' "$RESULTS_DIR/adequacy-repair.out"; then
     test_pass
 else
-    test_fail "adequacy FAIL did not perform one bounded redecomposition before spawn"
+    test_fail "adequacy FAIL did not perform one bounded planner reconsideration before spawn"
+fi
+
+test_case "planner may reject reviewer scope advice with explicit rationale"
+run_case "planner-reject"
+if [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]] && [[ "$(cat "$RECONSIDER_COUNT_FILE")" -eq 1 ]] && [[ -s "$SPAWN_FILE" ]] && grep -q 'REJECT MOVE_TO_READS: package.json' "$RESULTS_DIR/planner-reject.out" && grep -q 'REJECT MOVE_TO_READS: package.json' "$ADEQUACY_PROMPT_FILE"; then
+    test_pass
+else
+    test_fail "planner rejection was not preserved as advisory adjudication for second review"
 fi
 
 test_case "second semantic FAIL aborts before implementation spawn"
 reset_scenario "second-fail"
 status=0
 tangle_develop 'Build the requested externally observable application with a usable entry point.' > "$RESULTS_DIR/second-fail.out" 2>&1 || status=$?
-if [[ "$status" -ne 0 ]] && [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]] && [[ "$(cat "$REDECOMPOSE_COUNT_FILE")" -eq 1 ]] && [[ ! -s "$SPAWN_FILE" ]] && grep -q 'remains semantically inadequate' "$LOG_FILE"; then
+if [[ "$status" -ne 0 ]] && [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]] && [[ "$(cat "$RECONSIDER_COUNT_FILE")" -eq 1 ]] && [[ ! -s "$SPAWN_FILE" ]] && grep -q 'remains semantically inadequate' "$LOG_FILE"; then
     test_pass
 else
     test_fail "second adequacy FAIL did not fail closed before spawn"

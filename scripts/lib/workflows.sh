@@ -7,6 +7,11 @@ if ! type probe_result_file_status >/dev/null 2>&1; then
     _octo_probe_results_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/probe-results.sh"
     [[ -f "$_octo_probe_results_lib" ]] && source "$_octo_probe_results_lib"
 fi
+if ! type run_agent_sync_fallback_chain >/dev/null 2>&1; then
+    _octo_fallback_chain_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fallback-chain.sh"
+    [[ -f "$_octo_fallback_chain_lib" ]] && source "$_octo_fallback_chain_lib"
+    unset _octo_fallback_chain_lib
+fi
 if ! type review_kill_process_tree_frozen >/dev/null 2>&1; then
     _octo_review_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/review.sh"
     if [[ -f "$_octo_review_lib" ]]; then
@@ -1652,49 +1657,24 @@ ${previous_decomposition}
 Independent review:
 ${adequacy_review}
 "
-    local primary="agy" fallback="codex" heavy_fallback="codex" response=""
+    local primary="agy" response=""
     if declare -f octopus_agent_override >/dev/null 2>&1; then
         primary=$(octopus_execution_profile_provider "tangle" "decompose" "researcher" "agy")
-        fallback=$(octopus_execution_profile_provider "tangle" "decompose_fallback" "implementer" "codex")
-        heavy_fallback=$(octopus_execution_profile_provider "tangle" "decompose_heavy" "implementer-heavy" "codex")
     fi
 
-    if response=$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-reconsideration" run_agent_sync "$primary" "$prompt" 0 "researcher" "tangle"); then
-        if tangle_reconsideration_response_valid "$response"; then
-            printf '%s\n' "$response"
-            return 0
-        fi
-        log WARN "Planner reconsideration returned success but no usable DECISIONS+DECOMPOSITION; retrying once with fallback planner"
-    else
-        log WARN "Planner reconsideration primary provider failed; retrying once with fallback planner"
+    if ! declare -f run_agent_sync_fallback_chain >/dev/null 2>&1; then
+        log ERROR "Planner reconsideration requires the configured fallback-chain engine"
+        return 1
     fi
 
-    local retry_prompt="${prompt}
-
-STRICT RETRY: the prior planner attempt was unusable. Do not inspect, narrate, explain intent, or announce tool use. Start the first output line with exactly 'DECISIONS:' and include a 'DECOMPOSITION:' section with numbered subtasks."
-    response=""
-    if response=$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-reconsideration" run_agent_sync "$fallback" "$retry_prompt" 0 "implementer" "tangle"); then
-        if tangle_reconsideration_response_valid "$response"; then
-            printf '%s\n' "$response"
-            return 0
-        fi
-        log WARN "Planner reconsideration fallback returned success but unusable output; escalating once to heavy fallback planner"
-    else
-        log WARN "Planner reconsideration fallback provider failed; escalating once to heavy fallback planner"
+    if response=$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-reconsideration" \
+        run_agent_sync_fallback_chain "$primary" "$prompt" 0 "researcher" "tangle" \
+        tangle_reconsideration_response_valid default); then
+        printf '%s\n' "$response"
+        return 0
     fi
 
-    local heavy_retry_prompt="${retry_prompt}
-
-FINAL STRUCTURED RETRY: two planner attempts failed to produce the required protocol. Return only the exact DECISIONS: and DECOMPOSITION: structure. Preserve the original task; adjudicate the review rather than starting a different plan."
-    response=""
-    if response=$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-reconsideration" run_agent_sync "$heavy_fallback" "$heavy_retry_prompt" 0 "implementer-heavy" "tangle"); then
-        if tangle_reconsideration_response_valid "$response"; then
-            printf '%s\n' "$response"
-            return 0
-        fi
-    fi
-
-    log ERROR "Planner reconsideration exhausted primary, fallback, and heavy fallback without usable DECISIONS+DECOMPOSITION"
+    log ERROR "Planner reconsideration exhausted configured fallback chain without usable DECISIONS+DECOMPOSITION"
     return 1
 }
 

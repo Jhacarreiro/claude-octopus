@@ -5,6 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 source "$SCRIPT_DIR/../helpers/test-framework.sh"
+TEST_TMP_DIR="/tmp/octopus-tests-$$"
+mkdir -p "$TEST_TMP_DIR/home-default" "$TEST_TMP_DIR/home-configured"
+trap 'rm -rf "$TEST_TMP_DIR"' EXIT INT TERM
 test_suite "agy is the Google seat across workflows (Gemini CLI sunset 2026-06-18)"
 
 test_role_map_research_design_copywriting_is_agy() {
@@ -19,24 +22,24 @@ test_role_map_research_design_copywriting_is_agy() {
 test_fallback_chain_is_configuration_driven() {
     test_case "get_fallback_agent no longer hardcodes codex -> agy"
     local out
-    out="$(bash -c 'source "'"$PROJECT_ROOT"'/scripts/lib/model-resolver.sh" 2>/dev/null
+    out="$(HOME="$TEST_TMP_DIR/home-default" OCTOPUS_PROVIDERS_CONFIG="$TEST_TMP_DIR/missing-providers.json" bash -c 'source "'"$PROJECT_ROOT"'/scripts/lib/model-resolver.sh" 2>/dev/null
         is_agent_available(){ [[ "$1" == agy ]]; }
+        is_agent_available_v2(){ [[ "$1" == agy ]]; }
         get_fallback_agent codex')"
     [[ "$out" == "codex" ]] && test_pass || test_fail "expected preferred identity when configured/default chain has no available candidate, got: $out"
 }
 
 test_configured_fallback_chain_routes_native_resolver() {
     test_case "get_fallback_agent honors routing.fallbackChains and routing.roles"
-    local tmp cfg out
-    tmp=$(mktemp -d)
-    cfg="$tmp/providers.json"
+    local cfg out
+    cfg="$TEST_TMP_DIR/providers-configured.json"
     cat > "$cfg" <<'JSON'
 {"routing":{"roles":{"architect":{"provider":"claude","model":"claude-opus-test"}},"fallbackChains":{"default":[{"role":"architect"}]}}}
 JSON
-    out="$(OCTOPUS_PROVIDERS_CONFIG="$cfg" bash -c 'source "'"$PROJECT_ROOT"'/scripts/lib/model-resolver.sh" 2>/dev/null
+    out="$(HOME="$TEST_TMP_DIR/home-configured" OCTOPUS_PROVIDERS_CONFIG="$cfg" bash -c 'source "'"$PROJECT_ROOT"'/scripts/lib/model-resolver.sh" 2>/dev/null
         is_agent_available(){ [[ "$1" == claude ]]; }
+        is_agent_available_v2(){ [[ "$1" == claude ]]; }
         get_fallback_agent codex coding')"
-    rm -rf "$tmp"
     [[ "$out" == "claude:claude-opus-test" ]] && test_pass || test_fail "expected configured qualified claude fallback, got: $out"
 }
 

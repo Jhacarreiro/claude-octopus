@@ -2,6 +2,7 @@
 _agent_sync_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_agent_sync_lib_dir}/agent-spec.sh" 2>/dev/null || true
 source "${_agent_sync_lib_dir}/provider-registry.sh" || { echo "agent-sync: failed to load provider-registry.sh" >&2; return 1 2>/dev/null || exit 1; }
+source "${_agent_sync_lib_dir}/fallback-chain.sh" 2>/dev/null || true
 # ═══════════════════════════════════════════════════════════════════════════════
 # agent-sync.sh — Agent synchronous dispatch & Agent Teams routing
 # Extracted from orchestrate.sh (v9.7.4)

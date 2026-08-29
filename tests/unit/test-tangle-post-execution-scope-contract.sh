@@ -9,11 +9,9 @@ source "$PROJECT_ROOT_SRC/scripts/lib/workflows.sh"
 
 test_suite "tangle post-execution write scope contract"
 
-TEST_TMP_DIR="/tmp/octopus-tests-$$"
 TMP_ROOT="$TEST_TMP_DIR"
 TMP_REPO="$TMP_ROOT/repo"
 TMP_RESULTS="$TMP_ROOT/results"
-trap 'rm -rf "$TMP_ROOT"' EXIT INT TERM
 mkdir -p "$TMP_REPO/src" "$TMP_RESULTS"
 git -C "$TMP_REPO" init -q
 git -C "$TMP_REPO" config user.email test@example.com

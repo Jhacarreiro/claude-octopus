@@ -14,11 +14,9 @@ CYAN=""; GREEN=""; MAGENTA=""; NC=""
 TMUX_MODE=false
 DRY_RUN=false
 SUPPORTS_PARALLEL_FILE_SAFETY=false
-TEST_TMP_DIR="/tmp/octopus-tests-$$"
 RESULTS_DIR="$TEST_TMP_DIR/results"
 WORKSPACE_DIR="$RESULTS_DIR/workspace"
 mkdir -p "$WORKSPACE_DIR/.octo/agents"
-trap 'rm -rf "$TEST_TMP_DIR"' EXIT INT TERM
 
 SCENARIO_FILE="$RESULTS_DIR/scenario"
 ADEQUACY_COUNT_FILE="$RESULTS_DIR/adequacy-count"

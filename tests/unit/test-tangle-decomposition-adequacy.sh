@@ -23,6 +23,7 @@ SCENARIO_FILE="$RESULTS_DIR/scenario"
 ADEQUACY_COUNT_FILE="$RESULTS_DIR/adequacy-count"
 REDECOMPOSE_COUNT_FILE="$RESULTS_DIR/redecompose-count"
 RECONSIDER_COUNT_FILE="$RESULTS_DIR/reconsider-count"
+RECONSIDER_ATTEMPTS_FILE="$RESULTS_DIR/reconsider-attempts"
 SPAWN_FILE="$RESULTS_DIR/spawns"
 DECOMPOSE_PROMPT_FILE="$RESULTS_DIR/decompose-prompt"
 REDECOMPOSE_PROMPT_FILE="$RESULTS_DIR/redecompose-prompt"
@@ -44,6 +45,16 @@ design_review_ceremony() {
 }
 validate_tangle_results() { return 0; }
 tangle_contextual_review_gate() { return 0; }
+
+get_role_agent() {
+    case "$1" in
+        code-reviewer) printf "%s\n" "codex-review" ;;
+        implementer-heavy) printf "%s\n" "codex" ;;
+        architect) printf "%s\n" "claude-opus" ;;
+        *) printf "%s\n" "agy" ;;
+    esac
+}
+_octopus_profile_route_json() { printf "%s\n" "null"; }
 
 counter_next() {
     local file="$1" n=0
@@ -77,10 +88,13 @@ run_agent_sync() {
         tangle-decomposition-reconsideration)
             local reconsider_n
             reconsider_n=$(counter_next "$RECONSIDER_COUNT_FILE")
+            printf '%s|%s|%s\n' "$1" "${4:-}" "${5:-}" >> "$RECONSIDER_ATTEMPTS_FILE"
             printf '%s' "$prompt" > "$RECONSIDER_PROMPT_FILE"
             if [[ "$scenario" == "reconsider-fallback" && "$reconsider_n" -eq 1 ]]; then
                 printf '%s\n' "I'll ground-check the reviewer claims before deciding."
             elif [[ "$scenario" == "reconsider-third-fallback" && "$reconsider_n" -le 2 ]]; then
+                printf '%s\n' "I'll inspect the repo context before deciding."
+            elif [[ "$scenario" == "reconsider-exhaust" ]]; then
                 printf '%s\n' "I'll inspect the repo context before deciding."
             elif [[ "$scenario" == "planner-reject" ]]; then
                 cat <<'EOF'
@@ -106,7 +120,7 @@ EOF
                 second-fail)
                     printf '%s\n' 'VERDICT: FAIL' 'REASONS: scopes still cannot materialize the requested deliverable' 'SCOPE_REVIEW:' '- MOVE_TO_READS: scripts/lib/workflows.sh — context only'
                     ;;
-                adequacy-repair|reconsider-fallback|reconsider-third-fallback)
+                adequacy-repair|reconsider-fallback|reconsider-third-fallback|reconsider-exhaust)
                     if [[ "$n" -eq 1 ]]; then
                         printf '%s\n' 'VERDICT: FAIL' 'REASONS: existing workflow file is context-only and the app artifact is missing' 'SCOPE_REVIEW:' '- MOVE_TO_READS: scripts/lib/workflows.sh — context only; create the app in a new tree'
                     else
@@ -146,6 +160,7 @@ reset_scenario() {
     printf '0' > "$ADEQUACY_COUNT_FILE"
     printf '0' > "$REDECOMPOSE_COUNT_FILE"
     printf '0' > "$RECONSIDER_COUNT_FILE"
+    : > "$RECONSIDER_ATTEMPTS_FILE"
     : > "$SPAWN_FILE"
     : > "$DECOMPOSE_PROMPT_FILE"
     : > "$REDECOMPOSE_PROMPT_FILE"
@@ -223,20 +238,45 @@ else
     test_fail "planner rejection was not preserved as advisory adjudication for second review"
 fi
 
-test_case "unusable planner reconsideration retries once with fallback before spawn"
+test_case "unusable planner reconsideration advances through configured fallback chain"
 run_case "reconsider-fallback"
-if [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]] && [[ "$(cat "$RECONSIDER_COUNT_FILE")" -eq 2 ]] && [[ -s "$SPAWN_FILE" ]] && grep -q 'fallback planner' "$LOG_FILE" && grep -q 'STRICT RETRY' "$RECONSIDER_PROMPT_FILE"; then
+first_attempt=$(sed -n '1p' "$RECONSIDER_ATTEMPTS_FILE")
+second_attempt=$(sed -n '2p' "$RECONSIDER_ATTEMPTS_FILE")
+if [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]] && [[ "$(cat "$RECONSIDER_COUNT_FILE")" -eq 2 ]] && [[ -s "$SPAWN_FILE" ]] && \
+   [[ "$first_attempt" == "agy|researcher|tangle" ]] && [[ "$second_attempt" == "codex-review|researcher|tangle" ]] && \
+   grep -q "Fallback chain 'default': agy failed (semantic-invalid); trying next candidate" "$LOG_FILE"; then
     test_pass
 else
-    test_fail "unusable planner success did not trigger one structured fallback retry"
+    test_fail "semantic planner fallback did not use the configured chain while preserving researcher/tangle semantics"
 fi
 
-test_case "two unusable planner responses escalate once to heavy fallback before spawn"
+test_case "two unusable planner responses advance from code-reviewer routing to implementer-heavy routing"
 run_case "reconsider-third-fallback"
-if [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]] && [[ "$(cat "$RECONSIDER_COUNT_FILE")" -eq 3 ]] && [[ -s "$SPAWN_FILE" ]] && grep -q 'heavy fallback planner' "$LOG_FILE" && grep -q 'FINAL STRUCTURED RETRY' "$RECONSIDER_PROMPT_FILE"; then
+mapfile -t attempts < "$RECONSIDER_ATTEMPTS_FILE"
+if [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]] && [[ "$(cat "$RECONSIDER_COUNT_FILE")" -eq 3 ]] && [[ -s "$SPAWN_FILE" ]] && \
+   [[ "${attempts[0]:-}" == 'agy|researcher|tangle' ]] && \
+   [[ "${attempts[1]:-}" == "codex-review|researcher|tangle" ]] && \
+   [[ "${attempts[2]:-}" == "codex|researcher|tangle" ]] && \
+   [[ "${#attempts[@]}" -eq 3 ]]; then
     test_pass
 else
-    test_fail "second unusable planner response did not escalate once to heavy fallback"
+    test_fail "planner fallback did not advance through primary -> code-reviewer -> implementer-heavy routing"
+fi
+
+test_case "configured fallback chain exhausts through architect and aborts before spawn"
+reset_scenario "reconsider-exhaust"
+status=0
+tangle_develop 'Build the requested externally observable application with a usable entry point.' > "$RESULTS_DIR/reconsider-exhaust.out" 2>&1 || status=$?
+mapfile -t attempts < "$RECONSIDER_ATTEMPTS_FILE"
+if [[ "$status" -ne 0 ]] && [[ "$(cat "$RECONSIDER_COUNT_FILE")" -eq 4 ]] && [[ ! -s "$SPAWN_FILE" ]] && \
+   [[ "${attempts[0]:-}" == 'agy|researcher|tangle' ]] && \
+   [[ "${attempts[1]:-}" == "codex-review|researcher|tangle" ]] && \
+   [[ "${attempts[2]:-}" == "codex|researcher|tangle" ]] && \
+   [[ "${attempts[3]:-}" == "claude-opus|researcher|tangle" ]] && \
+   grep -q "Fallback chain 'default' exhausted without a usable result" "$LOG_FILE"; then
+    test_pass
+else
+    test_fail "configured fallback chain did not exhaust through architect before failing closed"
 fi
 
 test_case "second semantic FAIL aborts before implementation spawn"

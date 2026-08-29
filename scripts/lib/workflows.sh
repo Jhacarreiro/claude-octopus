@@ -1922,29 +1922,21 @@ Current decomposition:
 ${previous_decomposition}
 Independent review:
 ${adequacy_review}"
-    local primary="agy" fallback="codex" heavy_fallback="codex" response=""
+    local primary="agy" response=""
     if declare -f octopus_agent_override >/dev/null 2>&1; then
         primary=$(octopus_execution_profile_provider "tangle" "decompose" "researcher" "agy")
-        fallback=$(octopus_execution_profile_provider "tangle" "decompose_fallback" "implementer" "codex")
-        heavy_fallback=$(octopus_execution_profile_provider "tangle" "decompose_heavy" "implementer-heavy" "codex")
     fi
-    if response=$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-reconsideration" run_agent_sync "$primary" "$prompt" 0 "researcher" "tangle") && tangle_reconsideration_response_valid "$response"; then
-        printf '%s\n' "$response"; return 0
+    if ! declare -f run_agent_sync_fallback_chain >/dev/null 2>&1; then
+        log ERROR "Planner reconsideration requires the configured fallback-chain engine"
+        return 1
     fi
-    local retry_prompt="${prompt}
-
-STRICT RETRY: return only the exact DECISIONS: and DECOMPOSITION: structure; do not narrate or inspect."
-    if response=$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-reconsideration" run_agent_sync "$fallback" "$retry_prompt" 0 "implementer" "tangle") && tangle_reconsideration_response_valid "$response"; then
-        log WARN "Planner reconsideration primary response was unusable; fallback planner succeeded"
-        printf '%s\n' "$response"; return 0
+    if response=$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-reconsideration" \
+        run_agent_sync_fallback_chain "$primary" "$prompt" 0 "researcher" "tangle" \
+        tangle_reconsideration_response_valid default); then
+        printf '%s\n' "$response"
+        return 0
     fi
-    local heavy_retry_prompt="${retry_prompt}
-
-FINAL STRUCTURED RETRY: preserve the original task and adjudicate the review."
-    if response=$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-reconsideration" run_agent_sync "$heavy_fallback" "$heavy_retry_prompt" 0 "implementer-heavy" "tangle") && tangle_reconsideration_response_valid "$response"; then
-        log WARN "Planner reconsideration escalated to heavy fallback planner"
-        printf '%s\n' "$response"; return 0
-    fi
+    log ERROR "Planner reconsideration exhausted configured fallback chain without usable DECISIONS+DECOMPOSITION"
     return 1
 }
 

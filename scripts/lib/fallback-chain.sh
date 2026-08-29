@@ -124,6 +124,22 @@ octo_fallback_chain_agent_specs() {
     done < <(jq -c '.[]' <<<"$chain" 2>/dev/null)
 }
 
+octo_fallback_agent_available() {
+    local spec="${1:-}" executor=""
+    executor="${spec%%:*}"
+    [[ -n "$executor" ]] || return 1
+
+    if declare -f is_agent_available_v2 >/dev/null 2>&1; then
+        is_agent_available_v2 "$executor"
+        return $?
+    fi
+    if declare -f is_agent_available >/dev/null 2>&1; then
+        is_agent_available "$executor"
+        return $?
+    fi
+    return 1
+}
+
 _octo_fallback_provider_identity() {
     local spec="${1:-}" executor=""
     executor="${spec%%:*}"
@@ -149,7 +165,7 @@ octo_fallback_first_available() {
         executor="${spec%%:*}"
         candidate_provider="$(_octo_fallback_provider_identity "$spec")"
         [[ -n "$preferred_provider" && "$candidate_provider" == "$preferred_provider" ]] && continue
-        if declare -f is_agent_available >/dev/null 2>&1 && is_agent_available "$executor"; then
+        if octo_fallback_agent_available "$spec"; then
             printf '%s\n' "$spec"
             return 0
         fi

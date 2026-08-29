@@ -9,9 +9,11 @@ source "$PROJECT_ROOT/scripts/lib/fallback-chain.sh"
 
 test_suite "configurable fallback chains"
 
-TMP_ROOT=$(mktemp -d)
-trap 'rm -rf "$TMP_ROOT"' EXIT
-CFG="$TMP_ROOT/providers.json"
+TEST_TMP_DIR="/tmp/octopus-tests-$$"
+mkdir -p "$TEST_TMP_DIR"
+trap 'rm -rf "$TEST_TMP_DIR"' EXIT INT TERM
+TMP_ROOT="$TEST_TMP_DIR"
+CFG="$TEST_TMP_DIR/providers.json"
 export OCTOPUS_PROVIDERS_CONFIG="$CFG"
 
 write_config() {
@@ -50,6 +52,14 @@ is_agent_available() { [[ "$1" == "claude" ]]; }
 test_case "technical availability uses the same configured/default chain"
 chosen=$(octo_fallback_first_available default commandcode)
 if [[ "$chosen" == "claude:claude-opus-test" ]]; then test_pass; else test_fail "expected qualified claude spec, got $chosen"; fi
+
+test_case "technical fallback prefers fail-closed v2 availability when present"
+is_agent_available() { return 0; }
+is_agent_available_v2() { [[ "$1" == "claude" ]]; }
+chosen=$(octo_fallback_first_available default commandcode)
+if [[ "$chosen" == "claude:claude-opus-test" ]]; then test_pass; else test_fail "legacy fail-open availability leaked into fallback selection: $chosen"; fi
+unset -f is_agent_available_v2
+is_agent_available() { [[ "$1" == "claude" ]]; }
 
 test_case "technical fallback preserves explicit provider:model candidates"
 jq '.routing.fallbackChains.default=[{"provider":"claude","model":"claude-pinned-test"}]' "$CFG" > "$CFG.tmp"
@@ -110,6 +120,6 @@ run_agent_sync() {
 : > "$ATTEMPTS"
 rc=0
 run_agent_sync_fallback_chain commandcode:primary 'plan it' 30 researcher tangle validate_protocol default >/dev/null || rc=$?
-if [[ "$rc" -ne 0 ]] && grep -q 'claude:claude-opus-test' "$ATTEMPTS"; then test_pass; else test_fail "chain did not exhaust safely"; fi
+if [[ "$rc" -ne 0 ]] && grep -c 'claude:claude-opus-test' "$ATTEMPTS" >/dev/null; then test_pass; else test_fail "chain did not exhaust safely"; fi
 
 test_summary

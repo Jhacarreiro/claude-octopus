@@ -783,7 +783,7 @@ get_fallback_agent() {
     local task_type="$2"
     local candidate=""
 
-    if is_agent_available "$preferred"; then
+    if octo_fallback_agent_available "$preferred"; then
         echo "$preferred"
         return 0
     fi
@@ -793,7 +793,7 @@ get_fallback_agent() {
     # be fully configuration-driven.
     case "$preferred" in
         gemini|gemini-fast|gemini-image)
-            if is_agent_available "agy"; then
+            if octo_fallback_agent_available "agy"; then
                 echo "agy"
                 return 0
             fi

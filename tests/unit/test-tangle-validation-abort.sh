@@ -45,7 +45,7 @@ record_agents_batch_complete() { :; }
 
 run_agent_sync() {
     if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
-        printf '%s\n' 'VERDICT: PASS' 'REASONS: fixture decomposition is adequate'
+        printf '%s\n' 'VERDICT: PASS' 'SCOPE_REVIEW: NONE' 'REASONS: fixture decomposition is adequate'
         return 0
     fi
     printf '%s\n' '1. [CODING] Verify the existing fix. Files: apps/web/tests/setup.js'

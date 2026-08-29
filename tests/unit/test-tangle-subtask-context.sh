@@ -54,7 +54,7 @@ fi
 
 run_agent_sync() {
     if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
-        printf '%s\n' 'VERDICT: PASS' 'REASONS: fixture decomposition covers the requested template work'
+        printf '%s\n' 'VERDICT: PASS' 'SCOPE_REVIEW: NONE' 'REASONS: fixture decomposition covers the requested template work'
         return 0
     fi
     cat <<'EOF'

@@ -9,9 +9,6 @@ source "$PROJECT_ROOT/scripts/lib/fallback-chain.sh"
 
 test_suite "configurable fallback chains"
 
-TEST_TMP_DIR="/tmp/octopus-tests-$$"
-mkdir -p "$TEST_TMP_DIR"
-trap 'rm -rf "$TEST_TMP_DIR"' EXIT INT TERM
 TMP_ROOT="$TEST_TMP_DIR"
 CFG="$TEST_TMP_DIR/providers.json"
 export OCTOPUS_PROVIDERS_CONFIG="$CFG"

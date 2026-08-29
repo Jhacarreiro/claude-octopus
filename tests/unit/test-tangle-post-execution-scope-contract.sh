@@ -59,9 +59,11 @@ else
 fi
 
 # Isolate the wrapper from the existing quality gate; this suite specifically
-# verifies the additive deterministic scope contract.
+# verifies the deterministic scope contract and whether the base gate is invoked.
+VALIDATE_CALLS=0
 validate_tangle_results() {
     local task_group="$1"
+    VALIDATE_CALLS=$((VALIDATE_CALLS + 1))
     printf '%s\n' '# baseline validation' > "$RESULTS_DIR/tangle-validation-${task_group}.md"
     return 0
 }
@@ -71,10 +73,10 @@ test_case "validation wrapper fails and records out-of-scope changed paths"
 status=0
 tangle_validate_results_with_scope_contract fixture 'Build UI' "$BEFORE" "$SUBTASKS" || status=$?
 report="$RESULTS_DIR/tangle-validation-fixture.md"
-if [[ "$status" -ne 0 ]] && grep -q 'FAILED: Out-of-Scope Worktree Changes' "$report" && grep -q -- '- src/existing.ts' "$report" && grep -q 'Reads: never grants write permission' "$report"; then
+if [[ "$status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && grep -q 'deterministic write-scope pre-gate' "$report" && grep -q 'FAILED: Out-of-Scope Worktree Changes' "$report" && grep -q -- '- src/existing.ts' "$report" && grep -q 'Reads: never grants write permission' "$report"; then
     test_pass
 else
-    test_fail "scope violation did not hard-fail validation/report"
+    test_fail "scope violation did not fail before base validation/retries; calls=$VALIDATE_CALLS"
 fi
 
 test_case "scope violation is surfaced as one deterministic blocking finding"
@@ -95,10 +97,10 @@ git -C "$TMP_REPO" checkout -- src/existing.ts
 status=0
 tangle_validate_results_with_scope_contract repaired 'Build UI' "$BEFORE" "$SUBTASKS" || status=$?
 report="$RESULTS_DIR/tangle-validation-repaired.md"
-if [[ "$status" -eq 0 ]] && grep -q 'PASS: every changed path' "$report" && [[ -z "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" ]]; then
+if [[ "$status" -eq 0 ]] && [[ "$VALIDATE_CALLS" -eq 1 ]] && grep -q '# baseline validation' "$report" && grep -q 'PASS: every changed path' "$report" && [[ -z "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" ]]; then
     test_pass
 else
-    test_fail "scope contract did not clear after reverting illegal write"
+    test_fail "scope contract did not clear or base validation was not restored; calls=$VALIDATE_CALLS"
 fi
 
 test_summary

@@ -3880,21 +3880,11 @@ tangle_changed_paths_outside_write_scopes() {
     done <<< "$changed_paths" | sed '/^$/d' | sort -u
 }
 
-tangle_validate_results_with_scope_contract() {
-    local task_group="$1"
-    local original_prompt="$2"
-    local worktree_before_file="$3"
-    local subtasks="$4"
-    local validation_file="${RESULTS_DIR:-${HOME}/.claude-octopus/results}/tangle-validation-${task_group}.md"
-    local base_rc=0 violations="" authorized="" read_only=""
-
-    # Preserve all existing quality-gate behavior first. The deterministic scope
-    # contract is an additional hard gate over the actual worktree delta.
-    validate_tangle_results "$task_group" "$original_prompt" "$worktree_before_file" || base_rc=$?
-
-    authorized=$(tangle_authorized_write_scopes "$subtasks")
-    read_only=$(tangle_authorized_read_scopes "$subtasks")
-    violations=$(tangle_changed_paths_outside_write_scopes "$subtasks" "$worktree_before_file")
+tangle_append_write_scope_contract_report() {
+    local validation_file="$1"
+    local authorized="$2"
+    local read_only="$3"
+    local violations="$4"
 
     {
         echo ""
@@ -3921,16 +3911,46 @@ tangle_validate_results_with_scope_contract() {
             echo "PASS: every changed path produced by this Tangle run is inside an authorized Files:/Creates: scope."
         fi
     } >> "$validation_file"
+}
+
+tangle_validate_results_with_scope_contract() {
+    local task_group="$1"
+    local original_prompt="$2"
+    local worktree_before_file="$3"
+    local subtasks="$4"
+    local validation_file="${RESULTS_DIR:-${HOME}/.claude-octopus/results}/tangle-validation-${task_group}.md"
+    local base_rc=0 violations="" authorized="" read_only=""
+
+    authorized=$(tangle_authorized_write_scopes "$subtasks")
+    read_only=$(tangle_authorized_read_scopes "$subtasks")
+    violations=$(tangle_changed_paths_outside_write_scopes "$subtasks" "$worktree_before_file")
 
     TANGLE_SCOPE_CONTRACT_VIOLATIONS="$violations"
     export TANGLE_SCOPE_CONTRACT_VIOLATIONS
 
+    # Deterministic write-scope violations are known before the model-driven
+    # quality/retry path runs. Fail fast so an interrupted retry cannot erase
+    # the only opportunity to account for out-of-scope writes.
     if [[ -n "$violations" ]]; then
+        mkdir -p "$(dirname "$validation_file")"
+        {
+            echo "# Tangle Validation Report"
+            echo ""
+            echo "**Task Group:** $task_group"
+            echo "**Status:** FAILED"
+            echo "**Reason:** deterministic write-scope pre-gate"
+        } > "$validation_file"
+        tangle_append_write_scope_contract_report "$validation_file" "$authorized" "$read_only" "$violations"
         log ERROR "Tangle write-scope contract violated by changed path(s): $(printf '%s' "$violations" | tr '\n' ' ')"
         return 1
     fi
+
+    # Preserve the existing quality gate when deterministic scope is clean.
+    validate_tangle_results "$task_group" "$original_prompt" "$worktree_before_file" || base_rc=$?
+    tangle_append_write_scope_contract_report "$validation_file" "$authorized" "$read_only" "$violations"
     return "$base_rc"
 }
+
 
 tangle_ensure_scope_contract_finding() {
     local findings_file="$1"

@@ -16,13 +16,28 @@ test_role_map_research_design_copywriting_is_agy() {
     else test_fail "expected 3x agy, got: $(echo "$out" | tr '\n' ' ')"; fi
 }
 
-test_fallback_chain_prefers_agy() {
-    test_case "get_fallback_agent falls back to agy (not gemini) when codex is down"
+test_fallback_chain_is_configuration_driven() {
+    test_case "get_fallback_agent no longer hardcodes codex -> agy"
     local out
     out="$(bash -c 'source "'"$PROJECT_ROOT"'/scripts/lib/model-resolver.sh" 2>/dev/null
         is_agent_available(){ [[ "$1" == agy ]]; }
         get_fallback_agent codex')"
-    [[ "$out" == "agy" ]] && test_pass || test_fail "expected agy, got: $out"
+    [[ "$out" == "codex" ]] && test_pass || test_fail "expected preferred identity when configured/default chain has no available candidate, got: $out"
+}
+
+test_configured_fallback_chain_routes_native_resolver() {
+    test_case "get_fallback_agent honors routing.fallbackChains and routing.roles"
+    local tmp cfg out
+    tmp=$(mktemp -d)
+    cfg="$tmp/providers.json"
+    cat > "$cfg" <<'JSON'
+{"routing":{"roles":{"architect":{"provider":"claude","model":"claude-opus-test"}},"fallbackChains":{"default":[{"role":"architect"}]}}}
+JSON
+    out="$(OCTOPUS_PROVIDERS_CONFIG="$cfg" bash -c 'source "'"$PROJECT_ROOT"'/scripts/lib/model-resolver.sh" 2>/dev/null
+        is_agent_available(){ [[ "$1" == claude ]]; }
+        get_fallback_agent codex coding')"
+    rm -rf "$tmp"
+    [[ "$out" == "claude:claude-opus-test" ]] && test_pass || test_fail "expected configured qualified claude fallback, got: $out"
 }
 
 test_no_functional_gemini_dispatch() {
@@ -46,7 +61,8 @@ test_tangle_decompose_default_is_agy() {
 }
 
 test_role_map_research_design_copywriting_is_agy
-test_fallback_chain_prefers_agy
+test_fallback_chain_is_configuration_driven
+test_configured_fallback_chain_routes_native_resolver
 test_no_functional_gemini_dispatch
 test_tangle_decompose_default_is_agy
 

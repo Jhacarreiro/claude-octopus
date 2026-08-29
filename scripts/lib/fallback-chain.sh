@@ -132,7 +132,7 @@ _octo_fallback_provider_identity() {
     fi
     case "$executor" in
         codex|codex-*) echo codex ;;
-        claude|claude-*|claude-opus|claude-opus-*) echo claude ;;
+        claude|claude-*) echo claude ;;
         agy|agy-*|antigravity|gemini|gemini-*) echo agy ;;
         commandcode|commandcode-*) echo commandcode ;;
         openrouter|openrouter-*) echo openrouter ;;

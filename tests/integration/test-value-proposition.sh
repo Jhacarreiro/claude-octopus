@@ -135,7 +135,7 @@ test_quality_gates_validation() {
     # wrapper owns isolation/safety preflight; _tangle_develop_in_workspace owns
     # decomposition and validation, so line-proximity to tangle_develop() is not
     # a stable integration boundary.
-    local tangle_entry_code="" tangle_workspace_code=""
+    local tangle_entry_code="" tangle_workspace_code="" tangle_validation_wrapper_code=""
     if [[ -f "$ALL_SRC" ]]; then
         tangle_entry_code=$(awk '
             /^tangle_develop\(\) \{/ { capture=1 }
@@ -147,11 +147,17 @@ test_quality_gates_validation() {
             capture { print }
             capture && /^}$/ { exit }
         ' "$ALL_SRC")
+        tangle_validation_wrapper_code=$(awk '
+            /^tangle_validate_results_with_scope_contract\(\) \{/ { capture=1 }
+            capture { print }
+            capture && /^}$/ { exit }
+        ' "$ALL_SRC")
     fi
 
     ((TESTS_RUN++)) || true
     if grep -c "_tangle_develop_in_workspace" >/dev/null <<< "$tangle_entry_code" && \
-       grep -c 'validate_tangle_results "$task_group"' >/dev/null <<< "$tangle_workspace_code"; then
+       grep -c 'tangle_validate_results_with_scope_contract "$task_group"' >/dev/null <<< "$tangle_workspace_code" && \
+       grep -c 'validate_tangle_results "$task_group"' >/dev/null <<< "$tangle_validation_wrapper_code"; then
         echo -e "${GREEN}✓${NC} Tangle includes validation step"
         ((TESTS_PASSED++)) || true
     else

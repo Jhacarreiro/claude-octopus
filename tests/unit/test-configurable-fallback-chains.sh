@@ -59,7 +59,10 @@ if [[ "$chosen" == "claude:claude-opus-test" ]]; then test_pass; else test_fail 
 test_case "technical fallback fails closed when v2 availability is absent"
 unset -f is_agent_available_v2
 is_agent_available() { return 0; }
-if chosen=$(octo_fallback_first_available default commandcode); then
+chain_specs="$(octo_fallback_chain_agent_specs default)"
+if [[ -z "$chain_specs" ]]; then
+  test_fail "default fallback chain unexpectedly empty; fail-closed assertion would be vacuous"
+elif chosen=$(octo_fallback_first_available default commandcode); then
   test_fail "legacy fail-open availability selected an unverified fallback: $chosen"
 else
   test_pass

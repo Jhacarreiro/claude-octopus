@@ -30,9 +30,12 @@ export OCTOPUS_REVIEW_DEBATER_AGENT='commandcode:qwen/qwen3.8-27b'
 export OCTOPUS_REVIEW_SYNTHESIZER_AGENT='commandcode:thinkingmachines/inkling-small'
 
 test_case "semantic seats return literal provider:model overrides"
-if [[ "$(review_agent_for_seat codex implementation-verifier)" == 'codex:gpt-5.6-luna' ]] && \
-   [[ "$(review_agent_for_seat codex implementation-debater)" == 'commandcode:qwen/qwen3.8-27b' ]] && \
-   [[ "$(review_agent_for_seat claude-sonnet implementation-synthesizer)" == 'commandcode:thinkingmachines/inkling-small' ]]; then
+if [[ "$(review_agent_for_seat codex implementation-logic-reviewer)" == "$OCTOPUS_REVIEW_LOGIC_AGENT" ]] && \
+   [[ "$(review_agent_for_seat claude-sonnet implementation-security-reviewer)" == "$OCTOPUS_REVIEW_SECURITY_AGENT" ]] && \
+   [[ "$(review_agent_for_seat claude-sonnet implementation-architecture-reviewer)" == "$OCTOPUS_REVIEW_ARCHITECTURE_AGENT" ]] && \
+   [[ "$(review_agent_for_seat codex implementation-verifier)" == "$OCTOPUS_REVIEW_VERIFIER_AGENT" ]] && \
+   [[ "$(review_agent_for_seat codex implementation-debater)" == "$OCTOPUS_REVIEW_DEBATER_AGENT" ]] && \
+   [[ "$(review_agent_for_seat claude-sonnet implementation-synthesizer)" == "$OCTOPUS_REVIEW_SYNTHESIZER_AGENT" ]]; then
   test_pass
 else
   test_fail "semantic seat override mismatch"
@@ -61,17 +64,17 @@ OCTOPUS_REVIEW_SECURITY_AGENT='claude:claude-opus-5'
 test_case "Round 1 override seats are appended when config fleet lacks their roles"
 fleet=$'codex:implementation-logic-reviewer:correctness and logic bugs, edge cases, regressions\nclaude-sonnet:implementation-architecture-reviewer:architecture, integration, API contracts, breaking changes\n'
 expanded="$(review_fleet_with_override_seats "$fleet")"
-if grep -Fq ':implementation-security-reviewer:' <<< "$expanded" && \
-   grep -Fq ':implementation-cve-reviewer:' <<< "$expanded" && \
-   grep -Fq ':implementation-diversity-reviewer:' <<< "$expanded"; then
+if grep -Fc ':implementation-security-reviewer:' <<< "$expanded" >/dev/null && \
+   grep -Fc ':implementation-cve-reviewer:' <<< "$expanded" >/dev/null && \
+   grep -Fc ':implementation-diversity-reviewer:' <<< "$expanded" >/dev/null; then
   test_pass
 else
   test_fail "explicit Round 1 seats were not appended: $(tr '\n' '|' <<< "$expanded")"
 fi
 
 test_case "Round 1 dispatch replaces executor placeholder with literal seat identity"
-if [[ "$(review_agent_for_seat commandcode implementation-cve-reviewer)" == 'commandcode:tencent/hy3-paid' ]] && \
-   [[ "$(review_agent_for_seat commandcode implementation-diversity-reviewer)" == 'commandcode:qwen/qwen3.8-27b' ]]; then
+if [[ "$(review_agent_for_seat commandcode implementation-cve-reviewer)" == "$OCTOPUS_REVIEW_CVE_AGENT" ]] && \
+   [[ "$(review_agent_for_seat commandcode implementation-diversity-reviewer)" == "$OCTOPUS_REVIEW_DIVERSITY_AGENT" ]]; then
   test_pass
 else
   test_fail "Round 1 literal seat identities were not preserved"
@@ -86,7 +89,7 @@ else
 fi
 
 test_case "model-qualified CommandCode seats retain provider telemetry identity"
-if [[ "$(review_provider_key_from_agent_type 'commandcode:qwen/qwen3.8-27b')" == 'commandcode' ]]; then
+if [[ "$(review_provider_key_from_agent_type "$OCTOPUS_REVIEW_DIVERSITY_AGENT")" == 'commandcode' ]]; then
   test_pass
 else
   test_fail "CommandCode review seat was not classified as commandcode"

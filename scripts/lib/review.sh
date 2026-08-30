@@ -247,7 +247,7 @@ review_fleet_with_override_seats() {
         override="$(review_seat_agent_override "$role")" || rc=$?
         [[ "$rc" -eq 0 ]] || return "$rc"
 
-        if ! grep -Fq ":${role}:" <<< "$fleet"; then
+        if ! grep -Fc ":${role}:" <<< "$fleet" >/dev/null; then
             executor="$(octo_agent_spec_executor "$override")"
             specialty="$(review_seat_specialty "$role")"
             fleet+="${executor}:${role}:${specialty}"$'\n'

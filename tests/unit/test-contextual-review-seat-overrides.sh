@@ -61,23 +61,25 @@ else
 fi
 OCTOPUS_REVIEW_SECURITY_AGENT='claude:claude-opus-5'
 
-test_case "Round 1 override seats are appended when config fleet lacks their roles"
+test_case "Round 1 override seats are emitted exactly once with configured providers"
 fleet=$'codex:implementation-logic-reviewer:correctness and logic bugs, edge cases, regressions\nclaude-sonnet:implementation-architecture-reviewer:architecture, integration, API contracts, breaking changes\n'
 expanded="$(review_fleet_with_override_seats "$fleet")"
-if grep -Fc ':implementation-security-reviewer:' <<< "$expanded" >/dev/null && \
-   grep -Fc ':implementation-cve-reviewer:' <<< "$expanded" >/dev/null && \
-   grep -Fc ':implementation-diversity-reviewer:' <<< "$expanded" >/dev/null; then
+logic_provider="${OCTOPUS_REVIEW_LOGIC_AGENT%%:*}"
+security_provider="${OCTOPUS_REVIEW_SECURITY_AGENT%%:*}"
+cve_provider="${OCTOPUS_REVIEW_CVE_AGENT%%:*}"
+diversity_provider="${OCTOPUS_REVIEW_DIVERSITY_AGENT%%:*}"
+if [[ "$(grep -Fc ':implementation-logic-reviewer:' <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -Fc ':implementation-architecture-reviewer:' <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -Fc ':implementation-security-reviewer:' <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -Fc ':implementation-cve-reviewer:' <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -Fc ':implementation-diversity-reviewer:' <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -Fc "${logic_provider}:implementation-logic-reviewer:" <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -Fc "${security_provider}:implementation-security-reviewer:" <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -Fc "${cve_provider}:implementation-cve-reviewer:" <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -Fc "${diversity_provider}:implementation-diversity-reviewer:" <<< "$expanded")" -eq 1 ]]; then
   test_pass
 else
-  test_fail "explicit Round 1 seats were not appended: $(tr '\n' '|' <<< "$expanded")"
-fi
-
-test_case "Round 1 dispatch replaces executor placeholder with literal seat identity"
-if [[ "$(review_agent_for_seat commandcode implementation-cve-reviewer)" == "$OCTOPUS_REVIEW_CVE_AGENT" ]] && \
-   [[ "$(review_agent_for_seat commandcode implementation-diversity-reviewer)" == "$OCTOPUS_REVIEW_DIVERSITY_AGENT" ]]; then
-  test_pass
-else
-  test_fail "Round 1 literal seat identities were not preserved"
+  test_fail "Round 1 generated fleet did not preserve unique configured-provider seats: $(tr '\n' '|' <<< "$expanded")"
 fi
 
 test_case "unconfigured roles preserve upstream default executor"

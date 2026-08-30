@@ -133,10 +133,10 @@ octo_fallback_agent_available() {
         is_agent_available_v2 "$executor"
         return $?
     fi
-    if declare -f is_agent_available >/dev/null 2>&1; then
-        is_agent_available "$executor"
-        return $?
-    fi
+    # Fallback candidates must fail closed. The legacy is_agent_available()
+    # assumes unknown providers are available, which can defer an invalid seat
+    # until dispatch. Callers that use configurable fallback chains must provide
+    # the v2 availability contract from model-resolver.sh.
     return 1
 }
 

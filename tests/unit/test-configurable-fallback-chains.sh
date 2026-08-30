@@ -45,7 +45,7 @@ expected=$'claude:claude-opus-test\ncommandcode:custom/model'
 if [[ "$specs" == "$expected" ]]; then test_pass; else test_fail "override not honored: [$specs]"; fi
 
 write_config
-is_agent_available() { [[ "$1" == "claude" ]]; }
+is_agent_available_v2() { [[ "$1" == "claude" ]]; }
 test_case "technical availability uses the same configured/default chain"
 chosen=$(octo_fallback_first_available default commandcode)
 if [[ "$chosen" == "claude:claude-opus-test" ]]; then test_pass; else test_fail "expected qualified claude spec, got $chosen"; fi
@@ -55,8 +55,16 @@ is_agent_available() { return 0; }
 is_agent_available_v2() { [[ "$1" == "claude" ]]; }
 chosen=$(octo_fallback_first_available default commandcode)
 if [[ "$chosen" == "claude:claude-opus-test" ]]; then test_pass; else test_fail "legacy fail-open availability leaked into fallback selection: $chosen"; fi
+
+test_case "technical fallback fails closed when v2 availability is absent"
 unset -f is_agent_available_v2
-is_agent_available() { [[ "$1" == "claude" ]]; }
+is_agent_available() { return 0; }
+if chosen=$(octo_fallback_first_available default commandcode); then
+  test_fail "legacy fail-open availability selected an unverified fallback: $chosen"
+else
+  test_pass
+fi
+is_agent_available_v2() { [[ "$1" == "claude" ]]; }
 
 test_case "technical fallback preserves explicit provider:model candidates"
 jq '.routing.fallbackChains.default=[{"provider":"claude","model":"claude-pinned-test"}]' "$CFG" > "$CFG.tmp"

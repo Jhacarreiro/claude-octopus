@@ -235,6 +235,31 @@ cat > "$CONFIG_FILE" << EOF
 EOF
 assert_eq "$(resolve_octopus_model "commandcode" "commandcode-research" "research" "researcher")" "minimaxai/minimax-m3" "Cross-provider legacy role falls through to matching object phase"
 
+# Regression: a bare provider alias keeps role-provider precedence over a
+# legacy phase model route, while model-like gpt-* values remain model routes.
+clear_model_cache
+cat > "$CONFIG_FILE" << EOF
+{
+  "version": "3.0",
+  "providers": { "agy": { "default": "agy-default" } },
+  "routing": {
+    "roles": { "researcher": "gemini" },
+    "phases": { "research": "agy-phase-model" }
+  }
+}
+EOF
+assert_eq "$(resolve_octopus_model "agy" "agy-research" "research" "researcher")" "agy-default" "Bare gemini alias preserves matching role-provider precedence"
+
+clear_model_cache
+cat > "$CONFIG_FILE" << EOF
+{
+  "version": "3.0",
+  "providers": { "codex": { "default": "gpt-default" } },
+  "routing": { "roles": { "logic-reviewer": "gpt-5.5" } }
+}
+EOF
+assert_eq "$(resolve_octopus_model "codex" "codex" "review" "logic-reviewer")" "gpt-5.5" "Bare gpt model remains a model route, not a provider alias"
+
 # Test 6: Recursive reference (codex:spark)
 clear_model_cache
 cat > "$CONFIG_FILE" << EOF

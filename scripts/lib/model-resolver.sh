@@ -199,13 +199,54 @@ validate_model_name_for_provider() {
     esac
 }
 
+_octo_canonical_known_provider_name() {
+    local requested normalized id aliases command org caps alias alias_base old_ifs
+    requested="${1:-}"
+    normalized="$(octo_provider_normalize "$requested")"
+    [[ -n "$normalized" ]] || return 1
+
+    # Routing values are ambiguous: a bare string can be either a provider or
+    # a model. Accept canonical IDs and exact aliases (plus the exact base of a
+    # wildcard alias), but do not let wildcard aliases such as gpt* classify a
+    # concrete model like gpt-5.5 as a provider route.
+    while IFS='|' read -r id aliases command org caps; do
+        if [[ "$normalized" == "$id" ]]; then
+            printf '%s\n' "$id"
+            return 0
+        fi
+        old_ifs="$IFS"
+        IFS=','
+        for alias in $aliases; do
+            IFS="$old_ifs"
+            [[ -n "$alias" ]] || continue
+            case "$alias" in
+                *'*')
+                    alias_base="${alias%\*}"
+                    [[ "$normalized" == "$alias_base" ]] || continue
+                    ;;
+                *)
+                    [[ "$normalized" == "$alias" ]] || continue
+                    ;;
+            esac
+            printf '%s\n' "$id"
+            return 0
+        done
+        IFS="$old_ifs"
+    done <<EOF
+$(octo_provider_registry_rows)
+EOF
+
+    # Preserve the legacy provider variant accepted before registry-backed
+    # classification was introduced.
+    if [[ "$normalized" == "agy-research" ]]; then
+        printf '%s\n' "agy"
+        return 0
+    fi
+    return 1
+}
+
 _octo_is_known_provider_name() {
-    case "$1" in
-        codex|claude|perplexity|qwen|copilot|opencode|ollama|openrouter|orcarouter|cursor-agent|commandcode|vibe|agy|agy-research|antigravity)
-            return 0 ;;
-        *)
-            return 1 ;;
-    esac
+    _octo_canonical_known_provider_name "${1:-}" >/dev/null 2>&1
 }
 
 _octo_effective_cost_mode() {

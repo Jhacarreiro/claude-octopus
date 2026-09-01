@@ -1198,7 +1198,7 @@ Execution instructions:
 - Treat the original task as authoritative for requirements, explicit file targets, acceptance criteria, and forbidden changes.
 - Complete the assigned subtask without dropping original constraints that apply to it.
 - For [CODING] work, edit the repository files directly in the current worktree. Do not only describe a plan or paste code snippets.
-- For [CODING] work, treat file paths/directories named in the assigned subtask as approximate exclusive write scope intent. Use the resolved repository context files above as the concrete targets. Do not edit files clearly owned by another subtask; report a blocker if the required change crosses scopes.
+- For [CODING] work, treat the assigned subtask's Files: paths/directories as the exclusive write-scope authority. The resolved repository context above is lookup/read guidance and may help resolve an approximate Files: scope to its concrete target; it does not grant permission to edit additional files. Do not edit files clearly owned by another subtask; report a blocker if the required change crosses scopes.
 - If the subtask creates a new exported component, command, event type, route, hook, or helper, wire it into at least one production call site unless the original task explicitly asks for an isolated artifact.
 - Tests alone are not integration evidence. User-facing features must be reachable from the relevant user flow or the subtask must report a blocker.
 Migration safety:
@@ -1509,6 +1509,35 @@ ${previous_decomposition}
     OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-reformat-validation" run_agent_sync "$tangle_decompose_fallback_agent" "$reformat_prompt" 0 "researcher" "tangle"
 }
 
+tangle_effective_write_scopes() {
+    local subtask="$1"
+    local scopes="${2:-}"
+    local effective_scopes=""
+
+    if [[ -z "$scopes" ]]; then
+        scopes=$(tangle_extract_write_scopes "$subtask")
+    fi
+    [[ -n "$scopes" ]] || return 0
+
+    while IFS= read -r scope; do
+        [[ -z "$scope" ]] && continue
+        if tangle_scope_is_known_or_explicit_new_file "$scope"; then
+            effective_scopes="${effective_scopes}${scope}"$'\n'
+        else
+            local resolved_scopes
+            resolved_scopes=$(tangle_resolve_repo_context_files "$subtask")
+            if [[ -n "$resolved_scopes" ]]; then
+                effective_scopes="${effective_scopes}${resolved_scopes}"$'\n'
+            else
+                effective_scopes="${effective_scopes}${scope}"$'\n'
+            fi
+        fi
+    done <<< "$scopes"
+
+    printf '%s\n' "$effective_scopes" | sed '/^$/d' | sort -u
+}
+
+
 tangle_validate_parallel_write_scopes() {
     local subtasks="$1"
     local task_index=0
@@ -1538,26 +1567,8 @@ tangle_validate_parallel_write_scopes() {
             return 1
         fi
 
-        local effective_scopes=""
-        while IFS= read -r scope; do
-            [[ -z "$scope" ]] && continue
-            if tangle_scope_is_known_or_explicit_new_file "$scope"; then
-                effective_scopes="${effective_scopes}${scope}
-"
-            else
-                local resolved_scopes
-                resolved_scopes=$(tangle_resolve_repo_context_files "$subtask")
-                if [[ -n "$resolved_scopes" ]]; then
-                    effective_scopes="${effective_scopes}${resolved_scopes}
-"
-                else
-                    effective_scopes="${effective_scopes}${scope}
-"
-                fi
-            fi
-        done <<< "$scopes"
-        effective_scopes=$(printf '%s
-' "$effective_scopes" | sed '/^$/d' | sort -u)
+        local effective_scopes
+        effective_scopes=$(tangle_effective_write_scopes "$subtask" "$scopes")
 
         while IFS= read -r scope; do
             [[ -z "$scope" ]] && continue
@@ -1592,24 +1603,10 @@ tangle_consolidate_overlapping_subtasks() {
         tangle_line_is_numbered_subtask "$line" || continue
         lines+=("$line")
         if [[ "$line" =~ \[CODING\] ]]; then
-            local subtask scopes effective_scopes=""
+            local subtask scopes effective_scopes
             subtask=$(printf '%s\n' "$line" | sed -E 's/^[[:space:]]*(\*\*)?[0-9]+[\.\)][[:space:]]*//; s/^[[:space:]]+//')
             scopes=$(tangle_extract_write_scopes "$subtask")
-            while IFS= read -r scope; do
-                [[ -z "$scope" ]] && continue
-                if tangle_scope_is_known_or_explicit_new_file "$scope"; then
-                    effective_scopes="${effective_scopes}${scope}"$'\n'
-                else
-                    local resolved_scopes
-                    resolved_scopes=$(tangle_resolve_repo_context_files "$subtask")
-                    if [[ -n "$resolved_scopes" ]]; then
-                        effective_scopes="${effective_scopes}${resolved_scopes}"$'\n'
-                    else
-                        effective_scopes="${effective_scopes}${scope}"$'\n'
-                    fi
-                fi
-            done <<< "$scopes"
-            effective_scopes=$(printf '%s\n' "$effective_scopes" | sed '/^$/d' | sort -u)
+            effective_scopes=$(tangle_effective_write_scopes "$subtask" "$scopes")
             coding_lines+=("$line")
             coding_scopes+=("$effective_scopes")
             parent+=("$((${#parent[@]}))")
@@ -2462,6 +2459,23 @@ tangle_cleanup_verification_context() {
     unset TANGLE_VERIFY_PREV_EXIT_TRAP TANGLE_VERIFY_PREV_INT_TRAP TANGLE_VERIFY_PREV_TERM_TRAP
 }
 
+tangle_handle_verification_signal() {
+    local signal="$1"
+    local exit_code=1
+    case "$signal" in
+        INT) exit_code=130 ;;
+        TERM) exit_code=143 ;;
+    esac
+
+    # Cleanup restores the caller's signal trap. Re-deliver the original signal
+    # so that caller policy still runs, then force a signal-appropriate exit if
+    # that trap returns instead of terminating the shell.
+    tangle_cleanup_verification_context
+    kill -s "$signal" "$$" 2>/dev/null || true
+    exit "$exit_code"
+}
+
+
 tangle_verify() {
     local prompt="$1"
     local run_id="${OCTOPUS_VERIFY_RUN_ID:-$(date +%s)-$$}"
@@ -2509,7 +2523,9 @@ tangle_verify() {
     TANGLE_VERIFY_PREV_EXIT_TRAP=$(trap -p EXIT)
     TANGLE_VERIFY_PREV_INT_TRAP=$(trap -p INT)
     TANGLE_VERIFY_PREV_TERM_TRAP=$(trap -p TERM)
-    trap 'tangle_cleanup_verification_context' EXIT INT TERM
+    trap 'tangle_cleanup_verification_context' EXIT
+    trap 'tangle_handle_verification_signal INT' INT
+    trap 'tangle_handle_verification_signal TERM' TERM
 
     if declare -f octopus_agent_override >/dev/null 2>&1; then
         verify_agent=$(octopus_execution_profile_provider "tangle" "verify" "researcher" "agy")

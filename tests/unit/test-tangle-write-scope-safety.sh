@@ -55,6 +55,7 @@ EOF
 spawn_agent_capture_pid() {
     local task_id="$3"
     touch "$RESULTS_DIR/parallel.spawned"
+    printf '%s\n' "$2" > "$RESULTS_DIR/${task_id}.prompt"
     mkdir -p "$WORKSPACE_DIR/.octo/agents"
     printf '0\n' > "$WORKSPACE_DIR/.octo/agents/${task_id}.done"
     printf '%s\n' "$$"
@@ -162,6 +163,35 @@ if [[ "$TANGLE_STATUS" -eq 0 ]] && [[ -f "$RESULTS_DIR/parallel.spawned" ]]; the
     test_pass
 else
     test_fail "repairable overlap did not consolidate into a runnable decomposition"
+fi
+
+test_case "overlapping coding tasks are consolidated before worker dispatch"
+spawned_prompt_files=$(find "$RESULTS_DIR" -maxdepth 1 -type f -name 'tangle-*.prompt' | sort)
+spawned_prompt_count=$(printf '%s\n' "$spawned_prompt_files" | sed '/^$/d' | wc -l | tr -d '[:space:]')
+spawned_prompt=""
+if [[ "$spawned_prompt_count" -eq 1 ]]; then
+    spawned_prompt=$(cat "$spawned_prompt_files")
+fi
+if [[ "$spawned_prompt_count" -eq 1 ]] && \
+   [[ "$spawned_prompt" == *"Add the reference prefix"* ]] && \
+   [[ "$spawned_prompt" == *"Add legal wording to the same template"* ]] && \
+   [[ "$spawned_prompt" == *"src/lib/templates/NA02_REQUEST_REPORT.ts"* ]] && \
+   [[ "$spawned_prompt" == *"src/lib/legal/legalReferenceCatalog.ts"* ]]; then
+    test_pass
+else
+    test_fail "worker dispatch did not receive exactly one consolidated coding prompt"
+fi
+
+# Repo-context is resolution/read guidance, not implicit extra write authority.
+test_case "repo context does not grant write scope beyond Files clause"
+scope_prompt=$(build_tangle_subtask_prompt \
+    "Update the request report safely." \
+    "Update report — Files: src/lib/templates/NA02_REQUEST_REPORT.ts — Task: inspect src/lib/legal/legalReferenceCatalog.ts but do not edit it")
+if [[ "$scope_prompt" == *"Files: paths/directories as the exclusive write-scope authority"* ]] && \
+   [[ "$scope_prompt" == *"does not grant permission to edit additional files"* ]]; then
+    test_pass
+else
+    test_fail "subtask prompt still treats repository context as implicit write authorization"
 fi
 
 test_case "repairable overlap does not spawn direct fallback"

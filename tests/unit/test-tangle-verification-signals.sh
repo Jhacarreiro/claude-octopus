@@ -8,7 +8,7 @@ test_suite "tangle verification signals"
 WORKFLOWS="$PROJECT_ROOT/scripts/lib/workflows.sh"
 
 for signal in INT TERM; do
-    test_case "verification cleanup re-delivers $signal and cannot resume"
+    test_case "verification cleanup invokes saved $signal trap and cannot resume"
     marker="$TEST_TMP_DIR/caller-${signal}.marker"
     continued="$TEST_TMP_DIR/continued-${signal}.marker"
     child="$TEST_TMP_DIR/verify-${signal}.sh"

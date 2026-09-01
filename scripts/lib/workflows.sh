@@ -1336,6 +1336,44 @@ tangle_resolve_repo_context_files() {
     printf '%s\n' "${files[@]}" | sed '/^$/d' | awk '!seen[$0]++' | sed -n "1,${max_files}p"
 }
 
+tangle_resolve_write_scope_files() {
+    local scope="$1"
+    local normalized="${scope#./}"
+    normalized="${normalized%/}"
+    tangle_scope_is_safe_relative_path "$scope" || return 0
+
+    local repo_root
+    repo_root=$(tangle_resolve_repo_root) || return 0
+    git -C "$repo_root" rev-parse --show-toplevel >/dev/null 2>&1 || return 0
+
+    # Exact tracked file/directory matches preserve the declared scope.
+    if git -C "$repo_root" ls-files --error-unmatch "$normalized" >/dev/null 2>&1; then
+        printf '%s\n' "$normalized"
+        return 0
+    fi
+    if [[ -n "$(git -C "$repo_root" ls-files "$normalized/" 2>/dev/null || true)" ]]; then
+        printf '%s\n' "$normalized"
+        return 0
+    fi
+
+    # For an invented/approximate path, only a unique tracked basename may
+    # resolve it. Never use domain keywords, grep heuristics, or Task prose to
+    # expand write authority.
+    local basename="${normalized##*/}"
+    local matches=()
+    local full
+    while IFS= read -r full; do
+        [[ -n "$full" ]] || continue
+        [[ "${full##*/}" == "$basename" ]] || continue
+        matches+=("$full")
+    done < <(git -C "$repo_root" ls-files 2>/dev/null)
+
+    if [[ ${#matches[@]} -eq 1 ]]; then
+        printf '%s\n' "${matches[0]}"
+    fi
+}
+
+
 tangle_build_repo_context_block() {
     local assigned_subtask="$1"
     local repo_root
@@ -1525,7 +1563,7 @@ tangle_effective_write_scopes() {
             effective_scopes="${effective_scopes}${scope}"$'\n'
         else
             local resolved_scopes
-            resolved_scopes=$(tangle_resolve_repo_context_files "$scope")
+            resolved_scopes=$(tangle_resolve_write_scope_files "$scope")
             if [[ -n "$resolved_scopes" ]]; then
                 effective_scopes="${effective_scopes}${resolved_scopes}"$'\n'
             else
@@ -2459,19 +2497,46 @@ tangle_cleanup_verification_context() {
     unset TANGLE_VERIFY_PREV_EXIT_TRAP TANGLE_VERIFY_PREV_INT_TRAP TANGLE_VERIFY_PREV_TERM_TRAP
 }
 
+tangle_saved_trap_command() {
+    local saved_trap="$1"
+    [[ -n "$saved_trap" ]] || return 0
+
+    # trap -p emits shell-quoted argv such as:
+    #   trap -- 'handler body' SIGINT
+    # Decode that shell-generated representation in this helper so parsing
+    # does not alter the signal handler's positional parameters.
+    eval "set -- $saved_trap"
+    if [[ "${1:-}" == "trap" && "${2:-}" == "--" && $# -ge 4 ]]; then
+        printf '%s\n' "${3:-}"
+    fi
+}
+
+
 tangle_handle_verification_signal() {
     local signal="$1"
     local exit_code=1
+    local saved_signal_trap=""
+    local saved_signal_command=""
     case "$signal" in
-        INT) exit_code=130 ;;
-        TERM) exit_code=143 ;;
+        INT)
+            exit_code=130
+            saved_signal_trap="${TANGLE_VERIFY_PREV_INT_TRAP:-}"
+            ;;
+        TERM)
+            exit_code=143
+            saved_signal_trap="${TANGLE_VERIFY_PREV_TERM_TRAP:-}"
+            ;;
     esac
 
-    # Cleanup restores the caller's signal trap. Re-deliver the original signal
-    # so that caller policy still runs, then force a signal-appropriate exit if
-    # that trap returns instead of terminating the shell.
+    # Capture the caller handler before cleanup restores/unsets saved trap
+    # state. Re-signalling the current shell from inside its active handler is
+    # not portable (notably on Bash 3.2/macOS), so invoke the saved handler
+    # explicitly after cleanup instead.
+    saved_signal_command=$(tangle_saved_trap_command "$saved_signal_trap")
     tangle_cleanup_verification_context
-    kill -s "$signal" "$$" 2>/dev/null || true
+    if [[ -n "$saved_signal_command" ]]; then
+        eval "$saved_signal_command"
+    fi
     exit "$exit_code"
 }
 

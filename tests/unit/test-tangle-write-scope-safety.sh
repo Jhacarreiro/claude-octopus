@@ -193,6 +193,26 @@ else
     test_fail "Task prose path leaked into effective write scope: $task_only_effective"
 fi
 
+test_case "write scope resolution does not expand domain-keyword heuristics"
+heuristic_subtask="[CODING] Demo — Files: missing/commands/execute.js — Task: update only the declared file"
+heuristic_effective=$(tangle_effective_write_scopes "$heuristic_subtask")
+if [[ "$heuristic_effective" == "missing/commands/execute.js" ]] && \
+   [[ "$heuristic_effective" != *"README.md"* ]] && \
+   [[ "$heuristic_effective" != *"package.json"* ]]; then
+    test_pass
+else
+    test_fail "heuristic repo context leaked into write scope: $heuristic_effective"
+fi
+
+test_case "write scope resolution permits a unique basename match"
+basename_subtask="[CODING] Demo — Files: missing/workflows.sh — Task: update the declared workflow file"
+basename_effective=$(tangle_effective_write_scopes "$basename_subtask")
+if [[ "$basename_effective" == "scripts/lib/workflows.sh" ]]; then
+    test_pass
+else
+    test_fail "unique basename was not resolved strictly: $basename_effective"
+fi
+
 test_case "repo context does not grant write scope beyond Files clause"
 scope_prompt=$(build_tangle_subtask_prompt \
     "Update the request report safely." \

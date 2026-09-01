@@ -1559,6 +1559,9 @@ tangle_effective_write_scopes() {
 
     while IFS= read -r scope; do
         [[ -z "$scope" ]] && continue
+        if ! tangle_scope_is_safe_relative_path "$scope"; then
+            continue
+        fi
         if tangle_scope_is_known_or_explicit_new_file "$scope"; then
             effective_scopes="${effective_scopes}${scope}"$'\n'
         else

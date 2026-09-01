@@ -204,6 +204,15 @@ else
     test_fail "heuristic repo context leaked into write scope: $heuristic_effective"
 fi
 
+test_case "unsafe declared scopes are dropped before fallback"
+unsafe_subtask="[CODING] Demo — Files: .git/hooks/pre-commit — Task: update hook"
+unsafe_effective=$(tangle_effective_write_scopes "$unsafe_subtask")
+if [[ -z "$unsafe_effective" ]]; then
+    test_pass
+else
+    test_fail "unsafe declared scope survived effective-scope filtering: $unsafe_effective"
+fi
+
 test_case "write scope resolution permits a unique basename match"
 basename_subtask="[CODING] Demo — Files: missing/workflows.sh — Task: update the declared workflow file"
 basename_effective=$(tangle_effective_write_scopes "$basename_subtask")

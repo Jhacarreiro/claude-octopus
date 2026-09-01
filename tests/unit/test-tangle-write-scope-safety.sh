@@ -183,6 +183,16 @@ else
 fi
 
 # Repo-context is resolution/read guidance, not implicit extra write authority.
+test_case "Task-only paths cannot become effective write scope"
+task_only_subtask="[CODING] Demo — Files: missing/declared.ts — Task: inspect scripts/lib/workflows.sh only"
+task_only_effective=$(tangle_effective_write_scopes "$task_only_subtask")
+if [[ "$task_only_effective" == "missing/declared.ts" ]] && \
+   [[ "$task_only_effective" != *"scripts/lib/workflows.sh"* ]]; then
+    test_pass
+else
+    test_fail "Task prose path leaked into effective write scope: $task_only_effective"
+fi
+
 test_case "repo context does not grant write scope beyond Files clause"
 scope_prompt=$(build_tangle_subtask_prompt \
     "Update the request report safely." \

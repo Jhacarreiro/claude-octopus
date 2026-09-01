@@ -1525,7 +1525,7 @@ tangle_effective_write_scopes() {
             effective_scopes="${effective_scopes}${scope}"$'\n'
         else
             local resolved_scopes
-            resolved_scopes=$(tangle_resolve_repo_context_files "$subtask")
+            resolved_scopes=$(tangle_resolve_repo_context_files "$scope")
             if [[ -n "$resolved_scopes" ]]; then
                 effective_scopes="${effective_scopes}${resolved_scopes}"$'\n'
             else

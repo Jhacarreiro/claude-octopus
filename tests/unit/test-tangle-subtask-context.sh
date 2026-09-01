@@ -113,7 +113,7 @@ fi
 
 test_case "coding subtask prompts require direct edits and integration evidence"
 if [[ "$captured_prompts" == *"edit the repository files directly"* ]] && \
-   [[ "$captured_prompts" == *"exclusive write scope"* ]] && \
+   [[ "$captured_prompts" == *"exclusive write-scope authority"* ]] && \
    [[ "$captured_prompts" == *"Tests alone are not integration evidence"* ]] && \
    [[ "$captured_prompts" == *"## Worktree Changes"* ]] && \
    [[ "$captured_prompts" == *"## Integration Evidence"* ]]; then

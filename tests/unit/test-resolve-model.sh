@@ -37,20 +37,16 @@ export CLAUDE_CODE_SESSION=""
 export SUPPORTS_OPUS_4_7="${SUPPORTS_OPUS_4_7:-false}"
 source "${PLUGIN_DIR}/scripts/lib/model-resolver.sh"
 
-TESTS_RUN=0
-TESTS_PASSED=0
-
 assert_eq() {
-    TESTS_RUN=$((TESTS_RUN + 1))
     local actual="$1"
     local expected="$2"
     local desc="$3"
+    test_case "$desc"
     if [[ "$actual" == "$expected" ]]; then
-        echo -e "${GREEN}✓${NC} $desc (got: $actual)"
-        TESTS_PASSED=$((TESTS_PASSED + 1))
+        test_pass
     else
-        echo -e "${RED}✗${NC} $desc (expected: $expected, got: $actual)"
-        exit 1
+        test_fail "expected=[$expected] got=[$actual]"
+        return 1
     fi
 }
 
@@ -206,6 +202,38 @@ cat > "$CONFIG_FILE" << EOF
 }
 EOF
 assert_eq "$(resolve_octopus_model "commandcode" "commandcode-research" "research" "researcher")" "minimaxai/minimax-m3" "Cross-provider literal role falls through to matching phase"
+
+# Regression: object-route provider aliases are canonicalized before comparison.
+clear_model_cache
+cat > "$CONFIG_FILE" << EOF
+{
+  "version": "3.0",
+  "providers": { "agy": { "default": "agy-default" } },
+  "routing": {
+    "phases": {
+      "research": { "provider": "antigravity", "model": "agy-alias-phase" }
+    }
+  }
+}
+EOF
+assert_eq "$(resolve_octopus_model "agy" "agy" "research" "")" "agy-alias-phase" "Literal object phase routing canonicalizes provider aliases"
+
+# Regression: a cross-provider legacy role route must not mask a matching
+# literal object phase route for the provider being resolved.
+clear_model_cache
+cat > "$CONFIG_FILE" << EOF
+{
+  "version": "3.0",
+  "providers": { "commandcode": { "default": "deepseek/deepseek-v4-pro" } },
+  "routing": {
+    "roles": { "researcher": "claude:sonnet" },
+    "phases": {
+      "research": { "provider": "commandcode", "model": "minimaxai/minimax-m3" }
+    }
+  }
+}
+EOF
+assert_eq "$(resolve_octopus_model "commandcode" "commandcode-research" "research" "researcher")" "minimaxai/minimax-m3" "Cross-provider legacy role falls through to matching object phase"
 
 # Test 6: Recursive reference (codex:spark)
 clear_model_cache

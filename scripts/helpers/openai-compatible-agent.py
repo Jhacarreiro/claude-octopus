@@ -120,6 +120,13 @@ def tool_exec(cwd: Path, name: str, args: dict) -> str:
     except Exception as e:
         return f"ERROR: {type(e).__name__}: {e}"
 
+
+def normalize_reasoning_effort(value):
+    if value in {"xhigh", "max"}:
+        return "high"
+    return value
+
+
 def api_call(base_url, key, model, headers_extra, messages, max_tokens=0, request_timeout=60.0, max_retries=3, reasoning_effort=None, reasoning_policy="best_effort", tool_policy="auto"):
     payload = {"model": model, "messages": messages, "temperature": 0}
     if tool_policy == "auto":
@@ -152,7 +159,7 @@ def api_call(base_url, key, model, headers_extra, messages, max_tokens=0, reques
                 reasoning_effort
                 and reasoning_policy == "best_effort"
                 and e.code in {400, 422}
-                and any(token in body_text.lower() for token in ("reasoning_effort", "reasoning effort", "reasoning"))
+                and any(token in body_text.lower() for token in ("reasoning_effort", "reasoning effort", "reasoning-effort"))
             ):
                 print("chat_reasoning_fallback unsupported reasoning_effort; retrying without it", file=sys.stderr)
                 return api_call(
@@ -214,11 +221,13 @@ def main() -> int:
     ]
     print(f"provider={args.provider} base_url={base_url} model={model} cwd={cwd}", file=sys.stderr)
     requested_reasoning = args.reasoning_effort or "none"
-    print(f"chat_reasoning requested={requested_reasoning} policy={args.reasoning_policy}", file=sys.stderr)
+    effective_reasoning = normalize_reasoning_effort(args.reasoning_effort)
+    effective_label = effective_reasoning or "none"
+    print(f"chat_reasoning requested={requested_reasoning} effective={effective_label} policy={args.reasoning_policy}", file=sys.stderr)
     turn = 0
     while True:
         turn += 1
-        d = api_call(base_url, key, model, cfg.get("headers", {}), messages, max_tokens=max_tokens, request_timeout=request_timeout, max_retries=max_retries, reasoning_effort=args.reasoning_effort, reasoning_policy=args.reasoning_policy, tool_policy=args.tool_policy)
+        d = api_call(base_url, key, model, cfg.get("headers", {}), messages, max_tokens=max_tokens, request_timeout=request_timeout, max_retries=max_retries, reasoning_effort=effective_reasoning, reasoning_policy=args.reasoning_policy, tool_policy=args.tool_policy)
         ch = d.get("choices", [{}])[0]; msg = ch.get("message", {})
         finish = ch.get("finish_reason")
         raw_content = msg.get("content")

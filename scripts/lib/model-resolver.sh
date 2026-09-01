@@ -387,6 +387,7 @@ resolve_octopus_model() {
             local role_route_type=""
             local role_route_provider=""
             local role_route_model=""
+            local role_route_value=""
             local phase_route_provider=""
             local phase_route_model=""
             local role_route_blocks_phase="false"
@@ -398,6 +399,9 @@ resolve_octopus_model() {
                     if [[ "$role_route_type" == "object" ]]; then
                         role_route_provider=$(echo "$role_route_json" | jq -r '.provider // empty' 2>/dev/null)
                         role_route_model=$(echo "$role_route_json" | jq -r '.model // empty' 2>/dev/null)
+                        if [[ -n "$role_route_provider" ]]; then
+                            role_route_provider="$(octo_provider_canonical "$role_route_provider" 2>/dev/null || printf '%s' "$role_route_provider")"
+                        fi
                         if [[ -z "$role_route_provider" || "$role_route_provider" == "$canonical_provider" ]]; then
                             role_route_blocks_phase="true"
                             if [[ -n "$role_route_model" ]]; then
@@ -406,8 +410,19 @@ resolve_octopus_model() {
                             fi
                         fi
                     else
-                        # Legacy string routes retain their existing alias/provider semantics.
-                        role_route_blocks_phase="true"
+                        # A legacy role route only blocks the phase route when it
+                        # applies to the provider currently being resolved.
+                        role_route_value=$(echo "$role_route_json" | jq -r '.' 2>/dev/null)
+                        if [[ "$role_route_value" == *:* ]]; then
+                            role_route_provider="${role_route_value%%:*}"
+                            role_route_provider="$(octo_provider_canonical "$role_route_provider" 2>/dev/null || printf '%s' "$role_route_provider")"
+                            [[ "$role_route_provider" == "$canonical_provider" ]] && role_route_blocks_phase="true"
+                        elif _octo_is_known_provider_name "$role_route_value"; then
+                            role_route_provider="$(octo_provider_canonical "$role_route_value" 2>/dev/null || printf '%s' "$role_route_value")"
+                            [[ "$role_route_provider" == "$canonical_provider" ]] && role_route_blocks_phase="true"
+                        else
+                            role_route_blocks_phase="true"
+                        fi
                     fi
                 fi
             fi
@@ -417,6 +432,9 @@ resolve_octopus_model() {
                 if [[ -n "$phase_route_json" && "$phase_route_json" != "null" ]] && [[ "$(echo "$phase_route_json" | jq -r 'type' 2>/dev/null)" == "object" ]]; then
                     phase_route_provider=$(echo "$phase_route_json" | jq -r '.provider // empty' 2>/dev/null)
                     phase_route_model=$(echo "$phase_route_json" | jq -r '.model // empty' 2>/dev/null)
+                    if [[ -n "$phase_route_provider" ]]; then
+                        phase_route_provider="$(octo_provider_canonical "$phase_route_provider" 2>/dev/null || printf '%s' "$phase_route_provider")"
+                    fi
                     if [[ ( -z "$phase_route_provider" || "$phase_route_provider" == "$canonical_provider" ) && -n "$phase_route_model" ]]; then
                         resolved_model="$phase_route_model"
                         [[ -n "$_trace" ]] && echo "[model-trace] Tier 3 (literal phase route): $resolved_model ← SELECTED" >&2
@@ -448,7 +466,10 @@ resolve_octopus_model() {
                     elif _octo_is_known_provider_name "$routed"; then
                         role_route_provider="$routed"
                     fi
-                    if [[ -n "$role_route_provider" && "$role_route_provider" != "$provider" ]]; then
+                    if [[ -n "$role_route_provider" ]]; then
+                        role_route_provider="$(octo_provider_canonical "$role_route_provider" 2>/dev/null || printf '%s' "$role_route_provider")"
+                    fi
+                    if [[ -n "$role_route_provider" && "$role_route_provider" != "$canonical_provider" ]]; then
                         [[ -n "$_trace" ]] && echo "[model-trace] Tier 3 (role routing): SKIP (role route $routed targets $role_route_provider, resolving for $provider); checking phase route" >&2
                         routed=""
                     elif [[ -z "$role_route_provider" && -n "$phase_routed" && "$phase_routed" != "null" ]]; then
@@ -468,7 +489,9 @@ resolve_octopus_model() {
                 if [[ "$routed" == *:* ]]; then
                     local ref_provider="${routed%%:*}"
                     local ref_type="${routed#*:}"
-                    if [[ "$ref_provider" != "$provider" ]]; then
+                    local canonical_ref_provider
+                    canonical_ref_provider="$(octo_provider_canonical "$ref_provider" 2>/dev/null || printf '%s' "$ref_provider")"
+                    if [[ "$canonical_ref_provider" != "$canonical_provider" ]]; then
                         # Route targets a different provider — skip for this resolution
                         [[ -n "$_trace" ]] && echo "[model-trace] Tier 3 (phase/role routing): SKIP (route $routed targets $ref_provider, resolving for $provider)" >&2
                         routed=""

@@ -330,6 +330,7 @@ build_council_order() {
 
 build_review_fleet() {
     local order
+    review_validate_configured_seat_overrides || return $?
     order="$(build_council_order)" || return $?
     # shellcheck disable=SC2206
     local providers=($order)

@@ -147,14 +147,28 @@ octo_proof_capture_provider_status() {
     [[ -n "$run_dir" && -d "$run_dir" && -f "$status_file" ]] || return 0
     octo_proof_enabled || return 0
 
-    while IFS='|' read -r provider provider_status detail; do
+    local record field1 field2 field3 field4 remainder provider model provider_status detail
+    while IFS= read -r record; do
+        IFS='|' read -r field1 field2 field3 field4 remainder <<< "$record"
+        if [[ "$field1" == "v2" ]]; then
+            provider="$field2"
+            model="$field3"
+            provider_status="$field4"
+            detail="$remainder"
+        else
+            provider="$field1"
+            model=""
+            provider_status="$field2"
+            detail="${field3}${field4:+|${field4}}${remainder:+|${remainder}}"
+        fi
         [[ -z "${provider:-}" ]] && continue
-        detail="${detail:-}"
         octo_proof_event "$run_dir" "provider_status" "$(jq -n \
             --arg provider "$provider" \
+            --arg model "$model" \
             --arg status "$provider_status" \
             --arg detail "$detail" \
-            '{provider:$provider, status:$status, detail:$detail}')"
+            '{provider:$provider, status:$status, detail:$detail}
+             + if ($model | length) > 0 then {model:$model} else {} end')"
 
         case "$provider_status" in
             fallback|auth-failed)
@@ -165,10 +179,12 @@ octo_proof_capture_provider_status() {
                 fi
                 octo_proof_event "$run_dir" "provider_substitution" "$(jq -n \
                     --arg provider "$provider" \
+                    --arg model "$model" \
                     --arg status "$provider_status" \
                     --arg detail "$detail" \
                     --arg replacement "$replacement" \
-                    '{provider:$provider, status:$status, detail:$detail, replacement:$replacement}')"
+                    '{provider:$provider, status:$status, detail:$detail, replacement:$replacement}
+                     + if ($model | length) > 0 then {model:$model} else {} end')"
                 ;;
         esac
     done < "$status_file"

@@ -152,6 +152,26 @@ else
     test_fail "provider report omitted or mis-keyed a contextual provider: $report"
 fi
 
+test_case "provider report keeps distinct models from the same provider"
+: > "$status_file"
+review_append_provider_status "$status_file" 'commandcode:model-one.v1' implementation-logic-reviewer ok completed
+review_append_provider_status "$status_file" 'commandcode:model-two.v2' implementation-security-reviewer fallback 'second model failed'
+status_records="$(cat "$status_file")"
+report="$(env "HOME=${TEST_TMP_DIR}" bash -c '
+    source "$1/scripts/lib/provider-registry.sh"
+    source "$1/scripts/lib/review.sh"
+    print_provider_report "$2"
+' _ "$PROJECT_ROOT" "$status_file")"
+if [[ "$status_records" == *'v2|commandcode|model-one.v1|ok|completed'* ]] && \
+   [[ "$status_records" == *'v2|commandcode|model-two.v2|fallback|second model failed'* ]] && \
+   grep -Eq 'Commandcode/model-one\.v1:.*OK' <<< "$report" && \
+   grep -Eq 'Commandcode/model-two\.v2:.*FALLBACK' <<< "$report" && \
+   [[ "$(grep -cE 'Commandcode/model-(one\.v1|two\.v2):' <<< "$report")" -eq 2 ]]; then
+    test_pass
+else
+    test_fail "same-provider model identities collapsed in report: $report"
+fi
+
 test_case "synthesis lifecycle event uses the canonical provider key"
 synthesis_event="$(sed -n '/# #498: emit a synthesis lifecycle event/,/if \[\[ -n "$proof_dir" \]\]/p' "$PROJECT_ROOT/scripts/lib/review.sh")"
 if grep -Fq 'provider="$synthesis_provider_key"' <<< "$synthesis_event" && \

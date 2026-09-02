@@ -60,4 +60,25 @@ else
   test_fail "single-provider precedence was not reflected in fleet review: $(tr '\n' ';' <<< "$fleet")"
 fi
 
+test_case "fleet review rejects an exact model outside the dispatch allowlist"
+restricted_rc=0
+restricted_fleet="$(run_fleet \
+  OCTOPUS_CODEX_ALLOWED_MODELS='gpt-allowed' \
+  OCTOPUS_REVIEW_LOGIC_AGENT='codex:gpt-blocked' 2>/dev/null)" || restricted_rc=$?
+if [[ "$restricted_rc" -ne 0 && "$restricted_fleet" != *'codex:gpt-blocked'* ]]; then
+  test_pass
+else
+  test_fail "fleet review called a dispatch-rejected model effective: rc=$restricted_rc fleet=[$restricted_fleet]"
+fi
+
+test_case "fleet review rejects an exact Fable security seat"
+fable_rc=0
+fable_fleet="$(run_fleet \
+  OCTOPUS_REVIEW_SECURITY_AGENT='anthropic:claude-fable-5' 2>/dev/null)" || fable_rc=$?
+if [[ "$fable_rc" -ne 0 && "$fable_fleet" != *'claude:claude-fable-5'* ]]; then
+  test_pass
+else
+  test_fail "fleet review called an unsafe Fable security seat effective: rc=$fable_rc fleet=[$fable_fleet]"
+fi
+
 test_summary

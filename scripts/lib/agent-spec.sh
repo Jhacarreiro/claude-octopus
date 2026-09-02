@@ -82,6 +82,69 @@ octo_agent_spec_canonicalize_exact() {
     printf '%s:%s\n' "$canonical_executor" "$model"
 }
 
+# Return the environment variable that constrains models for a canonical
+# provider. Dispatch and review-seat previews share this map so a preview can
+# never advertise an exact model that runtime dispatch will reject.
+octo_provider_model_allowlist_var() {
+    local provider="${1:-}"
+    provider="$(octo_agent_spec_provider "$provider")"
+    case "$provider" in
+        gemini) provider="agy" ;;
+    esac
+
+    case "$provider" in
+        codex) echo "OCTOPUS_CODEX_ALLOWED_MODELS" ;;
+        agy) echo "OCTOPUS_AGY_ALLOWED_MODELS" ;;
+        claude-sdk) echo "OCTOPUS_CLAUDE_SDK_ALLOWED_MODELS" ;;
+        claude) echo "OCTOPUS_CLAUDE_ALLOWED_MODELS" ;;
+        openrouter) echo "OCTOPUS_OPENROUTER_ALLOWED_MODELS" ;;
+        orcarouter) echo "OCTOPUS_ORCAROUTER_ALLOWED_MODELS" ;;
+        atlascloud|atlascloud-agent) echo "ATLASCLOUD_ALLOWED_MODELS" ;;
+        openai-compatible|openai-tools|openai-compatible-agent) echo "OPENAI_COMPAT_ALLOWED_MODELS" ;;
+        perplexity) echo "OCTOPUS_PERPLEXITY_ALLOWED_MODELS" ;;
+        qwen) echo "OCTOPUS_QWEN_ALLOWED_MODELS" ;;
+        cursor-agent) echo "OCTOPUS_CURSOR_AGENT_ALLOWED_MODELS" ;;
+        commandcode) echo "OCTOPUS_COMMANDCODE_ALLOWED_MODELS" ;;
+        opencode) echo "OCTOPUS_OPENCODE_ALLOWED_MODELS" ;;
+        ollama) echo "OCTOPUS_OLLAMA_ALLOWED_MODELS" ;;
+        copilot) echo "OCTOPUS_COPILOT_ALLOWED_MODELS" ;;
+        vibe) echo "OCTOPUS_VIBE_ALLOWED_MODELS" ;;
+        *) return 1 ;;
+    esac
+}
+
+octo_agent_spec_exact_model_allowed() {
+    local spec="${1:-}" model allowlist_var allowlist
+    model="$(octo_agent_spec_explicit_model "$spec")" || return 1
+    allowlist_var="$(octo_provider_model_allowlist_var "$spec" 2>/dev/null || true)"
+    [[ -n "$allowlist_var" ]] || return 0
+    allowlist="${!allowlist_var:-}"
+    [[ -z "$allowlist" || ",$allowlist," == *",$model,"* ]]
+}
+
+octo_agent_spec_is_security_dispatch() {
+    local combined="${1:-} ${2:-} ${3:-}"
+    case "$combined" in
+        *security*|*squeeze*|*red-team*|*redteam*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+octo_agent_spec_exact_role_allowed() {
+    local spec="${1:-}" role="${2:-}" phase="${3:-}" provider model
+    provider="$(octo_agent_spec_provider "$spec")"
+    model="$(octo_agent_spec_explicit_model "$spec")" || return 1
+    case "$provider" in
+        claude|claude-sdk)
+            if [[ "$model" == "${FABLE5_MODEL_ID:-claude-fable-5}" ]] &&
+               octo_agent_spec_is_security_dispatch "$role" "$spec" "$phase"; then
+                return 1
+            fi
+            ;;
+    esac
+    return 0
+}
+
 octo_agent_spec_slug() {
     local spec="${1:-unknown}"
     # Keep the full seat identity while making it safe for filenames and

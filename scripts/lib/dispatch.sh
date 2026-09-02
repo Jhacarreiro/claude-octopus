@@ -49,11 +49,9 @@ _octopus_claude_reasoning_fragment() {
 # Exact model pins must stay exact, so an unsafe Fable security pin is rejected
 # instead of being silently rerouted to a different model.
 _octopus_validate_exact_claude_dispatch_model() {
-    local model="$1" role="${2:-}" agent_type="${3:-}" phase="${4:-}"
+    local role="${2:-}" agent_type="${3:-}" phase="${4:-}"
     [[ "$agent_type" == *:* ]] || return 0
-    [[ "$model" == "${FABLE5_MODEL_ID:-claude-fable-5}" ]] || return 0
-    if declare -f fable5_is_security_dispatch >/dev/null 2>&1 && \
-       fable5_is_security_dispatch "$role" "$agent_type" "$phase"; then
+    if ! octo_agent_spec_exact_role_allowed "$agent_type" "$role" "$phase"; then
         log "ERROR" "Exact Fable 5 model pins cannot be used for security dispatches"
         return 1
     fi
@@ -63,6 +61,11 @@ _octopus_validate_exact_claude_dispatch_model() {
 _octopus_openai_compatible_runtime_config() {
     local provider="$1"
     local config_provider="$provider" base_url api_key_env credential_value
+    provider="${provider%%:*}"
+    if declare -f octo_provider_canonical >/dev/null 2>&1; then
+        provider="$(octo_provider_canonical "$provider" 2>/dev/null || printf '%s' "$provider")"
+    fi
+    config_provider="$provider"
     case "$provider" in
         openai-compatible|openai-tools|openai-compatible-agent) config_provider="openai-compatible-agent" ;;
     esac
@@ -262,7 +265,7 @@ get_agent_command() {
                 return 1
             fi
             _octopus_validate_exact_claude_dispatch_model "$model" "$role" "$agent_type" "$phase" || return 1
-            model="${model//./-}"
+            [[ "$agent_type" == *:* ]] || model="${model//./-}"
             echo "${_claude_bin}${_BARE_OPT} --print --model ${model} ${reasoning_fragment} ${claude_perm}" ;;
         claude-sonnet)
             local reasoning_level reasoning_policy reasoning_fragment
@@ -273,7 +276,7 @@ get_agent_command() {
                 return 1
             fi
             _octopus_validate_exact_claude_dispatch_model "$model" "$role" "$agent_type" "$phase" || return 1
-            model="${model//./-}"
+            [[ "$agent_type" == *:* ]] || model="${model//./-}"
             echo "${_claude_bin}${_BARE_OPT} --print --model ${model} ${reasoning_fragment} ${claude_perm}" ;;
         claude-opus|claude-opus-fast)
             # Resolve a concrete model so current-host detection and user pins
@@ -353,7 +356,7 @@ get_agent_command() {
                     return 1
                     ;;
             esac
-            opus_model_flag="${opus_model_flag//./-}"
+            [[ "$agent_type" == *:* ]] || opus_model_flag="${opus_model_flag//./-}"
             local opus_reasoning_fragment=""
             opus_reasoning_fragment="$(_octopus_claude_reasoning_fragment "$opus_effort" best_effort)" || return 1
             echo "${_claude_bin}${_BARE_OPT} --print --model ${opus_model_flag}${opus_reasoning_fragment:+ ${opus_reasoning_fragment}} ${claude_perm}"
@@ -829,32 +832,9 @@ get_agent_model() {
 validate_model_allowed() {
     local provider="$1"
     local model="$2"
-
-    case "$provider" in
-        gemini|gemini-*) provider="agy" ;;
-        antigravity|agy-research) provider="agy" ;;
-    esac
-
     local allowlist_var=""
-    case "$provider" in
-        codex)      allowlist_var="OCTOPUS_CODEX_ALLOWED_MODELS" ;;
-        agy)        allowlist_var="OCTOPUS_AGY_ALLOWED_MODELS" ;;
-        claude-sdk) allowlist_var="OCTOPUS_CLAUDE_SDK_ALLOWED_MODELS" ;;
-        claude)     allowlist_var="OCTOPUS_CLAUDE_ALLOWED_MODELS" ;;
-        openrouter) allowlist_var="OCTOPUS_OPENROUTER_ALLOWED_MODELS" ;;
-        orcarouter) allowlist_var="OCTOPUS_ORCAROUTER_ALLOWED_MODELS" ;;
-        atlascloud) allowlist_var="ATLASCLOUD_ALLOWED_MODELS" ;;
-        openai-compatible|openai-tools|openai-compatible-agent) allowlist_var="OPENAI_COMPAT_ALLOWED_MODELS" ;;
-        perplexity) allowlist_var="OCTOPUS_PERPLEXITY_ALLOWED_MODELS" ;;
-        qwen)       allowlist_var="OCTOPUS_QWEN_ALLOWED_MODELS" ;;
-        cursor-agent) allowlist_var="OCTOPUS_CURSOR_AGENT_ALLOWED_MODELS" ;;
-        commandcode) allowlist_var="OCTOPUS_COMMANDCODE_ALLOWED_MODELS" ;;
-        opencode)   allowlist_var="OCTOPUS_OPENCODE_ALLOWED_MODELS" ;;
-        ollama)     allowlist_var="OCTOPUS_OLLAMA_ALLOWED_MODELS" ;;
-        copilot)    allowlist_var="OCTOPUS_COPILOT_ALLOWED_MODELS" ;;
-        vibe)       allowlist_var="OCTOPUS_VIBE_ALLOWED_MODELS" ;;
-        *)          return 0 ;;  # Unknown provider — allow
-    esac
+    allowlist_var="$(octo_provider_model_allowlist_var "$provider" 2>/dev/null || true)"
+    [[ -n "$allowlist_var" ]] || return 0
 
     local allowlist="${!allowlist_var:-}"
     [[ -z "$allowlist" ]] && return 0  # No allowlist = all allowed

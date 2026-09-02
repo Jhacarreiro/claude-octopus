@@ -75,6 +75,28 @@ else
   test_fail "an exact contextual model was omitted: agy=[$agy_cmd] claude=[$claude_cmd] opus=[$opus_cmd] openrouter=[$openrouter_cmd] orcarouter=[$orcarouter_cmd] vibe=[$vibe_cmd] atlas=[$atlas_cmd]"
 fi
 
+test_case "explicit Claude seats preserve dotted model IDs byte-for-byte"
+claude_dotted_cmd="$(get_agent_command 'claude:claude-3.5-sonnet' review implementation-architecture-reviewer 2>/dev/null || true)"
+opus_dotted_cmd="$(get_agent_command 'claude-opus:claude-3.5-sonnet' review implementation-architecture-reviewer 2>/dev/null || true)"
+if [[ "$claude_dotted_cmd" == *'--model claude-3.5-sonnet'* ]] &&
+   [[ "$opus_dotted_cmd" == *'--model claude-3.5-sonnet'* ]] &&
+   [[ "$claude_dotted_cmd" != *'--model claude-3-5-sonnet'* ]] &&
+   [[ "$opus_dotted_cmd" != *'--model claude-3-5-sonnet'* ]]; then
+  test_pass
+else
+  test_fail "explicit dotted Claude model was normalized: claude=[$claude_dotted_cmd] opus=[$opus_dotted_cmd]"
+fi
+
+test_case "unqualified Claude routes retain legacy dotted-model normalization"
+legacy_claude_cmd="$(OCTOPUS_CLAUDE_MODEL='claude-3.5-sonnet' get_agent_command claude review implementation-architecture-reviewer 2>/dev/null || true)"
+legacy_opus_cmd="$(OCTOPUS_OPUS_MODEL='claude-3.5-sonnet' get_agent_command claude-opus review implementation-architecture-reviewer 2>/dev/null || true)"
+if [[ "$legacy_claude_cmd" == *'--model claude-3-5-sonnet'* ]] &&
+   [[ "$legacy_opus_cmd" == *'--model claude-3-5-sonnet'* ]]; then
+  test_pass
+else
+  test_fail "legacy Claude normalization changed: claude=[$legacy_claude_cmd] opus=[$legacy_opus_cmd]"
+fi
+
 test_case "an explicit model blocked by restrictions fails instead of falling back"
 OCTOPUS_CODEX_ALLOWED_MODELS='gpt-5.6-luna'
 restricted_rc=0

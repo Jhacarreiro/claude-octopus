@@ -140,6 +140,36 @@ else
     test_fail "octo_proof_capture_provider_status is not defined"
 fi
 
+test_case "provider status capture preserves distinct model identities"
+if declare -F octo_proof_capture_provider_status >/dev/null 2>&1; then
+    tmp_home=$(mktemp -d)
+    HOME="$tmp_home"
+    OCTOPUS_PROOF_ROOT="$tmp_home/proofs"
+    OCTOPUS_PROOF_RUN_ID="provider-models"
+    run_dir=$(octo_proof_init "review" "goal" '{}')
+    status_file="$tmp_home/provider-model-status.txt"
+    {
+        echo "v2|commandcode|model-one.v1|ok|Round 1 findings"
+        echo "v2|commandcode|model-two.v2|fallback|Round 1 failed"
+    } > "$status_file"
+    octo_proof_capture_provider_status "$run_dir" "$status_file"
+    if jq -s -e '
+        [.[] | select(.type == "provider_status" and .data.provider == "commandcode") | .data.model]
+        | sort == ["model-one.v1", "model-two.v2"]
+      ' "$run_dir/proof.jsonl" >/dev/null \
+       && jq -s -e '
+        [.[] | select(.type == "provider_substitution" and .data.provider == "commandcode" and .data.model == "model-two.v2")]
+        | length == 1
+      ' "$run_dir/proof.jsonl" >/dev/null; then
+        test_pass
+    else
+        test_fail "proof packet collapsed or misparsed model-qualified provider status"
+    fi
+    rm -rf "$tmp_home"
+else
+    test_fail "octo_proof_capture_provider_status is not defined"
+fi
+
 test_case "finalize updates state and writes markdown summary"
 if declare -F octo_proof_finalize >/dev/null 2>&1; then
     tmp_home=$(mktemp -d)

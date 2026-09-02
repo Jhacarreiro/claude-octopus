@@ -57,6 +57,45 @@ else
 fi
 OCTOPUS_REVIEW_SECURITY_AGENT='claude:claude-opus-5'
 
+test_case "every explicitly blank review seat override fails closed"
+blank_overrides_ok=true
+for role in \
+  implementation-logic-reviewer \
+  implementation-security-reviewer \
+  implementation-architecture-reviewer \
+  implementation-cve-reviewer \
+  implementation-diversity-reviewer \
+  implementation-verifier \
+  implementation-debater \
+  implementation-synthesizer; do
+  env_name="$(review_seat_override_env_name "$role")"
+  saved_value="${!env_name-}"
+  printf -v "$env_name" '%s' ''
+  export "$env_name"
+  rc=0
+  review_agent_for_seat codex "$role" >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -ne 0 ]] || blank_overrides_ok=false
+  printf -v "$env_name" '%s' "$saved_value"
+  export "$env_name"
+done
+if [[ "$blank_overrides_ok" == true ]]; then
+  test_pass
+else
+  test_fail "an explicitly blank review seat override was treated as unset"
+fi
+
+test_case "Round 1 rejects an explicitly blank diversity override"
+saved_diversity="$OCTOPUS_REVIEW_DIVERSITY_AGENT"
+OCTOPUS_REVIEW_DIVERSITY_AGENT=''
+blank_diversity_rc=0
+review_fleet_with_override_seats 'codex:implementation-logic-reviewer:logic' >/dev/null 2>&1 || blank_diversity_rc=$?
+OCTOPUS_REVIEW_DIVERSITY_AGENT="$saved_diversity"
+if [[ "$blank_diversity_rc" -ne 0 ]]; then
+  test_pass
+else
+  test_fail "blank diversity override was skipped instead of rejected"
+fi
+
 test_case "single-provider override keeps global precedence"
 OCTOPUS_REVIEW_SINGLE_PROVIDER=codex
 if [[ "$(review_agent_for_seat claude-sonnet implementation-synthesizer)" == 'codex' ]]; then

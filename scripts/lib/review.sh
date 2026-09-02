@@ -212,7 +212,43 @@ review_seat_agent_override() {
         return 2
     fi
 
+    if ! octo_agent_spec_exact_model_allowed "$agent"; then
+        log ERROR "Review seat override ${env_name}='${agent}' is blocked by the provider model allowlist"
+        return 2
+    fi
+
+    if ! octo_agent_spec_exact_role_allowed "$agent" "$role" review; then
+        log ERROR "Review seat override ${env_name}='${agent}' is unsafe for role '${role}'"
+        return 2
+    fi
+
     printf '%s\n' "$agent"
+}
+
+review_validate_configured_seat_overrides() {
+    local role env_name rc=0
+    local roles=(
+        implementation-logic-reviewer
+        implementation-security-reviewer
+        implementation-architecture-reviewer
+        implementation-cve-reviewer
+        implementation-diversity-reviewer
+        implementation-verifier
+        implementation-debater
+        implementation-synthesizer
+    )
+
+    # The global provider override supersedes all seat-specific configuration.
+    [[ -n "${OCTOPUS_REVIEW_SINGLE_PROVIDER:-}" ]] && return 0
+
+    for role in "${roles[@]}"; do
+        env_name="$(review_seat_override_env_name "$role")" || continue
+        [[ "${!env_name+x}" == "x" ]] || continue
+        rc=0
+        review_seat_agent_override "$role" >/dev/null || rc=$?
+        [[ "$rc" -eq 0 ]] || return "$rc"
+    done
+    return 0
 }
 
 review_agent_for_seat() {
@@ -246,7 +282,7 @@ review_fleet_with_override_seats() {
 
     for role in "${roles[@]}"; do
         env_name="$(review_seat_override_env_name "$role")" || continue
-        [[ -n "${!env_name:-}" ]] || continue
+        [[ "${!env_name+x}" == "x" ]] || continue
 
         rc=0
         override="$(review_seat_agent_override "$role")" || rc=$?
@@ -272,6 +308,8 @@ review_phase_provider() {
 
 build_review_fleet() {
     local fleet=""
+
+    review_validate_configured_seat_overrides || return $?
 
     if [[ -n "${OCTOPUS_REVIEW_SINGLE_PROVIDER:-}" ]]; then
         local override_provider
@@ -704,6 +742,43 @@ review_provider_key_from_agent_type() {
     esac
 }
 
+# Versioned records carry provider and model as separate fields. The marker
+# avoids confusing a model named "ok" or "fallback" with a legacy status.
+# The report parser still accepts provider|status|detail records.
+review_append_provider_status() {
+    local status_file="$1" agent_type="$2" role="$3" status="$4" detail="$5"
+    local provider model=""
+    provider="$(review_provider_key_from_agent_type "$agent_type")"
+    model="$(octo_agent_spec_explicit_model "$agent_type" 2>/dev/null || true)"
+    if [[ -z "$model" ]] && declare -f get_agent_model >/dev/null 2>&1; then
+        model="$(get_agent_model "$agent_type" review "$role" 2>/dev/null || true)"
+    fi
+
+    if [[ -n "$model" ]]; then
+        printf 'v2|%s|%s|%s|%s\n' "$provider" "$model" "$status" "$detail" >> "$status_file"
+    else
+        printf '%s|%s|%s\n' "$provider" "$status" "$detail" >> "$status_file"
+    fi
+}
+
+review_parse_provider_status_record() {
+    local record="$1" raw_provider field2 field3 field4 remainder
+    IFS='|' read -r raw_provider field2 field3 field4 remainder <<< "$record"
+    [[ -n "$raw_provider" ]] || return 1
+
+    if [[ "$raw_provider" == "v2" ]]; then
+        REVIEW_STATUS_PROVIDER="$(review_provider_key_from_agent_type "$field2")"
+        REVIEW_STATUS_MODEL="$field3"
+        REVIEW_STATUS_VALUE="$field4"
+        REVIEW_STATUS_DETAIL="$remainder"
+    else
+        REVIEW_STATUS_PROVIDER="$(review_provider_key_from_agent_type "$raw_provider")"
+        REVIEW_STATUS_MODEL=""
+        REVIEW_STATUS_VALUE="$field2"
+        REVIEW_STATUS_DETAIL="${field3}${field4:+|${field4}}${remainder:+|${remainder}}"
+    fi
+}
+
 # review_wait_for_result_status: waits for one result file to become terminal,
 # using the same progress-stall semantics as Round 1. No wall-clock cap.
 review_wait_for_result_status() {
@@ -1031,7 +1106,8 @@ review_collect_diff() {
 # review_run: canonical 3-round multi-LLM code review pipeline
 # WHY: replaces the single-model "codex exec review" dispatch with a
 # v9.0: Provider report card — prints post-run summary of provider status
-# Args: provider_status_file (one line per event: "provider|status|detail")
+# Args: provider_status_file. New records use "v2|provider|model|status|detail";
+# legacy "provider|status|detail" records remain supported.
 # WHY: Mid-stream warnings vanish in terminal scroll. This prints AFTER all output,
 # making provider failures impossible to miss.
 print_provider_report() {
@@ -1048,11 +1124,54 @@ print_provider_report() {
     local codex_status="not used" agy_status="not used" claude_status="not used" perplexity_status="not used" compatible_status="not used" copilot_status="not used" commandcode_status="not used"
     local codex_detail="" agy_detail="" claude_detail="" perplexity_detail="" compatible_detail="" copilot_detail="" commandcode_detail=""
     local had_fallback=false
+    local codex_model_status=false agy_model_status=false claude_model_status=false perplexity_model_status=false
+    local compatible_model_status=false copilot_model_status=false commandcode_model_status=false
+    local codex_legacy_status=false agy_legacy_status=false claude_legacy_status=false perplexity_legacy_status=false
+    local compatible_legacy_status=false copilot_legacy_status=false commandcode_legacy_status=false
 
-    while IFS='|' read -r provider status detail; do
-        provider="$(review_provider_key_from_agent_type "$provider")"
+    local record provider model status detail identity extra_status
+    while IFS= read -r record; do
+        review_parse_provider_status_record "$record" || continue
+        provider="$REVIEW_STATUS_PROVIDER"
+        model="$REVIEW_STATUS_MODEL"
+        status="$REVIEW_STATUS_VALUE"
+        detail="$REVIEW_STATUS_DETAIL"
+
+        if [[ -n "$model" ]]; then
+            identity="${provider}/${model}"
+            extra_status=""
+            case "$status" in
+                ok) extra_status="✓ OK" ;;
+                fallback)
+                    extra_status="✗ FALLBACK"
+                    had_fallback=true
+                    ;;
+                auth-failed)
+                    extra_status="✗ AUTH FAILED"
+                    had_fallback=true
+                    ;;
+                not-installed) extra_status="not installed" ;;
+            esac
+            case "$provider" in
+                codex) codex_model_status=true ;;
+                agy) agy_model_status=true ;;
+                claude) claude_model_status=true ;;
+                perplexity) perplexity_model_status=true ;;
+                openai-compatible) compatible_model_status=true ;;
+                copilot) copilot_model_status=true ;;
+                commandcode) commandcode_model_status=true ;;
+            esac
+            if [[ -n "$extra_status" ]]; then
+                awk -F'|' -v key="$identity" '$1 != key' "$extra_status_file" > "${extra_status_file}.tmp"
+                mv "${extra_status_file}.tmp" "$extra_status_file"
+                printf '%s|%s|%s\n' "$identity" "$extra_status" "$detail" >> "$extra_status_file"
+            fi
+            continue
+        fi
+
         case "$provider" in
             codex)
+                codex_legacy_status=true
                 if [[ "$status" == "ok" ]]; then
                     codex_status="✓ OK"
                 elif [[ "$status" == "fallback" ]]; then
@@ -1066,6 +1185,7 @@ print_provider_report() {
                 fi
                 ;;
             agy|gemini)
+                agy_legacy_status=true
                 if [[ "$status" == "ok" ]]; then
                     agy_status="✓ OK"
                 elif [[ "$status" == "fallback" ]]; then
@@ -1075,6 +1195,7 @@ print_provider_report() {
                 fi
                 ;;
             claude)
+                claude_legacy_status=true
                 if [[ "$status" == "ok" ]]; then
                     claude_status="✓ OK"
                 elif [[ "$status" == "fallback" ]]; then
@@ -1088,6 +1209,7 @@ print_provider_report() {
                 fi
                 ;;
             perplexity)
+                perplexity_legacy_status=true
                 if [[ "$status" == "ok" ]]; then
                     perplexity_status="✓ OK"
                 elif [[ "$status" == "fallback" ]]; then
@@ -1097,6 +1219,7 @@ print_provider_report() {
                 fi
                 ;;
             openai-compatible|openai-tools|openai-compatible-agent)
+                compatible_legacy_status=true
                 if [[ "$status" == "ok" ]]; then
                     compatible_status="✓ OK"
                 elif [[ "$status" == "fallback" ]]; then
@@ -1110,6 +1233,7 @@ print_provider_report() {
                 fi
                 ;;
             commandcode)
+                commandcode_legacy_status=true
                 if [[ "$status" == "ok" ]]; then
                     commandcode_status="✓ OK"
                 elif [[ "$status" == "fallback" ]]; then
@@ -1123,6 +1247,7 @@ print_provider_report() {
                 fi
                 ;;
             copilot)
+                copilot_legacy_status=true
                 if [[ "$status" == "ok" ]]; then
                     copilot_status="✓ OK"
                 elif [[ "$status" == "fallback" ]]; then
@@ -1136,7 +1261,7 @@ print_provider_report() {
                 fi
                 ;;
             *)
-                local extra_status=""
+                extra_status=""
                 case "$status" in
                     ok) extra_status="✓ OK" ;;
                     fallback)
@@ -1162,20 +1287,34 @@ print_provider_report() {
     echo "┌─────────────────────────────────────────────┐"
     echo "│ 🐙 Provider Status                          │"
     echo "│                                             │"
-    printf "│ 🔴 Codex:      %-28s│\n" "$codex_status"
-    [[ -n "$codex_detail" ]] && printf "│    → %-38.38s│\n" "$codex_detail"
-    printf "│ 🧭 AGY:        %-28s│\n" "$agy_status"
-    [[ -n "$agy_detail" ]] && printf "│    → %-38.38s│\n" "$agy_detail"
-    printf "│ 🔵 Claude:     %-28s│\n" "$claude_status"
-    [[ -n "$claude_detail" ]] && printf "│    → %-38.38s│\n" "$claude_detail"
-    printf "│ 🟣 Perplexity: %-28s│\n" "$perplexity_status"
-    [[ -n "$perplexity_detail" ]] && printf "│    → %-38.38s│\n" "$perplexity_detail"
-    printf "│ 🟢 Compatible:  %-25s│\n" "$compatible_status"
-    [[ -n "$compatible_detail" ]] && printf "│    → %-38.38s│\n" "$compatible_detail"
-    printf "│ 🟡 Copilot:     %-27s│\n" "$copilot_status"
-    [[ -n "$copilot_detail" ]] && printf "│    → %-38.38s│\n" "$copilot_detail"
-    printf "│ 🟠 CommandCode: %-27s│\n" "$commandcode_status"
-    [[ -n "$commandcode_detail" ]] && printf "│    → %-38.38s│\n" "$commandcode_detail"
+    if [[ "$codex_legacy_status" == true || "$codex_model_status" != true ]]; then
+        printf "│ 🔴 Codex:      %-28s│\n" "$codex_status"
+        [[ -n "$codex_detail" ]] && printf "│    → %-38.38s│\n" "$codex_detail"
+    fi
+    if [[ "$agy_legacy_status" == true || "$agy_model_status" != true ]]; then
+        printf "│ 🧭 AGY:        %-28s│\n" "$agy_status"
+        [[ -n "$agy_detail" ]] && printf "│    → %-38.38s│\n" "$agy_detail"
+    fi
+    if [[ "$claude_legacy_status" == true || "$claude_model_status" != true ]]; then
+        printf "│ 🔵 Claude:     %-28s│\n" "$claude_status"
+        [[ -n "$claude_detail" ]] && printf "│    → %-38.38s│\n" "$claude_detail"
+    fi
+    if [[ "$perplexity_legacy_status" == true || "$perplexity_model_status" != true ]]; then
+        printf "│ 🟣 Perplexity: %-28s│\n" "$perplexity_status"
+        [[ -n "$perplexity_detail" ]] && printf "│    → %-38.38s│\n" "$perplexity_detail"
+    fi
+    if [[ "$compatible_legacy_status" == true || "$compatible_model_status" != true ]]; then
+        printf "│ 🟢 Compatible:  %-25s│\n" "$compatible_status"
+        [[ -n "$compatible_detail" ]] && printf "│    → %-38.38s│\n" "$compatible_detail"
+    fi
+    if [[ "$copilot_legacy_status" == true || "$copilot_model_status" != true ]]; then
+        printf "│ 🟡 Copilot:     %-27s│\n" "$copilot_status"
+        [[ -n "$copilot_detail" ]] && printf "│    → %-38.38s│\n" "$copilot_detail"
+    fi
+    if [[ "$commandcode_legacy_status" == true || "$commandcode_model_status" != true ]]; then
+        printf "│ 🟠 CommandCode: %-27s│\n" "$commandcode_status"
+        [[ -n "$commandcode_detail" ]] && printf "│    → %-38.38s│\n" "$commandcode_detail"
+    fi
     while IFS='|' read -r provider status detail; do
         [[ -n "$provider" ]] || continue
         local provider_label
@@ -1192,10 +1331,15 @@ print_provider_report() {
     if [[ "$had_fallback" == "true" ]]; then
         echo ""
         echo "Provider failure details:"
-        while IFS='|' read -r provider status detail; do
+        while IFS= read -r record; do
+            review_parse_provider_status_record "$record" || continue
+            provider="$REVIEW_STATUS_PROVIDER"
+            model="$REVIEW_STATUS_MODEL"
+            status="$REVIEW_STATUS_VALUE"
+            detail="$REVIEW_STATUS_DETAIL"
             if [[ "$status" == "fallback" || "$status" == "auth-failed" ]]; then
-                provider="$(review_provider_key_from_agent_type "$provider")"
-                printf -- '- %s: %s\n' "$provider" "$detail"
+                identity="${provider}${model:+/${model}}"
+                printf -- '- %s: %s\n' "$identity" "$detail"
             fi
         done < "$status_file"
     fi
@@ -1205,10 +1349,15 @@ print_provider_report() {
         mkdir -p "$(dirname "$fallback_log")"
         local ts
         ts=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S)
-        while IFS='|' read -r provider status detail; do
+        while IFS= read -r record; do
+            review_parse_provider_status_record "$record" || continue
+            provider="$REVIEW_STATUS_PROVIDER"
+            model="$REVIEW_STATUS_MODEL"
+            status="$REVIEW_STATUS_VALUE"
+            detail="$REVIEW_STATUS_DETAIL"
             if [[ "$status" == "fallback" || "$status" == "auth-failed" ]]; then
-                provider="$(review_provider_key_from_agent_type "$provider")"
-                echo "[$ts] provider=$provider status=$status detail=$detail" >> "$fallback_log"
+                identity="${provider}${model:+/${model}}"
+                echo "[$ts] provider=$identity status=$status detail=$detail" >> "$fallback_log"
             fi
         done < "$status_file"
         # Keep only last 50 entries
@@ -1602,7 +1751,7 @@ ${round1_prompts[$retry_idx]}"
         provider_key="$(review_provider_key_from_agent_type "$atype")"
         if [[ ! -f "$f" ]]; then
             ((round1_partial_count++)) || true
-            echo "${provider_key}|fallback|Round 1 agent missing result" >> "$provider_status_file"
+            review_append_provider_status "$provider_status_file" "$atype" "${round1_roles[$idx]}" fallback "Round 1 agent missing result"
             ((idx++)) || true
             continue
         fi
@@ -1649,9 +1798,9 @@ ${round1_prompts[$retry_idx]}"
             local failure_detail
             failure_detail="$(review_result_failure_detail "$f" 2>/dev/null || true)"
             failure_detail="${failure_detail:-Round 1 agent did not complete successfully}"
-            echo "${provider_key}|fallback|${failure_detail}" >> "$provider_status_file"
+            review_append_provider_status "$provider_status_file" "$atype" "${round1_roles[$idx]}" fallback "$failure_detail"
         else
-            echo "${provider_key}|ok|Round 1 completed" >> "$provider_status_file"
+            review_append_provider_status "$provider_status_file" "$atype" "${round1_roles[$idx]}" ok "Round 1 completed"
         fi
         ((idx++)) || true
     done
@@ -1716,26 +1865,25 @@ $(echo "$all_findings" | jq -c '.')
 
 Return ONLY valid JSON with 'findings' array including verdict field."
 
-    local verified_findings verifier_provider verifier_provider_key
+    local verified_findings verifier_provider
     verifier_provider="$(review_phase_provider "codex" "implementation-verifier")" || return 1
-    verifier_provider_key="$(review_provider_key_from_agent_type "$verifier_provider")"
     if [[ -n "${OCTOPUS_REVIEW_SINGLE_PROVIDER:-}" || -n "${OCTOPUS_REVIEW_VERIFIER_AGENT:-}" ]]; then
         verified_findings=$(review_run_agent_sync_progress "$verifier_provider" "$verifier_prompt" "implementation-verifier" "review" "verifier-$(octo_agent_spec_slug "$verifier_provider")") && {
-            echo "${verifier_provider_key}|ok|Round 2 verification" >> "$provider_status_file"
+            review_append_provider_status "$provider_status_file" "$verifier_provider" implementation-verifier ok "Round 2 verification"
         } || {
             log WARN "review_run: ${verifier_provider} verification failed, using all findings as confirmed"
-            echo "${verifier_provider_key}|fallback|Round 2 verification failed; preserving Round 1 findings" >> "$provider_status_file"
+            review_append_provider_status "$provider_status_file" "$verifier_provider" implementation-verifier fallback "Round 2 verification failed; preserving Round 1 findings"
             verified_findings=$(printf '{"findings":%s}' "$(
                 echo "$all_findings" | jq 'map(. + {"verdict":"confirmed"})' 2>/dev/null || echo "[]"
             )")
         }
     else
         verified_findings=$(review_run_agent_sync_progress "codex" "$verifier_prompt" "implementation-verifier" "review" "verifier-codex") && {
-            echo "codex|ok|Round 2 verification" >> "$provider_status_file"
+            review_append_provider_status "$provider_status_file" codex implementation-verifier ok "Round 2 verification"
         } || {
             log WARN "review_run: codex verifier failed, falling back to claude-sonnet"
             log "USER" "⚠ Round 2: Codex unavailable → claude-sonnet (fallback). Codex API usage will NOT change."
-            echo "codex|fallback|Round 2 → claude-sonnet" >> "$provider_status_file"
+            review_append_provider_status "$provider_status_file" codex implementation-verifier fallback "Round 2 → claude-sonnet"
             verified_findings=$(review_run_agent_sync_progress "claude-sonnet" "$verifier_prompt" "implementation-verifier" "review" "verifier-claude-sonnet") || {
                 log WARN "review_run: verification failed entirely, using all findings as confirmed"
                 verified_findings=$(printf '{"findings":%s}' "$(
@@ -1777,15 +1925,14 @@ Return ONLY valid JSON with 'findings' array including verdict field."
             local debate_prompt="Challenge these $debate_count contested code review findings. For each, state whether it is a real bug (include) or false positive (exclude). Be adversarial.
 Findings: $(echo "$debate_candidates" | jq -c '.')
 Return JSON: {\"include\": [...finding titles...], \"exclude\": [...finding titles...]}"
-            local debate_result debate_provider debate_provider_key
+            local debate_result debate_provider
             debate_provider="$(review_phase_provider "codex" "implementation-debater")" || return 1
-            debate_provider_key="$(review_provider_key_from_agent_type "$debate_provider")"
             debate_result=$(review_run_agent_sync_progress "$debate_provider" "$debate_prompt" "implementation-debater" "review" "debate-$(octo_agent_spec_slug "$debate_provider")") && {
-                echo "${debate_provider_key}|ok|Round 3 debate" >> "$provider_status_file"
+                review_append_provider_status "$provider_status_file" "$debate_provider" implementation-debater ok "Round 3 debate"
             } || {
                 log WARN "review_run: ${debate_provider} debate agent failed, including all contested findings"
                 log "USER" "⚠ Round 3: ${debate_provider} debate gate unavailable — including all contested findings without debate."
-                echo "${debate_provider_key}|fallback|Round 3 debate → skipped" >> "$provider_status_file"
+                review_append_provider_status "$provider_status_file" "$debate_provider" implementation-debater fallback "Round 3 debate → skipped"
                 debate_result="{\"include\":[],\"exclude\":[]}"
             }
             # v9.3.1: Strip markdown fences from debate result (#188)
@@ -1814,10 +1961,12 @@ Return ONLY JSON: {\"findings\": [...ranked, deduplicated findings...]}"
     local final_json synth_ok="true" synthesis_provider synthesis_provider_key
     synthesis_provider="$(review_phase_provider "claude-sonnet" "implementation-synthesizer")" || return 1
     synthesis_provider_key="$(review_provider_key_from_agent_type "$synthesis_provider")"
-    final_json=$(review_run_agent_sync_progress "$synthesis_provider" "$synthesis_prompt" "implementation-synthesizer" "review" "synthesis-$(octo_agent_spec_slug "$synthesis_provider")") || {
+    final_json=$(review_run_agent_sync_progress "$synthesis_provider" "$synthesis_prompt" "implementation-synthesizer" "review" "synthesis-$(octo_agent_spec_slug "$synthesis_provider")") && {
+        review_append_provider_status "$provider_status_file" "$synthesis_provider" implementation-synthesizer ok "Round 3 synthesis"
+    } || {
         synth_ok="false"
         log WARN "review_run: ${synthesis_provider} synthesis failed, using confirmed findings sorted as-is"
-        echo "${synthesis_provider_key}|fallback|Round 3 synthesis failed; using local deterministic fallback" >> "$provider_status_file"
+        review_append_provider_status "$provider_status_file" "$synthesis_provider" implementation-synthesizer fallback "Round 3 synthesis failed; using local deterministic fallback"
         final_json="$(review_local_synthesis_json "$confirmed_findings" "$round1_warning")"
     }
 

@@ -70,6 +70,10 @@ one requested. Update the seat or its model allowlist instead. The Fable 5
 security guard follows the same rule: an exact Fable pin on a security seat is
 rejected rather than rerouted to another model.
 
+Review lifecycle records and the final provider report keep the canonical
+provider and exact model as separate fields, so two models served by one
+provider remain distinct. Legacy provider-only status records are still read.
+
 Provider admission still applies independently. A seat fails closed when its
 provider is not admitted by the active provider allowlist.
 `OCTOPUS_REVIEW_SINGLE_PROVIDER` remains the global compatibility override and

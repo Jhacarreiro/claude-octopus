@@ -537,7 +537,7 @@ resolve_octopus_model() {
                         [[ -n "$_trace" ]] && echo "[model-trace] Tier 3 (phase/role routing): SKIP (route $routed targets $ref_provider, resolving for $provider)" >&2
                         routed=""
                     else
-                        if ! resolved_model=$(resolve_octopus_model "$ref_provider" "$ref_type" "" ""); then
+                        if ! resolved_model=$(resolve_octopus_model "$canonical_ref_provider" "$ref_type" "" ""); then
                             return 1
                         fi
                     fi

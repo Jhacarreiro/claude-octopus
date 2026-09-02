@@ -275,6 +275,22 @@ cat > "$CONFIG_FILE" << EOF
 EOF
 assert_eq "$(resolve_octopus_model "codex" "codex" "deliver")" "config-spark" "Recursive reference"
 
+# Recursive provider references must use the canonical provider for the lookup,
+# not only for the cross-provider comparison.
+clear_model_cache
+cat > "$CONFIG_FILE" << EOF
+{
+  "version": "3.0",
+  "providers": {
+    "codex": { "default": "config-default", "spark": "config-spark" }
+  },
+  "routing": {
+    "phases": { "deliver": "openai:spark" }
+  }
+}
+EOF
+assert_eq "$(resolve_octopus_model "codex" "codex" "deliver")" "config-spark" "Recursive provider alias uses canonical model namespace"
+
 # Test 7: Tier mapping
 clear_model_cache
 cat > "$CONFIG_FILE" << EOF

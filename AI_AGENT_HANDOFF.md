@@ -4,9 +4,10 @@ Last updated: 2026-09-02
 Status: The five verified maintainer findings for PR #972 are fixed on the
 local worktree. Exact provider/model routing, blank override rejection,
 model-aware status and proof records, and fleet-preview policy parity have
-focused regression coverage. Twenty-two relevant suites pass 364/364; `make
-sync`, `make sync-check`, Bash 3.2 syntax and feature-floor checks, diff checks,
-and executable-mode checks pass.
+focused regression coverage. A follow-up lifecycle guard now finalizes failed
+proof state and removes temporary provider status when fleet validation rejects
+an override under `set -e`. The follow-up's eight focused suites pass 106/106;
+`make sync-check`, Bash 3.2 syntax, diff checks, and executable-mode checks pass.
 Branch: `maint/pr-972-fix`, based on exact PR head
 `ccd66e1f77f37f08c893847162437879b973deb9`.
 Delivery: Local maintainer commit only. No push or full CI run was authorized.

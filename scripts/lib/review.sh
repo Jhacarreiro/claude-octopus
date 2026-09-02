@@ -1623,8 +1623,22 @@ Use this context as the requested behavior and constraints. Flag severity=normal
 
     # ── ROUND 1: Parallel agent fleet ────────────────────────────────────────
     log INFO "review_run: Round 1 — parallel specialist fleet (no wall timeout, stall_window=${review_stall_window}s, diff=${diff_lines} lines)"
-    local fleet
-    fleet=$(build_review_fleet)
+    local fleet fleet_status=0
+    fleet=$(build_review_fleet) || fleet_status=$?
+    if [[ "$fleet_status" -ne 0 ]]; then
+        local fleet_failure_summary="Review fleet validation failed with status ${fleet_status}. Check configured review seat overrides and provider availability."
+        log ERROR "review_run: ${fleet_failure_summary}"
+        printf '{"findings":[],"warning":"%s"}\n' "$fleet_failure_summary" > "$findings_file"
+        if [[ -n "$proof_dir" ]]; then
+            octo_proof_artifact "$proof_dir" "review-findings" "$findings_file" "review fleet validation failed"
+            octo_proof_capture_provider_status "$proof_dir" "$provider_status_file"
+            octo_proof_finalize "$proof_dir" "fail" "$fleet_failure_summary"
+            echo "Proof packet: $proof_dir"
+        fi
+        rm -f "$provider_status_file"
+        render_terminal_report "$findings_file"
+        return "$fleet_status"
+    fi
 
     local agent_prompt_base
     agent_prompt_base="You are a code reviewer. Review the following diff and return ONLY a JSON object with a 'findings' array.

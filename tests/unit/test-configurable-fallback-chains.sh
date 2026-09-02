@@ -99,6 +99,22 @@ chosen=$(octo_fallback_first_available default commandcode)
 if [[ "$chosen" == "claude:claude-pinned-test" ]]; then test_pass; else test_fail "explicit model was lost: $chosen"; fi
 write_config
 
+test_case "technical fallback skips an invalid qualified candidate"
+jq '.routing.fallbackChains.default=[{"provider":"claude","model":"bad model"},{"provider":"claude","model":"claude-pinned-test"}]' "$CFG" > "$CFG.tmp"
+mv "$CFG.tmp" "$CFG"
+chosen=$(octo_fallback_first_available default commandcode)
+if [[ "$chosen" == "claude:claude-pinned-test" ]]; then test_pass; else test_fail "invalid qualified candidate blocked the valid fallback: $chosen"; fi
+
+test_case "technical fallback fails closed when every qualified candidate is invalid"
+jq '.routing.fallbackChains.default=[{"provider":"claude","model":"bad model"},{"provider":"claude","model":"also\tbad"}]' "$CFG" > "$CFG.tmp"
+mv "$CFG.tmp" "$CFG"
+if chosen=$(octo_fallback_first_available default commandcode); then
+  test_fail "invalid qualified chain selected a candidate: $chosen"
+else
+  test_pass
+fi
+write_config
+
 ATTEMPTS="$TMP_ROOT/attempts.log"
 : > "$ATTEMPTS"
 validate_protocol() {

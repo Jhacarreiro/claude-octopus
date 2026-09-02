@@ -152,9 +152,19 @@ octo_fallback_chain_agent_specs() {
 }
 
 octo_fallback_agent_available() {
-    local spec="${1:-}" executor=""
+    local spec="${1:-}" executor="" provider="" model=""
     executor="${spec%%:*}"
     [[ -n "$executor" ]] || return 1
+
+    if [[ "$spec" == *:* ]]; then
+        model="${spec#*:}"
+        [[ -n "$model" ]] || return 1
+        declare -f octo_agent_spec_provider >/dev/null 2>&1 || return 1
+        provider="$(octo_agent_spec_provider "$spec" 2>/dev/null)" || return 1
+        [[ -n "$provider" ]] || return 1
+        declare -f validate_model_name_for_provider >/dev/null 2>&1 || return 1
+        validate_model_name_for_provider "$provider" "$model" >/dev/null 2>&1 || return 1
+    fi
 
     if declare -f is_agent_available_v2 >/dev/null 2>&1; then
         is_agent_available_v2 "$executor"

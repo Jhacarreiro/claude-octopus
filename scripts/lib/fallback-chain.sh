@@ -57,22 +57,49 @@ _octo_fallback_ensure_role_resolver() {
 
 octo_fallback_role_agent_spec() {
     local role="$1" phase="${2:-}" provider="" model="" routed_provider=""
+    local route="null" route_type="null" route_value="" route_provider="" route_model=""
 
     _octo_fallback_ensure_role_resolver || return 1
     routed_provider="$(get_role_agent "$role" 2>/dev/null || true)"
     model="$(get_role_model "$role" 2>/dev/null || true)"
     [[ -n "$routed_provider" ]] || return 1
 
-    if declare -f octopus_profile_provider >/dev/null 2>&1; then
-        provider="$(octopus_profile_provider "$phase" "$role" "$routed_provider" 2>/dev/null || true)"
+    provider="$routed_provider"
+    if declare -f _octopus_profile_route_json >/dev/null 2>&1; then
+        route="$(_octopus_profile_route_json "$phase" "$role" 2>/dev/null || printf '%s\n' null)"
+        route_type="$(jq -r 'type' <<<"$route" 2>/dev/null || printf '%s\n' null)"
     fi
-    provider="${provider:-$routed_provider}"
 
-    if declare -f octopus_profile_model >/dev/null 2>&1; then
-        local configured_model
-        configured_model="$(octopus_profile_model "$phase" "$role" 2>/dev/null || true)"
-        [[ -n "$configured_model" ]] && model="$configured_model"
-    fi
+    case "$route_type" in
+        object)
+            route_provider="$(jq -r '.provider // empty' <<<"$route" 2>/dev/null || true)"
+            route_model="$(jq -r '.model // empty' <<<"$route" 2>/dev/null || true)"
+            if [[ -n "$route_provider" ]]; then
+                provider="$route_provider"
+                model=""
+            fi
+            [[ -n "$route_model" ]] && model="$route_model"
+            ;;
+        string)
+            route_value="$(jq -r '.' <<<"$route" 2>/dev/null || true)"
+            if [[ "$route_value" == *:* ]]; then
+                route_provider="${route_value%%:*}"
+                route_model="${route_value#*:}"
+                [[ -n "$route_provider" && -n "$route_model" ]] || return 1
+                declare -f resolve_octopus_model >/dev/null 2>&1 || return 1
+                model="$(resolve_octopus_model "$route_provider" "$route_model" "" "")" || return 1
+                provider="$route_provider"
+            elif [[ -n "$route_value" ]]; then
+                if declare -f octo_provider_canonical >/dev/null 2>&1 && \
+                   route_provider="$(octo_provider_canonical "$route_value" 2>/dev/null)"; then
+                    provider="$route_provider"
+                    model=""
+                else
+                    model="$route_value"
+                fi
+            fi
+            ;;
+    esac
 
     if [[ -n "$model" ]]; then
         printf '%s:%s\n' "$provider" "$model"

@@ -4,18 +4,28 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/../helpers/test-framework.sh"
-source "$PROJECT_ROOT/scripts/lib/execution-profile.sh"
-source "$PROJECT_ROOT/scripts/lib/fallback-chain.sh"
+source "$PROJECT_ROOT/scripts/lib/model-resolver.sh"
 
 test_suite "configurable fallback chains"
 
 TMP_ROOT="$TEST_TMP_DIR"
 CFG="$TEST_TMP_DIR/providers.json"
+mkdir -p "$TEST_TMP_DIR/model-cache"
+export TMPDIR="$TEST_TMP_DIR/model-cache"
 export OCTOPUS_PROVIDERS_CONFIG="$CFG"
 
 write_config() {
     cat > "$CFG" <<'JSON'
 {
+  "providers": {
+    "codex": {
+      "default": "gpt-default-test",
+      "council": "gpt-council-test"
+    },
+    "claude": {
+      "default": "claude-default-test"
+    }
+  },
   "routing": {
     "roles": {
       "code-reviewer": {"provider":"codex","model":"gpt-luna-test"},
@@ -36,6 +46,19 @@ test_case "default roles resolve through routing.roles provider and model"
 specs=$(octo_fallback_chain_agent_specs default)
 expected=$'codex:gpt-luna-test\ncodex:gpt-sol-test\nclaude:claude-opus-test'
 if [[ "$specs" == "$expected" ]]; then test_pass; else test_fail "unexpected specs: [$specs]"; fi
+
+test_case "bare-provider role routes clear the inherited static-role model"
+jq '.routing.roles["code-reviewer"]="claude" | .routing.fallbackChains.default=[{"role":"code-reviewer"}]' "$CFG" > "$CFG.tmp"
+mv "$CFG.tmp" "$CFG"
+specs=$(octo_fallback_chain_agent_specs default)
+if [[ "$specs" == "claude" ]]; then test_pass; else test_fail "bare provider retained the prior role model: [$specs]"; fi
+
+test_case "provider capability role routes resolve to a concrete model"
+jq '.routing.roles["code-reviewer"]="codex:council" | .routing.fallbackChains.default=[{"role":"code-reviewer"}]' "$CFG" > "$CFG.tmp"
+mv "$CFG.tmp" "$CFG"
+specs=$(octo_fallback_chain_agent_specs default)
+if [[ "$specs" == "codex:gpt-council-test" ]]; then test_pass; else test_fail "provider capability was not recursively resolved: [$specs]"; fi
+write_config
 
 test_case "providers.json may replace the fallback chain"
 jq '.routing.fallbackChains.default=[{"role":"architect"},{"provider":"commandcode","model":"custom/model"}]' "$CFG" > "$CFG.tmp"

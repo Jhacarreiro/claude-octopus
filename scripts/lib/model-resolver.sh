@@ -328,7 +328,7 @@ resolve_octopus_model() {
     local agent_type="$2"
     local phase="${3:-}"
     local role="${4:-}"
-    local config_file="${HOME}/.claude-octopus/config/providers.json"
+    local config_file="${OCTOPUS_PROVIDERS_CONFIG:-${HOME}/.claude-octopus/config/providers.json}"
     local resolved_model=""
     local cost_mode routing_policy
     cost_mode="$(_octo_effective_cost_mode "$config_file")"

@@ -50,6 +50,16 @@ assert_eq() {
     fi
 }
 
+logged_load_error=""
+log() { logged_load_error="$1:$2"; }
+_model_resolver_load_error "catalog unavailable"
+assert_eq "$logged_load_error" "ERROR:catalog unavailable" "Load failures use the project logger when available"
+unset -f log
+fallback_load_error="$(_model_resolver_load_error "catalog unavailable" 2>&1)"
+assert_eq "$fallback_load_error" "model-resolver: catalog unavailable" "Load failures retain a bootstrap stderr fallback"
+log() { :; }
+export -f log
+
 # Clear model resolution caches (in-memory + persistent file)
 # Must be called between tests that change env vars or config files
 clear_model_cache() {

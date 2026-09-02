@@ -11,12 +11,20 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _model_resolver_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${_model_resolver_lib_dir}/provider-registry.sh" || { echo "model-resolver: failed to load provider-registry.sh" >&2; return 1 2>/dev/null || exit 1; }
+_model_resolver_load_error() {
+    local message="$1"
+    if declare -f log >/dev/null 2>&1; then
+        log ERROR "$message" || printf 'model-resolver: %s\n' "$message" >&2
+    else
+        printf 'model-resolver: %s\n' "$message" >&2
+    fi
+}
+source "${_model_resolver_lib_dir}/provider-registry.sh" || { _model_resolver_load_error "failed to load provider-registry.sh"; return 1 2>/dev/null || exit 1; }
 if ! declare -f octo_model_cache_file >/dev/null 2>&1; then
     source "${_model_resolver_lib_dir}/model-cache-path.sh" 2>/dev/null || true
 fi
 if ! declare -f get_model_catalog >/dev/null 2>&1; then
-    source "${_model_resolver_lib_dir}/models.sh" || { echo "model-resolver: failed to load models.sh" >&2; return 1 2>/dev/null || exit 1; }
+    source "${_model_resolver_lib_dir}/models.sh" || { _model_resolver_load_error "failed to load models.sh"; return 1 2>/dev/null || exit 1; }
 fi
 if ! declare -f _is_cursor_agent_binary >/dev/null 2>&1; then
     source "${_model_resolver_lib_dir}/cursor-agent.sh" 2>/dev/null || true
@@ -270,7 +278,7 @@ _octo_route_value_model_family() {
         claude-*|anthropic/*) printf '%s\n' anthropic ;;
         gpt-*|o[134]-*|codex*|openai/*) printf '%s\n' openai ;;
         gemini-*|agy-*|google/*) printf '%s\n' google ;;
-        qwen*|qwen/*|alibaba/*) printf '%s\n' alibaba ;;
+        qwen*|alibaba/*) printf '%s\n' alibaba ;;
         grok-*|xai/*|x-ai/*) printf '%s\n' xai ;;
         mistral-*|mistral/*|mistralai/*) printf '%s\n' mistral ;;
         sonar*|perplexity/*) printf '%s\n' perplexity ;;

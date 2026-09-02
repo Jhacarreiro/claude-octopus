@@ -1,21 +1,24 @@
 # AI Agent Handoff
 
-Last updated: 2026-09-02
-Status: The five verified maintainer findings for PR #972 are fixed on the
-local worktree. Exact provider/model routing, blank override rejection,
-model-aware status and proof records, and fleet-preview policy parity have
-focused regression coverage. A follow-up lifecycle guard now finalizes failed
-proof state and removes temporary provider status when fleet validation rejects
-an override under `set -e`. The follow-up's eight focused suites pass 106/106;
-`make sync-check`, Bash 3.2 syntax, diff checks, and executable-mode checks pass.
-Branch: `maint/pr-972-fix`, based on exact PR head
-`ccd66e1f77f37f08c893847162437879b973deb9`.
-Delivery: Local maintainer commit only. No push or full CI run was authorized.
-Current release: [v10.1.0](https://github.com/nyldn/claude-octopus/releases/tag/v10.1.0)
+Last updated: 2026-08-30
+Status: PR #984 contains the install, setup, readiness, dispatch, cost, and
+uninstall simplification. Two findings from the latest exact-head CodeRabbit
+round have verified fixes in the branch head, independent Fable 5 review
+returned PASS/PASS, and the complete local matrix is green. The final head
+still needs exact-head hosted review before merge.
+Branch: `feat/simplify-install-setup-use`, reconciled with `origin/main` at
+`f9b8c92aa228a4b3f6bc9132c6c0a06f3142b73e`.
+Delivery: PR [#984](https://github.com/nyldn/claude-octopus/pull/984) is open.
+Its branch head includes the final reviewed follow-up after
+`d412469ce7345496793849b88b1803a0b23c4d28`.
+Current release: [v10.0.0](https://github.com/nyldn/claude-octopus/releases/tag/v10.0.0)
 Tracking: `bd` is unavailable in this checkout, so no Beads issue was created or
-updated.
-Next action: inspect the local commit, then push and update PR #972 only when
-explicitly authorized. Run the normal hosted review and full CI before merge.
+updated for this cleanup.
+Next action: commit and push the review follow-up, resolve the verified review
+threads, wait for exact-head checks and approval, then squash-merge PR #984 and
+run the guarded v10.1.0 release workflow. The user authorized merge, release,
+shared-marketplace publication, and cleanup of only the related worktrees
+proven safe to remove.
 
 ## Install, Setup, and Everyday-Use Simplification
 

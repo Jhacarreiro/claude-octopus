@@ -213,10 +213,15 @@ _octopus_is_safe_openai_compatible_value() {
 # later in the string), so `env OCTOPUS_GROK_MODEL=x echo pwned <shim>` is
 # rejected instead of matching on a fixed prefix/suffix pair.
 _validate_env_prefixed_shim_command() {
-    local cmd="$1" env_prefix="$2" shim_suffix="$3"
+    local cmd="$1" env_prefix="$2" shim_suffix="$3" allowed_tail="${4:-}"
     local -a parts
     read -r -a parts <<< "$cmd"
-    [[ "${#parts[@]}" -eq 3 ]] || return 1
+    if [[ -n "$allowed_tail" ]]; then
+        [[ "${#parts[@]}" -eq 5 ]] || return 1
+        [[ "${parts[3]} ${parts[4]}" == "$allowed_tail" ]] || return 1
+    else
+        [[ "${#parts[@]}" -eq 3 ]] || return 1
+    fi
     [[ "${parts[0]}" == "env" ]] || return 1
     [[ "${parts[1]}" == "${env_prefix}="* ]] || return 1
     [[ "${parts[2]}" == *"$shim_suffix" ]] || return 1
@@ -247,8 +252,11 @@ _validate_openai_compatible_agent_command() {
         local value="${parts[$((i + 1))]}"
         case "$flag" in
             --provider)
-                [[ -z "$provider" && "$value" == "generic" ]] || return 1
-                provider="$value"
+                [[ -z "$provider" ]] || return 1
+                case "$value" in
+                    generic|atlascloud) provider="$value" ;;
+                    *) return 1 ;;
+                esac
                 ;;
             --model)
                 [[ -z "$model" ]] || return 1
@@ -424,6 +432,12 @@ validate_agent_command() {
             return 0
         fi
         if _validate_env_prefixed_shim_command "$cmd" "OCTOPUS_CLAUDE_SDK_MODEL" "/scripts/helpers/claude-sdk-exec.sh"; then
+            return 0
+        fi
+        if _validate_env_prefixed_shim_command "$cmd" "OCTOPUS_AGY_MODEL" "/scripts/helpers/agy-exec.sh"; then
+            return 0
+        fi
+        if _validate_env_prefixed_shim_command "$cmd" "OCTOPUS_VIBE_MODEL" "/scripts/helpers/vibe-exec.sh" "--output text"; then
             return 0
         fi
     fi

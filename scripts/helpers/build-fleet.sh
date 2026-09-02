@@ -31,6 +31,7 @@ fi
 source "${SCRIPT_DIR}/../lib/provider-registry.sh"
 source "${SCRIPT_DIR}/../lib/provider-policy.sh"
 source "${SCRIPT_DIR}/../lib/agent-spec.sh"
+source "${SCRIPT_DIR}/../lib/review.sh"
 
 WORKFLOW="${1:-research}"
 INTENSITY="${2:-standard}"
@@ -335,16 +336,48 @@ build_review_fleet() {
     local count=${#providers[@]}
     [[ $count -gt 0 ]] || return 0
 
-    local labels=("Logic Reviewer" "Security Reviewer" "Architecture Reviewer" "CVE Reviewer")
+    local roles=(
+        implementation-logic-reviewer
+        implementation-security-reviewer
+        implementation-architecture-reviewer
+        implementation-cve-reviewer
+        implementation-diversity-reviewer
+        implementation-verifier
+        implementation-debater
+        implementation-synthesizer
+    )
+    local labels=("Logic Reviewer" "Security Reviewer" "Architecture Reviewer" "CVE Reviewer" "Diversity Reviewer" "Verifier" "Debater" "Synthesizer")
     local prompts=(
         "Review for correctness and logic bugs, edge cases, regressions in: $PROMPT"
         "Review for OWASP vulnerabilities, injection, auth flaws, data exposure in: $PROMPT"
         "Review architecture, integration, API contracts, breaking changes in: $PROMPT"
         "Check for known CVEs, library advisories, and security bulletins related to: $PROMPT"
+        "Review for blind spots, missed assumptions, and provider-family divergence in: $PROMPT"
+        "Verify confirmed findings against the code and evidence in: $PROMPT"
+        "Challenge disputed findings and test competing interpretations in: $PROMPT"
+        "Synthesize the verified review findings for: $PROMPT"
+    )
+    local verifier_default="${providers[0]}" synthesis_default="${providers[0]}"
+    if is_available codex && octo_provider_allowed codex; then
+        verifier_default=codex
+    fi
+    if octo_provider_allowed claude-sonnet; then
+        synthesis_default=claude-sonnet
+    fi
+
+    local defaults=(
+        "${providers[0]}"
+        "${providers[$((1 % count))]}"
+        "${providers[$((2 % count))]}"
+        "${providers[$((3 % count))]}"
+        "${providers[$((4 % count))]}"
+        "$verifier_default"
+        "$verifier_default"
+        "$synthesis_default"
     )
     local i provider
-    for ((i=0; i<4; i++)); do
-        provider="${providers[$((i % count))]}"
+    for ((i=0; i<8; i++)); do
+        provider="$(review_agent_for_seat "${defaults[$i]}" "${roles[$i]}")" || return $?
         emit "$provider" "${labels[$i]}" "${prompts[$i]}"
     done
     return 0

@@ -199,8 +199,13 @@ review_seat_agent_override() {
     local role="${1:-}" env_name="" agent=""
     env_name="$(review_seat_override_env_name "$role" 2>/dev/null || true)"
     [[ -n "$env_name" ]] || return 1
-    agent="${!env_name:-}"
-    [[ -n "$agent" ]] || return 1
+    [[ "${!env_name+x}" == "x" ]] || return 1
+    agent="${!env_name-}"
+
+    if ! agent="$(octo_agent_spec_canonicalize_exact "$agent")"; then
+        log ERROR "Review seat override ${env_name} must be a supported provider:model spec"
+        return 2
+    fi
 
     if ! declare -f octo_provider_allowed >/dev/null 2>&1 || ! octo_provider_allowed "$agent"; then
         log ERROR "Review seat override ${env_name}='${agent}' is not admitted by the active allowlist"
@@ -250,6 +255,9 @@ review_fleet_with_override_seats() {
         if ! grep -Fc ":${role}:" <<< "$fleet" >/dev/null; then
             executor="$(octo_agent_spec_executor "$override")"
             specialty="$(review_seat_specialty "$role")"
+            if [[ -n "$fleet" && "$fleet" != *$'\n' ]]; then
+                fleet+=$'\n'
+            fi
             fleet+="${executor}:${role}:${specialty}"$'\n'
         fi
     done
@@ -679,16 +687,20 @@ review_result_failure_detail() {
 }
 
 review_provider_key_from_agent_type() {
-    case "${1:-}" in
+    local executor="${1%%:*}" canonical=""
+    case "$executor" in
         openai-compatible*|openai-tools*) echo "openai-compatible" ;;
-        claude-sdk*) echo "claude" ;;
+        claude-sdk*) echo "claude-sdk" ;;
         claude*) echo "claude" ;;
         copilot*) echo "copilot" ;;
         codex*) echo "codex" ;;
         commandcode*) echo "commandcode" ;;
         agy*|antigravity|gemini*) echo "agy" ;;
         perplexity*) echo "perplexity" ;;
-        *) printf '%s\n' "${1%%[-_]*}" ;;
+        *)
+            canonical="$(octo_provider_canonical "$executor" 2>/dev/null || true)"
+            printf '%s\n' "${canonical:-${executor%%[-_]*}}"
+            ;;
     esac
 }
 
@@ -1025,10 +1037,12 @@ review_collect_diff() {
 print_provider_report() {
     local status_file="$1"
     local fallback_log="${HOME}/.claude-octopus/provider-fallbacks.log"
+    local extra_status_file
 
     if [[ ! -f "$status_file" ]]; then
         return 0
     fi
+    extra_status_file="$(mktemp "${TMPDIR:-/tmp}/octopus-provider-report.XXXXXX")" || return 1
 
     # Determine status per provider
     local codex_status="not used" agy_status="not used" claude_status="not used" perplexity_status="not used" compatible_status="not used" copilot_status="not used" commandcode_status="not used"
@@ -1036,6 +1050,7 @@ print_provider_report() {
     local had_fallback=false
 
     while IFS='|' read -r provider status detail; do
+        provider="$(review_provider_key_from_agent_type "$provider")"
         case "$provider" in
             codex)
                 if [[ "$status" == "ok" ]]; then
@@ -1120,6 +1135,25 @@ print_provider_report() {
                     had_fallback=true
                 fi
                 ;;
+            *)
+                local extra_status=""
+                case "$status" in
+                    ok) extra_status="✓ OK" ;;
+                    fallback)
+                        extra_status="✗ FALLBACK"
+                        had_fallback=true
+                        ;;
+                    auth-failed)
+                        extra_status="✗ AUTH FAILED"
+                        had_fallback=true
+                        ;;
+                esac
+                if [[ -n "$extra_status" ]]; then
+                    awk -F'|' -v key="$provider" '$1 != key' "$extra_status_file" > "${extra_status_file}.tmp"
+                    mv "${extra_status_file}.tmp" "$extra_status_file"
+                    printf '%s|%s|%s\n' "$provider" "$extra_status" "$detail" >> "$extra_status_file"
+                fi
+                ;;
         esac
     done < "$status_file"
 
@@ -1142,6 +1176,13 @@ print_provider_report() {
     [[ -n "$copilot_detail" ]] && printf "│    → %-38.38s│\n" "$copilot_detail"
     printf "│ 🟠 CommandCode: %-27s│\n" "$commandcode_status"
     [[ -n "$commandcode_detail" ]] && printf "│    → %-38.38s│\n" "$commandcode_detail"
+    while IFS='|' read -r provider status detail; do
+        [[ -n "$provider" ]] || continue
+        local provider_label
+        provider_label="$(printf '%s' "$provider" | awk '{ print toupper(substr($0,1,1)) substr($0,2) }')"
+        printf "│ %-14s %-27s│\n" "${provider_label}:" "$status"
+        [[ -n "$detail" && "$status" != "✓ OK" ]] && printf "│    → %-38.38s│\n" "$detail"
+    done < "$extra_status_file"
     if [[ "$had_fallback" == "true" ]]; then
         echo "│                                             │"
         echo "│ ⚠ Some providers failed — run octopus doctor│"
@@ -1153,6 +1194,7 @@ print_provider_report() {
         echo "Provider failure details:"
         while IFS='|' read -r provider status detail; do
             if [[ "$status" == "fallback" || "$status" == "auth-failed" ]]; then
+                provider="$(review_provider_key_from_agent_type "$provider")"
                 printf -- '- %s: %s\n' "$provider" "$detail"
             fi
         done < "$status_file"
@@ -1165,6 +1207,7 @@ print_provider_report() {
         ts=$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S)
         while IFS='|' read -r provider status detail; do
             if [[ "$status" == "fallback" || "$status" == "auth-failed" ]]; then
+                provider="$(review_provider_key_from_agent_type "$provider")"
                 echo "[$ts] provider=$provider status=$status detail=$detail" >> "$fallback_log"
             fi
         done < "$status_file"
@@ -1175,6 +1218,7 @@ print_provider_report() {
     fi
 
     rm -f "$status_file"
+    rm -f "$extra_status_file"
 }
 
 # parallel fleet (Round 1) + verification (Round 2) + synthesis (Round 3)
@@ -1810,7 +1854,7 @@ Return ONLY JSON: {\"findings\": [...ranked, deduplicated findings...]}"
         if ! _synth_count=$(review_findings_count "$final_json"); then
             _synth_count=0
         fi
-        octo_event_emit "synthesis" phase="review" provider="$synthesis_provider" provider_label_kind="legacy-alias" executor_alias="$synthesis_provider" configured_provider="$(octo_provider_identity_from_agent_type "$synthesis_provider")" configured_model="$(get_agent_model "$synthesis_provider" "review" "implementation-synthesizer" 2>/dev/null || echo unresolved)" runtime_provider="unknown" runtime_model="unknown" council_role="implementation-synthesizer" synthesis_strategy="review" count="${_synth_count:-0}" || true
+        octo_event_emit "synthesis" phase="review" provider="$synthesis_provider_key" provider_label_kind="canonical" executor_alias="$synthesis_provider" configured_provider="$(octo_provider_identity_from_agent_type "$synthesis_provider")" configured_model="$(get_agent_model "$synthesis_provider" "review" "implementation-synthesizer" 2>/dev/null || echo unresolved)" runtime_provider="unknown" runtime_model="unknown" council_role="implementation-synthesizer" synthesis_strategy="review" count="${_synth_count:-0}" || true
     fi
 
     if [[ -n "$proof_dir" ]]; then

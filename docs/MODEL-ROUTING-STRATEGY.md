@@ -58,10 +58,24 @@ providers instead of inheriting the review fleet's provider defaults:
 | Synthesizer | `OCTOPUS_REVIEW_SYNTHESIZER_AGENT` |
 
 For example, `OCTOPUS_REVIEW_SYNTHESIZER_AGENT=commandcode:thinkingmachines/inkling-small`
-keeps the synthesis seat on that exact provider and model. Explicit seat overrides
-remain subject to the active provider allowlist and fail closed when the requested
-provider is not admitted. `OCTOPUS_REVIEW_SINGLE_PROVIDER` remains the global
-compatibility override and takes precedence over individual seat overrides.
+keeps the synthesis seat on that exact provider and model. Registered aliases
+such as `command-code` and `anthropic` are accepted at the configuration boundary
+and normalized to executable provider names.
+
+Each seat override must contain both a provider and a model. Blank values,
+provider-only values, unsafe whitespace, unknown providers, and models blocked by
+the provider's model restriction are rejected. Exact seat overrides never use a
+restriction-service fallback because that would run a different model than the
+one requested. Update the seat or its model allowlist instead. The Fable 5
+security guard follows the same rule: an exact Fable pin on a security seat is
+rejected rather than rerouted to another model.
+
+Provider admission still applies independently. A seat fails closed when its
+provider is not admitted by the active provider allowlist.
+`OCTOPUS_REVIEW_SINGLE_PROVIDER` remains the global compatibility override and
+takes precedence over individual seat overrides. Run `octopus fleet review` to
+inspect the effective logic, security, architecture, CVE, diversity, verifier,
+debater, and synthesizer seats before starting a review.
 
 Round-1 seat overrides are additive when their semantic role is absent from the
 configured review fleet; unconfigured seats retain the existing fleet behavior.

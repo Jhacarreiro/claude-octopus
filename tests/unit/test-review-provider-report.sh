@@ -133,4 +133,32 @@ else
     test_fail "Copilot provider failure was hidden or truncated: $report"
 fi
 
+test_case "provider report renders admitted contextual providers with canonical keys"
+printf '%s\n' \
+  'vibe|ok|completed' \
+  'atlas-cloud|fallback|Atlas request failed' \
+  'anthropic|ok|completed' > "$status_file"
+report="$(env "HOME=${TEST_TMP_DIR}" bash -c '
+    source "$1/scripts/lib/provider-registry.sh"
+    source "$1/scripts/lib/review.sh"
+    print_provider_report "$2"
+' _ "$PROJECT_ROOT" "$status_file")"
+if grep -Eq 'Vibe:[[:space:]]+.*OK' <<< "$report" && \
+   grep -Eq 'Atlascloud:[[:space:]]+.*FALLBACK' <<< "$report" && \
+   grep -Eq 'Claude:[[:space:]]+.*OK' <<< "$report" && \
+   [[ "$report" == *'Atlas request failed'* ]]; then
+    test_pass
+else
+    test_fail "provider report omitted or mis-keyed a contextual provider: $report"
+fi
+
+test_case "synthesis lifecycle event uses the canonical provider key"
+synthesis_event="$(sed -n '/# #498: emit a synthesis lifecycle event/,/if \[\[ -n "$proof_dir" \]\]/p' "$PROJECT_ROOT/scripts/lib/review.sh")"
+if grep -Fq 'provider="$synthesis_provider_key"' <<< "$synthesis_event" && \
+   ! grep -Fq 'provider="$synthesis_provider"' <<< "$synthesis_event"; then
+    test_pass
+else
+    test_fail "synthesis event does not use the canonical provider key"
+fi
+
 test_summary

@@ -8,6 +8,7 @@ test_suite "Contextual review seat overrides"
 export PLUGIN_DIR="$PROJECT_ROOT"
 export HOME="$TEST_TMP_DIR/contextual-review-seat-overrides"
 mkdir -p "$HOME/.claude-octopus/config"
+source "$PROJECT_ROOT/scripts/lib/provider-registry.sh"
 source "$PROJECT_ROOT/scripts/lib/agent-spec.sh"
 source "$PROJECT_ROOT/scripts/lib/review.sh"
 
@@ -18,21 +19,21 @@ octo_provider_allowed() {
     *) return 1 ;;
   esac
 }
-
 unset OCTOPUS_REVIEW_SINGLE_PROVIDER
-export OCTOPUS_REVIEW_LOGIC_AGENT='codex:gpt-5.6-luna'
+export OCTOPUS_REVIEW_LOGIC_AGENT='openai:gpt-5.6-luna'
 export OCTOPUS_REVIEW_SECURITY_AGENT='claude:claude-opus-5'
-export OCTOPUS_REVIEW_ARCHITECTURE_AGENT='claude:claude-opus-5'
-export OCTOPUS_REVIEW_CVE_AGENT='commandcode:tencent/hy3-paid'
+export OCTOPUS_REVIEW_ARCHITECTURE_AGENT='anthropic:claude-opus-5'
+export OCTOPUS_REVIEW_CVE_AGENT='command-code:tencent/hy3-paid'
 export OCTOPUS_REVIEW_DIVERSITY_AGENT='commandcode:qwen/qwen3.8-27b'
 export OCTOPUS_REVIEW_VERIFIER_AGENT='codex:gpt-5.6-luna'
 export OCTOPUS_REVIEW_DEBATER_AGENT='commandcode:qwen/qwen3.8-27b'
 export OCTOPUS_REVIEW_SYNTHESIZER_AGENT='commandcode:thinkingmachines/inkling-small'
 
-test_case "semantic seats return literal provider:model overrides"
-if [[ "$(review_agent_for_seat codex implementation-logic-reviewer)" == "$OCTOPUS_REVIEW_LOGIC_AGENT" ]] && \
+test_case "semantic seats canonicalize registered aliases to executable provider:model specs"
+if [[ "$(review_agent_for_seat codex implementation-logic-reviewer)" == 'codex:gpt-5.6-luna' ]] && \
    [[ "$(review_agent_for_seat claude-sonnet implementation-security-reviewer)" == "$OCTOPUS_REVIEW_SECURITY_AGENT" ]] && \
-   [[ "$(review_agent_for_seat claude-sonnet implementation-architecture-reviewer)" == "$OCTOPUS_REVIEW_ARCHITECTURE_AGENT" ]] && \
+   [[ "$(review_agent_for_seat claude-sonnet implementation-architecture-reviewer)" == 'claude:claude-opus-5' ]] && \
+   [[ "$(review_agent_for_seat perplexity implementation-cve-reviewer)" == 'commandcode:tencent/hy3-paid' ]] && \
    [[ "$(review_agent_for_seat codex implementation-verifier)" == "$OCTOPUS_REVIEW_VERIFIER_AGENT" ]] && \
    [[ "$(review_agent_for_seat codex implementation-debater)" == "$OCTOPUS_REVIEW_DEBATER_AGENT" ]] && \
    [[ "$(review_agent_for_seat claude-sonnet implementation-synthesizer)" == "$OCTOPUS_REVIEW_SYNTHESIZER_AGENT" ]]; then
@@ -40,6 +41,21 @@ if [[ "$(review_agent_for_seat codex implementation-logic-reviewer)" == "$OCTOPU
 else
   test_fail "semantic seat override mismatch"
 fi
+
+test_case "blank whitespace and provider-only seat overrides fail closed"
+malformed_ok=true
+for malformed in '' '   ' 'claude' 'claude:' ' claude:claude-opus-5' 'claude:claude-opus-5 '; do
+  OCTOPUS_REVIEW_SECURITY_AGENT="$malformed"
+  rc=0
+  review_agent_for_seat claude-sonnet implementation-security-reviewer >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -ne 0 ]] || malformed_ok=false
+done
+if [[ "$malformed_ok" == true ]]; then
+  test_pass
+else
+  test_fail "a malformed contextual seat override was admitted"
+fi
+OCTOPUS_REVIEW_SECURITY_AGENT='claude:claude-opus-5'
 
 test_case "single-provider override keeps global precedence"
 OCTOPUS_REVIEW_SINGLE_PROVIDER=codex
@@ -61,22 +77,44 @@ else
 fi
 OCTOPUS_REVIEW_SECURITY_AGENT='claude:claude-opus-5'
 
+test_case "unknown seat providers fail closed when the allowlist is unset"
+octo_provider_allowed() { return 0; }
+OCTOPUS_REVIEW_SECURITY_AGENT='unknown-provider:some-model'
+rc=0
+review_agent_for_seat claude-sonnet implementation-security-reviewer >/dev/null 2>&1 || rc=$?
+if [[ "$rc" -ne 0 ]]; then
+  test_pass
+else
+  test_fail "unknown provider was admitted when the allowlist allowed all registered providers"
+fi
+octo_provider_allowed() {
+  case "$(octo_agent_spec_provider "$1")" in
+    codex|claude|commandcode) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+OCTOPUS_REVIEW_SECURITY_AGENT='claude:claude-opus-5'
+
 test_case "Round 1 override seats are emitted exactly once with configured providers"
-fleet=$'codex:implementation-logic-reviewer:correctness and logic bugs, edge cases, regressions\nclaude-sonnet:implementation-architecture-reviewer:architecture, integration, API contracts, breaking changes\n'
+# build_review_fleet obtains its configured fleet through command substitution,
+# which strips the producer's trailing newline before override seats are added.
+fleet=$'codex:implementation-logic-reviewer:correctness and logic bugs, edge cases, regressions\nclaude-sonnet:implementation-architecture-reviewer:architecture, integration, API contracts, breaking changes'
 expanded="$(review_fleet_with_override_seats "$fleet")"
 logic_provider="${OCTOPUS_REVIEW_LOGIC_AGENT%%:*}"
 security_provider="${OCTOPUS_REVIEW_SECURITY_AGENT%%:*}"
 cve_provider="${OCTOPUS_REVIEW_CVE_AGENT%%:*}"
 diversity_provider="${OCTOPUS_REVIEW_DIVERSITY_AGENT%%:*}"
-if [[ "$(grep -Fc ':implementation-logic-reviewer:' <<< "$expanded")" -eq 1 ]] && \
-   [[ "$(grep -Fc ':implementation-architecture-reviewer:' <<< "$expanded")" -eq 1 ]] && \
-   [[ "$(grep -Fc ':implementation-security-reviewer:' <<< "$expanded")" -eq 1 ]] && \
-   [[ "$(grep -Fc ':implementation-cve-reviewer:' <<< "$expanded")" -eq 1 ]] && \
-   [[ "$(grep -Fc ':implementation-diversity-reviewer:' <<< "$expanded")" -eq 1 ]] && \
-   [[ "$(grep -Fc "${logic_provider}:implementation-logic-reviewer:" <<< "$expanded")" -eq 1 ]] && \
-   [[ "$(grep -Fc "${security_provider}:implementation-security-reviewer:" <<< "$expanded")" -eq 1 ]] && \
-   [[ "$(grep -Fc "${cve_provider}:implementation-cve-reviewer:" <<< "$expanded")" -eq 1 ]] && \
-   [[ "$(grep -Fc "${diversity_provider}:implementation-diversity-reviewer:" <<< "$expanded")" -eq 1 ]]; then
+expanded_line_count="$(printf '%s\n' "$expanded" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+if [[ "$expanded_line_count" -eq 5 ]] && \
+   [[ "$(grep -cE '^[^:]+:implementation-logic-reviewer:' <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -cE '^[^:]+:implementation-architecture-reviewer:' <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -cE '^[^:]+:implementation-security-reviewer:' <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -cE '^[^:]+:implementation-cve-reviewer:' <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -cE '^[^:]+:implementation-diversity-reviewer:' <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -cE '^codex:implementation-logic-reviewer:' <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -cE "^${security_provider}:implementation-security-reviewer:" <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -cE '^commandcode:implementation-cve-reviewer:' <<< "$expanded")" -eq 1 ]] && \
+   [[ "$(grep -cE "^${diversity_provider}:implementation-diversity-reviewer:" <<< "$expanded")" -eq 1 ]]; then
   test_pass
 else
   test_fail "Round 1 generated fleet did not preserve unique configured-provider seats: $(tr '\n' '|' <<< "$expanded")"
@@ -95,6 +133,13 @@ if [[ "$(review_provider_key_from_agent_type "$OCTOPUS_REVIEW_DIVERSITY_AGENT")"
   test_pass
 else
   test_fail "CommandCode review seat was not classified as commandcode"
+fi
+
+test_case "model-qualified registry seats omit the model from provider telemetry"
+if [[ "$(review_provider_key_from_agent_type 'vibe:provider/model-id')" == 'vibe' ]]; then
+  test_pass
+else
+  test_fail "model-qualified Vibe review seat leaked its model into provider telemetry"
 fi
 
 test_summary

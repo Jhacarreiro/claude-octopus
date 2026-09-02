@@ -53,6 +53,35 @@ octo_agent_spec_explicit_model() {
     printf '%s\n' "$model"
 }
 
+# Normalize a model-qualified seat to the executable name consumed by
+# dispatch.sh. Provider aliases belong at the configuration boundary; runtime
+# agent specs must use dispatchable executors.
+octo_agent_spec_canonicalize_exact() {
+    local spec="${1-}" executor model provider canonical_executor
+    [[ -n "$spec" && "$spec" == *:* ]] || return 1
+    [[ "$spec" != *[[:space:]]* && "$spec" != *\\* ]] || return 1
+
+    executor="${spec%%:*}"
+    model="${spec#*:}"
+    [[ -n "$executor" && -n "$model" ]] || return 1
+    provider="$(octo_provider_canonical "$executor" 2>/dev/null)" || return 1
+
+    case "$provider" in
+        atlascloud) canonical_executor="atlascloud-agent" ;;
+        *) canonical_executor="$provider" ;;
+    esac
+
+    octo_provider_has_capability "$provider" dispatch || return 1
+
+    # Exact contextual seats are serialized into a shell command string and
+    # later split into argv. Keep the accepted model grammar to one safe token.
+    case "$model" in
+        /*|*[[:space:]]*|*\\*|*\**|*";"*|*"|"*|*"&"*|*'$'*|*'`'*|*"'"*|*'"'*|*"("*|*")"*|*"<"*|*">"*|*"!"*|*"?"*|*"["*|*"]"*|*"{"*|*"}"*) return 1 ;;
+    esac
+
+    printf '%s:%s\n' "$canonical_executor" "$model"
+}
+
 octo_agent_spec_slug() {
     local spec="${1:-unknown}"
     # Keep the full seat identity while making it safe for filenames and

@@ -40,6 +40,20 @@ else
     test_fail "expected agy-exec shim path to be accepted"
 fi
 
+test_case "validate_agent_command allows agy-exec shim with exact model env prefix"
+if validate_agent_command "env OCTOPUS_AGY_MODEL=gemini-exact $PROJECT_ROOT/scripts/helpers/agy-exec.sh"; then
+    test_pass
+else
+    test_fail "expected env-prefixed agy-exec shim path to be accepted"
+fi
+
+test_case "validate_agent_command allows vibe-exec shim with exact model env prefix"
+if validate_agent_command "env OCTOPUS_VIBE_MODEL=mistral-large-latest $PROJECT_ROOT/scripts/helpers/vibe-exec.sh --output text"; then
+    test_pass
+else
+    test_fail "expected env-prefixed vibe-exec shim path to be accepted"
+fi
+
 test_case "validate_agent_command rejects embedded agy-exec shim path"
 if validate_agent_command "echo $PROJECT_ROOT/scripts/helpers/agy-exec.sh" >/dev/null 2>&1; then
     test_fail "expected embedded agy-exec shim path to be rejected"

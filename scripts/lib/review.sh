@@ -196,7 +196,7 @@ review_seat_specialty() {
 }
 
 review_seat_agent_override() {
-    local role="${1:-}" env_name="" agent=""
+    local role="${1:-}" env_name="" agent="" provider="" model=""
     env_name="$(review_seat_override_env_name "$role" 2>/dev/null || true)"
     [[ -n "$env_name" ]] || return 1
     [[ "${!env_name+x}" == "x" ]] || return 1
@@ -214,6 +214,20 @@ review_seat_agent_override() {
 
     if ! octo_agent_spec_exact_model_allowed "$agent"; then
         log ERROR "Review seat override ${env_name}='${agent}' is blocked by the provider model allowlist"
+        return 2
+    fi
+
+    provider="$(octo_agent_spec_provider "$agent")"
+    model="$(octo_agent_spec_explicit_model "$agent")" || {
+        log ERROR "Review seat override ${env_name}='${agent}' has no exact model"
+        return 2
+    }
+    if ! declare -f validate_model_name_for_provider >/dev/null 2>&1; then
+        log ERROR "Review seat override ${env_name}='${agent}' cannot be validated because provider model validation is unavailable"
+        return 2
+    fi
+    if ! validate_model_name_for_provider "$provider" "$model"; then
+        log ERROR "Review seat override ${env_name}='${agent}' is not a valid model for provider '${provider}'"
         return 2
     fi
 
@@ -1612,10 +1626,6 @@ Use this context as the requested behavior and constraints. Flag severity=normal
     local fleet
     fleet=$(build_review_fleet)
 
-    if [[ -n "$proof_dir" ]]; then
-        octo_proof_event "$proof_dir" "provider_fleet" "$(printf '%s\n' "$fleet" | jq -R -s 'split("\n")[:-1]')"
-    fi
-
     local agent_prompt_base
     agent_prompt_base="You are a code reviewer. Review the following diff and return ONLY a JSON object with a 'findings' array.
 
@@ -1682,6 +1692,17 @@ ${agent_prompt_base}"
         fi
         round1_pids+=("$round1_pid")
     done <<< "$fleet"
+
+    if [[ -n "$proof_dir" ]]; then
+        local resolved_provider_fleet_json="[]"
+        if [[ "${#round1_agent_types[@]}" -gt 0 ]]; then
+            resolved_provider_fleet_json="$(
+                printf '%s\n' "${round1_agent_types[@]}" |
+                    jq -c -R -s 'split("\n")[:-1]'
+            )"
+        fi
+        octo_proof_event "$proof_dir" "provider_fleet" "$resolved_provider_fleet_json"
+    fi
 
     fleet_dispatch_end
 

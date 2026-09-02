@@ -92,4 +92,46 @@ gemini:reviewer2:style"'
     fi
 fi
 
+test_case "provider fleet proof records resolved exact Round 1 identities"
+
+LOOP_SRC=$(sed -n '/^    fleet_dispatch_begin$/,/^    fleet_dispatch_end$/p' "$REVIEW_SH")
+if [[ -z "$LOOP_SRC" ]]; then
+    test_fail "could not extract the Round 1 dispatch loop from review.sh (source drift?)"
+else
+    PROOF_HARNESS="$TEST_TMP_DIR/proof-harness.sh"
+    {
+        echo '#!/usr/bin/env bash'
+        echo 'set -eo pipefail'
+        printf 'source %q\n' "$PROJECT_ROOT/scripts/lib/agent-spec.sh"
+        echo 'RESULTS_DIR="'"$TEST_TMP_DIR"'"'
+        echo 'timestamp="ts-proof"'
+        echo 'fleet="codex:reviewer1:logic
+claude-sonnet:reviewer2:architecture"'
+        echo 'round1_files=(); round1_agent_types=(); round1_roles=(); round1_task_ids=(); round1_prompts=(); round1_pids=()'
+        echo 'agent_prompt_base="base prompt"'
+        echo 'proof_dir="proof-enabled"'
+        echo 'log() { :; }'
+        echo 'fleet_dispatch_begin() { :; }'
+        echo 'fleet_dispatch_end() { :; }'
+        echo 'review_agent_for_seat() {'
+        echo '    if [[ "$2" == "reviewer1" ]]; then printf "%s\n" "commandcode:model-exact"; else printf "%s\n" "$1"; fi'
+        echo '}'
+        echo 'spawn_agent_capture_pid() { echo 424242; }'
+        echo 'octo_proof_event() { printf "proof_type=%s\nproof_data=%s\n" "$2" "$3"; }'
+        echo 'run_round1() {'
+        printf '%s\n' "$LOOP_SRC"
+        echo '}'
+        echo 'run_round1'
+    } > "$PROOF_HARNESS"
+
+    if PROOF_OUT=$(bash "$PROOF_HARNESS" 2>&1) && \
+       [[ "$PROOF_OUT" == *'proof_type=provider_fleet'* ]] && \
+       [[ "$PROOF_OUT" == *'["commandcode:model-exact","claude-sonnet"]'* ]] && \
+       [[ "$PROOF_OUT" != *'["codex","claude-sonnet"]'* ]]; then
+        test_pass
+    else
+        test_fail "provider_fleet proof did not capture resolved identities: ${PROOF_OUT:-<empty>}"
+    fi
+fi
+
 test_summary

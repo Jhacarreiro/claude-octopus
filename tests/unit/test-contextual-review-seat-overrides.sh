@@ -10,6 +10,7 @@ export HOME="$TEST_TMP_DIR/contextual-review-seat-overrides"
 mkdir -p "$HOME/.claude-octopus/config"
 source "$PROJECT_ROOT/scripts/lib/provider-registry.sh"
 source "$PROJECT_ROOT/scripts/lib/agent-spec.sh"
+source "$PROJECT_ROOT/scripts/lib/model-resolver.sh"
 source "$PROJECT_ROOT/scripts/lib/review.sh"
 
 log() { :; }

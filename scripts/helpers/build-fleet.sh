@@ -31,6 +31,7 @@ fi
 source "${SCRIPT_DIR}/../lib/provider-registry.sh"
 source "${SCRIPT_DIR}/../lib/provider-policy.sh"
 source "${SCRIPT_DIR}/../lib/agent-spec.sh"
+source "${SCRIPT_DIR}/../lib/model-resolver.sh"
 source "${SCRIPT_DIR}/../lib/review.sh"
 
 WORKFLOW="${1:-research}"

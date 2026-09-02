@@ -21,9 +21,22 @@ printf '%s\n' \
 CHECKER
 chmod +x "$checker"
 
+agy_bin="$TEST_TMP_DIR/agy-bin"
+mkdir -p "$agy_bin"
+cat > "$agy_bin/agy" <<'AGY'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "models" ]]; then
+  printf '%s\n' 'gemini-exact' 'gemini-known'
+  exit 0
+fi
+exit 1
+AGY
+chmod +x "$agy_bin/agy"
+
 run_fleet() {
   env \
     "HOME=$TEST_TMP_DIR/home" \
+    "PATH=$agy_bin:$PATH" \
     "OCTOPUS_PROVIDER_CHECKER=$checker" \
     "OCTO_ALLOWED_PROVIDERS=codex commandcode claude agy openrouter orcarouter vibe atlascloud" \
     "$@" \
@@ -79,6 +92,18 @@ if [[ "$fable_rc" -ne 0 && "$fable_fleet" != *'claude:claude-fable-5'* ]]; then
   test_pass
 else
   test_fail "fleet review called an unsafe Fable security seat effective: rc=$fable_rc fleet=[$fable_fleet]"
+fi
+
+test_case "fleet review rejects an AGY model absent from the live catalog"
+agy_rc=0
+agy_error="$TEST_TMP_DIR/agy-missing-model.err"
+agy_fleet="$(run_fleet \
+  OCTOPUS_REVIEW_SECURITY_AGENT='agy:missing-model' 2>"$agy_error")" || agy_rc=$?
+if [[ "$agy_rc" -ne 0 && "$agy_fleet" != *'agy:missing-model'* ]] && \
+   grep -Fq "is not a valid model for provider 'agy'" "$agy_error"; then
+  test_pass
+else
+  test_fail "fleet review did not clearly reject a dispatch-rejected AGY model: rc=$agy_rc fleet=[$agy_fleet] error=[$(tr '\n' ';' < "$agy_error")]"
 fi
 
 test_summary

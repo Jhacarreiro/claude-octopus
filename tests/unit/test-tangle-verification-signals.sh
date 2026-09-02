@@ -10,6 +10,7 @@ WORKFLOWS="$PROJECT_ROOT/scripts/lib/workflows.sh"
 for signal in INT TERM; do
     test_case "verification cleanup invokes saved $signal trap and cannot resume"
     marker="$TEST_TMP_DIR/caller-${signal}.marker"
+    exit_marker="$TEST_TMP_DIR/caller-${signal}-exit.marker"
     continued="$TEST_TMP_DIR/continued-${signal}.marker"
     child="$TEST_TMP_DIR/verify-${signal}.sh"
     cat > "$child" <<'CHILD'
@@ -17,10 +18,12 @@ for signal in INT TERM; do
 set -euo pipefail
 WORKFLOWS="$1"
 MARKER="$2"
-CONTINUED="$3"
-SIGNAL="$4"
+EXIT_MARKER="$3"
+CONTINUED="$4"
+SIGNAL="$5"
 source "$WORKFLOWS"
 log() { :; }
+trap 'printf "caller-exit\n" > "$EXIT_MARKER"' EXIT
 trap 'printf "caller-signal\n" > "$MARKER"' "$SIGNAL"
 TANGLE_VERIFY_PREV_EXIT_TRAP=$(trap -p EXIT)
 TANGLE_VERIFY_PREV_INT_TRAP=$(trap -p INT)
@@ -31,15 +34,15 @@ printf 'resumed\n' > "$CONTINUED"
 CHILD
     chmod +x "$child"
     set +e
-    bash "$child" "$WORKFLOWS" "$marker" "$continued" "$signal"
+    bash "$child" "$WORKFLOWS" "$marker" "$exit_marker" "$continued" "$signal"
     rc=$?
     set -e
     expected=143
     [[ "$signal" == "INT" ]] && expected=130
-    if [[ "$rc" -eq "$expected" ]] && [[ -f "$marker" ]] && [[ ! -e "$continued" ]]; then
+    if [[ "$rc" -eq "$expected" ]] && [[ -f "$marker" ]] && [[ -f "$exit_marker" ]] && [[ ! -e "$continued" ]]; then
         test_pass
     else
-        test_fail "$signal handler rc=$rc expected=$expected marker=$(test -f "$marker" && echo yes || echo no) continued=$(test -e "$continued" && echo yes || echo no)"
+        test_fail "$signal handler rc=$rc expected=$expected marker=$(test -f "$marker" && echo yes || echo no) exit_marker=$(test -f "$exit_marker" && echo yes || echo no) continued=$(test -e "$continued" && echo yes || echo no)"
     fi
 done
 

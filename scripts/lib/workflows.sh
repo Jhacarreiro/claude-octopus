@@ -1501,7 +1501,8 @@ tangle_build_repo_context_block() {
     cat <<EOF
 Repository context for this subtask:
 - The worktree is the source of truth. Do not invent repository layout from generic names.
-- Treat the decomposer's Files clause as approximate intent. Prefer the resolved files below when they conflict with invented paths.
+- The subtask's Files: clause is the only write authority. Use the resolved files below to locate a concrete target for an approximate declared path and to read supporting context.
+- Never edit a resolved file outside the subtask's declared Files: scope. Report a blocker instead.
 - If none of the resolved files fit, inspect the tracked file list and report the blocker.
 
 Tracked files, first 200:
@@ -1895,7 +1896,8 @@ tangle_consolidate_overlapping_subtasks() {
             ((member_count++)) || true
             merged_scopes="${merged_scopes}${coding_scopes[$member]}"$'\n'
             local task_text
-            task_text=$(tangle_extract_structured_clause "${coding_lines[$member]}" "Task" 2>/dev/null || true)
+            task_text=$(tangle_extract_structured_clause "${coding_lines[$member]}" "Task" 2>/dev/null \
+                | awk 'BEGIN { first=1 } { if (!first) printf " "; printf "%s", $0; first=0 } END { if (!first) print "" }' || true)
             if [[ -z "$task_text" ]]; then
                 task_text=$(printf '%s\n' "${coding_lines[$member]}" | sed -E 's/^[[:space:]]*(\*\*)?[0-9]+[\.\)][[:space:]]*//')
                 task_text="${task_text%% Files:*}"

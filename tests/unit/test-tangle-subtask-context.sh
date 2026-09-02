@@ -41,6 +41,16 @@ fleet_dispatch_begin() { :; }
 fleet_dispatch_end() { :; }
 validate_tangle_results() { :; }
 
+test_case "repository context preserves declared Files scope as exclusive write authority"
+repo_context="$(tangle_build_repo_context_block '[CODING] Demo — Files: scripts/lib/workflows.sh — Task: inspect related files')"
+if [[ "$repo_context" == *"Files: clause is the only write authority"* ]] &&
+   [[ "$repo_context" == *"Never edit a resolved file"* ]] &&
+   [[ "$repo_context" != *"Prefer the resolved files"* ]]; then
+    test_pass
+else
+    test_fail "repository context still conflicts with the exclusive write-scope contract"
+fi
+
 test_case "subtask prompt builder validates required inputs"
 set +e
 empty_prompt_error=$(build_tangle_subtask_prompt "" "1. [CODING] Files: README.md" 2>&1 >/dev/null)

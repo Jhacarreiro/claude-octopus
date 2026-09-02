@@ -13,6 +13,30 @@ test_suite "Review provider report"
 
 status_file="$TEST_TMP_DIR/provider-status.txt"
 
+test_case "review provider-status parsing delegates to the shared parser"
+if (
+    octo_parse_provider_status_record() {
+        OCTO_PROVIDER_STATUS_PROVIDER=commandcode
+        OCTO_PROVIDER_STATUS_MODEL=model-one.v1
+        OCTO_PROVIDER_STATUS_VALUE=fallback
+        OCTO_PROVIDER_STATUS_DETAIL='shared parser detail'
+        return 0
+    }
+    review_parse_provider_status_record 'ignored|input|that|must|not be parsed locally' &&
+    [[ "$REVIEW_STATUS_PROVIDER" == commandcode &&
+       "$REVIEW_STATUS_MODEL" == model-one.v1 &&
+       "$REVIEW_STATUS_VALUE" == fallback &&
+       "$REVIEW_STATUS_DETAIL" == 'shared parser detail' ]] || exit 1
+    octo_parse_provider_status_record() { return 73; }
+    parse_rc=0
+    review_parse_provider_status_record 'ignored|input' || parse_rc=$?
+    [[ "$parse_rc" -eq 73 ]]
+); then
+    test_pass
+else
+    test_fail "review parser bypassed the shared provider-status parser"
+fi
+
 test_case "Claude is not reported healthy without a successful execution"
 printf '%s\n' 'codex|fallback|Round 1 agent did not complete successfully' > "$status_file"
 report="$(env "HOME=${TEST_TMP_DIR}" bash -c '

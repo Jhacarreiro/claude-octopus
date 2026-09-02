@@ -4,6 +4,10 @@
 # Proof packets are local-only run artifacts. They make escalated Octopus
 # workflows auditable without turning the plugin into a full project manager.
 
+_proof_packet_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${_proof_packet_lib_dir}/agent-spec.sh" 2>/dev/null || true
+unset _proof_packet_lib_dir
+
 octo_proof_enabled() {
     case "${OCTOPUS_PROOF_PACKET:-1}" in
         0|false|FALSE|off|OFF|no|NO) return 1 ;;
@@ -147,20 +151,13 @@ octo_proof_capture_provider_status() {
     [[ -n "$run_dir" && -d "$run_dir" && -f "$status_file" ]] || return 0
     octo_proof_enabled || return 0
 
-    local record field1 field2 field3 field4 remainder provider model provider_status detail
+    local record provider model provider_status detail
     while IFS= read -r record; do
-        IFS='|' read -r field1 field2 field3 field4 remainder <<< "$record"
-        if [[ "$field1" == "v2" ]]; then
-            provider="$field2"
-            model="$field3"
-            provider_status="$field4"
-            detail="$remainder"
-        else
-            provider="$field1"
-            model=""
-            provider_status="$field2"
-            detail="${field3}${field4:+|${field4}}${remainder:+|${remainder}}"
-        fi
+        octo_parse_provider_status_record "$record" || continue
+        provider="$OCTO_PROVIDER_STATUS_PROVIDER"
+        model="$OCTO_PROVIDER_STATUS_MODEL"
+        provider_status="$OCTO_PROVIDER_STATUS_VALUE"
+        detail="$OCTO_PROVIDER_STATUS_DETAIL"
         [[ -z "${provider:-}" ]] && continue
         octo_proof_event "$run_dir" "provider_status" "$(jq -n \
             --arg provider "$provider" \

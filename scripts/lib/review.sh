@@ -776,21 +776,12 @@ review_append_provider_status() {
 }
 
 review_parse_provider_status_record() {
-    local record="$1" raw_provider field2 field3 field4 remainder
-    IFS='|' read -r raw_provider field2 field3 field4 remainder <<< "$record"
-    [[ -n "$raw_provider" ]] || return 1
-
-    if [[ "$raw_provider" == "v2" ]]; then
-        REVIEW_STATUS_PROVIDER="$(review_provider_key_from_agent_type "$field2")"
-        REVIEW_STATUS_MODEL="$field3"
-        REVIEW_STATUS_VALUE="$field4"
-        REVIEW_STATUS_DETAIL="$remainder"
-    else
-        REVIEW_STATUS_PROVIDER="$(review_provider_key_from_agent_type "$raw_provider")"
-        REVIEW_STATUS_MODEL=""
-        REVIEW_STATUS_VALUE="$field2"
-        REVIEW_STATUS_DETAIL="${field3}${field4:+|${field4}}${remainder:+|${remainder}}"
-    fi
+    local record="$1"
+    octo_parse_provider_status_record "$record" || return $?
+    REVIEW_STATUS_PROVIDER="$(review_provider_key_from_agent_type "$OCTO_PROVIDER_STATUS_PROVIDER")"
+    REVIEW_STATUS_MODEL="$OCTO_PROVIDER_STATUS_MODEL"
+    REVIEW_STATUS_VALUE="$OCTO_PROVIDER_STATUS_VALUE"
+    REVIEW_STATUS_DETAIL="$OCTO_PROVIDER_STATUS_DETAIL"
 }
 
 # review_wait_for_result_status: waits for one result file to become terminal,

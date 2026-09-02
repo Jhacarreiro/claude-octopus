@@ -45,14 +45,14 @@ run_fleet() {
 
 test_case "fleet review shows all eight effective model-qualified seat overrides"
 fleet="$(run_fleet \
-  OCTOPUS_REVIEW_LOGIC_AGENT='openai:gpt-5.6-luna' \
-  OCTOPUS_REVIEW_SECURITY_AGENT='agy:gemini-exact' \
-  OCTOPUS_REVIEW_ARCHITECTURE_AGENT='anthropic:claude-opus-5' \
-  OCTOPUS_REVIEW_CVE_AGENT='command-code:tencent/hy3-paid' \
-  OCTOPUS_REVIEW_DIVERSITY_AGENT='openrouter:deepseek/deepseek-v4' \
-  OCTOPUS_REVIEW_VERIFIER_AGENT='orcarouter:anthropic/claude-sonnet-4.6' \
-  OCTOPUS_REVIEW_DEBATER_AGENT='vibe:mistral-large-latest' \
-  OCTOPUS_REVIEW_SYNTHESIZER_AGENT='atlas-cloud:qwen/qwen3.5')"
+  "OCTOPUS_REVIEW_LOGIC_AGENT=openai:gpt-5.6-luna" \
+  "OCTOPUS_REVIEW_SECURITY_AGENT=agy:gemini-exact" \
+  "OCTOPUS_REVIEW_ARCHITECTURE_AGENT=anthropic:claude-opus-5" \
+  "OCTOPUS_REVIEW_CVE_AGENT=command-code:tencent/hy3-paid" \
+  "OCTOPUS_REVIEW_DIVERSITY_AGENT=openrouter:deepseek/deepseek-v4" \
+  "OCTOPUS_REVIEW_VERIFIER_AGENT=orcarouter:anthropic/claude-sonnet-4.6" \
+  "OCTOPUS_REVIEW_DEBATER_AGENT=vibe:mistral-large-latest" \
+  "OCTOPUS_REVIEW_SYNTHESIZER_AGENT=atlas-cloud:qwen/qwen3.5")"
 expected_specs=$'codex:gpt-5.6-luna\nagy:gemini-exact\nclaude:claude-opus-5\ncommandcode:tencent/hy3-paid\nopenrouter:deepseek/deepseek-v4\norcarouter:anthropic/claude-sonnet-4.6\nvibe:mistral-large-latest\natlascloud-agent:qwen/qwen3.5'
 actual_specs="$(printf '%s\n' "$fleet" | cut -d'|' -f1)"
 if [[ "$(printf '%s\n' "$fleet" | grep -c .)" -eq 8 && "$actual_specs" == "$expected_specs" ]]; then
@@ -63,9 +63,9 @@ fi
 
 test_case "single-provider override takes precedence over all seat overrides in fleet review"
 fleet="$(run_fleet \
-  OCTOPUS_REVIEW_SINGLE_PROVIDER=codex \
-  OCTOPUS_REVIEW_LOGIC_AGENT='commandcode:model-a' \
-  OCTOPUS_REVIEW_SYNTHESIZER_AGENT='vibe:model-b')"
+  "OCTOPUS_REVIEW_SINGLE_PROVIDER=codex" \
+  "OCTOPUS_REVIEW_LOGIC_AGENT=commandcode:model-a" \
+  "OCTOPUS_REVIEW_SYNTHESIZER_AGENT=vibe:model-b")"
 if [[ "$(printf '%s\n' "$fleet" | grep -c .)" -eq 8 ]] && \
    [[ "$(printf '%s\n' "$fleet" | cut -d'|' -f1 | grep -vc '^codex$' || true)" -eq 0 ]]; then
   test_pass
@@ -76,8 +76,8 @@ fi
 test_case "fleet review rejects an exact model outside the dispatch allowlist"
 restricted_rc=0
 restricted_fleet="$(run_fleet \
-  OCTOPUS_CODEX_ALLOWED_MODELS='gpt-allowed' \
-  OCTOPUS_REVIEW_LOGIC_AGENT='codex:gpt-blocked' 2>/dev/null)" || restricted_rc=$?
+  "OCTOPUS_CODEX_ALLOWED_MODELS=gpt-allowed" \
+  "OCTOPUS_REVIEW_LOGIC_AGENT=codex:gpt-blocked" 2>/dev/null)" || restricted_rc=$?
 if [[ "$restricted_rc" -ne 0 && "$restricted_fleet" != *'codex:gpt-blocked'* ]]; then
   test_pass
 else
@@ -87,7 +87,7 @@ fi
 test_case "fleet review rejects an exact Fable security seat"
 fable_rc=0
 fable_fleet="$(run_fleet \
-  OCTOPUS_REVIEW_SECURITY_AGENT='anthropic:claude-fable-5' 2>/dev/null)" || fable_rc=$?
+  "OCTOPUS_REVIEW_SECURITY_AGENT=anthropic:claude-fable-5" 2>/dev/null)" || fable_rc=$?
 if [[ "$fable_rc" -ne 0 && "$fable_fleet" != *'claude:claude-fable-5'* ]]; then
   test_pass
 else
@@ -98,7 +98,7 @@ test_case "fleet review rejects an AGY model absent from the live catalog"
 agy_rc=0
 agy_error="$TEST_TMP_DIR/agy-missing-model.err"
 agy_fleet="$(run_fleet \
-  OCTOPUS_REVIEW_SECURITY_AGENT='agy:missing-model' 2>"$agy_error")" || agy_rc=$?
+  "OCTOPUS_REVIEW_SECURITY_AGENT=agy:missing-model" 2>"$agy_error")" || agy_rc=$?
 if [[ "$agy_rc" -ne 0 && "$agy_fleet" != *'agy:missing-model'* ]] && \
    grep -Fq "is not a valid model for provider 'agy'" "$agy_error"; then
   test_pass

@@ -53,6 +53,31 @@ octo_agent_spec_explicit_model() {
     printf '%s\n' "$model"
 }
 
+# Parse one provider-status record without applying caller-specific provider
+# normalization. Versioned records are v2|provider|model|status|detail; legacy
+# records are provider|status|detail. Detail may itself contain pipe characters.
+octo_parse_provider_status_record() {
+    local record="${1-}" field1 field2 field3 field4 remainder
+    OCTO_PROVIDER_STATUS_PROVIDER=""
+    OCTO_PROVIDER_STATUS_MODEL=""
+    OCTO_PROVIDER_STATUS_VALUE=""
+    OCTO_PROVIDER_STATUS_DETAIL=""
+
+    IFS='|' read -r field1 field2 field3 field4 remainder <<< "$record"
+    [[ -n "$field1" ]] || return 1
+
+    if [[ "$field1" == "v2" ]]; then
+        OCTO_PROVIDER_STATUS_PROVIDER="$field2"
+        OCTO_PROVIDER_STATUS_MODEL="$field3"
+        OCTO_PROVIDER_STATUS_VALUE="$field4"
+        OCTO_PROVIDER_STATUS_DETAIL="$remainder"
+    else
+        OCTO_PROVIDER_STATUS_PROVIDER="$field1"
+        OCTO_PROVIDER_STATUS_VALUE="$field2"
+        OCTO_PROVIDER_STATUS_DETAIL="${field3}${field4:+|${field4}}${remainder:+|${remainder}}"
+    fi
+}
+
 # Run-contract identity keeps legacy executor aliases unchanged, but exact
 # provider:model seats must use separate canonical provider and model fields.
 octo_agent_spec_contract_provider() {

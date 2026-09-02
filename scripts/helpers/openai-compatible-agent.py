@@ -129,7 +129,7 @@ def normalize_reasoning_effort(value):
 
 def rejects_reasoning_effort(body_text):
     text = body_text.lower()
-    field = r"reasoning(?:_effort| effort|-effort)"
+    field = r"(?<![A-Za-z0-9_-])reasoning(?:_effort| effort|-effort)(?![A-Za-z0-9_-])"
     kind = r"(?:field|parameter|argument|property)"
     rejection = r"(?:unsupported|not supported|unrecognized|unknown|unexpected|not allowed|not permitted)"
     patterns = (

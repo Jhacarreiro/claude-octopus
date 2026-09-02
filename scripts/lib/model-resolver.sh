@@ -15,6 +15,9 @@ source "${_model_resolver_lib_dir}/provider-registry.sh" || { echo "model-resolv
 if ! declare -f octo_model_cache_file >/dev/null 2>&1; then
     source "${_model_resolver_lib_dir}/model-cache-path.sh" 2>/dev/null || true
 fi
+if ! declare -f get_model_catalog >/dev/null 2>&1; then
+    source "${_model_resolver_lib_dir}/models.sh" || { echo "model-resolver: failed to load models.sh" >&2; return 1 2>/dev/null || exit 1; }
+fi
 if ! declare -f _is_cursor_agent_binary >/dev/null 2>&1; then
     source "${_model_resolver_lib_dir}/cursor-agent.sh" 2>/dev/null || true
 fi
@@ -250,6 +253,31 @@ _octo_is_known_provider_name() {
     _octo_canonical_known_provider_name "${1:-}" >/dev/null 2>&1
 }
 
+_octo_route_value_model_family() {
+    local model="${1:-}" target_provider="${2:-}" catalog_provider=""
+    if [[ "$model" == "default" && -n "$target_provider" ]]; then
+        octo_provider_org "$target_provider" 2>/dev/null || printf '%s\n' unknown
+        return 0
+    fi
+    if is_known_model "$model"; then
+        catalog_provider="$(get_model_capability "$model" provider 2>/dev/null || true)"
+        if [[ -n "$catalog_provider" && "$catalog_provider" != "unknown" ]]; then
+            octo_provider_org "$catalog_provider" 2>/dev/null || printf '%s\n' unknown
+            return 0
+        fi
+    fi
+    case "${1:-}" in
+        claude-*|anthropic/*) printf '%s\n' anthropic ;;
+        gpt-*|o[134]-*|codex*|openai/*) printf '%s\n' openai ;;
+        gemini-*|agy-*|google/*) printf '%s\n' google ;;
+        qwen*|qwen/*|alibaba/*) printf '%s\n' alibaba ;;
+        grok-*|xai/*|x-ai/*) printf '%s\n' xai ;;
+        mistral-*|mistral/*|mistralai/*) printf '%s\n' mistral ;;
+        sonar*|perplexity/*) printf '%s\n' perplexity ;;
+        *) printf '%s\n' unknown ;;
+    esac
+}
+
 _octo_effective_cost_mode() {
     local config_file="${1:-}"
     local mode="${OCTOPUS_COST_MODE:-}"
@@ -433,6 +461,8 @@ resolve_octopus_model() {
             local phase_route_provider=""
             local phase_route_model=""
             local role_route_blocks_phase="false"
+            local role_route_model_family=""
+            local role_route_provider_org=""
 
             if [[ -n "$role" ]]; then
                 role_route_json=$(echo "$config_data" | jq -c --arg role "$role" '.routing.roles[$role] // empty' 2>/dev/null)
@@ -463,7 +493,14 @@ resolve_octopus_model() {
                             role_route_provider="$(octo_provider_canonical "$role_route_value" 2>/dev/null || printf '%s' "$role_route_value")"
                             [[ "$role_route_provider" == "$canonical_provider" ]] && role_route_blocks_phase="true"
                         else
+                            role_route_model_family="$(_octo_route_value_model_family "$role_route_value" "$canonical_provider")"
+                            role_route_provider_org="$(octo_provider_org "$canonical_provider" 2>/dev/null || true)"
                             role_route_blocks_phase="true"
+                            if ! octo_provider_has_capability "$canonical_provider" model-gateway &&
+                               [[ "$role_route_model_family" != "unknown" &&
+                                  "$role_route_model_family" != "$role_route_provider_org" ]]; then
+                                role_route_blocks_phase="false"
+                            fi
                         fi
                     fi
                 fi
@@ -514,13 +551,13 @@ resolve_octopus_model() {
                     if [[ -n "$role_route_provider" && "$role_route_provider" != "$canonical_provider" ]]; then
                         [[ -n "$_trace" ]] && echo "[model-trace] Tier 3 (role routing): SKIP (role route $routed targets $role_route_provider, resolving for $provider); checking phase route" >&2
                         routed=""
-                    elif [[ -z "$role_route_provider" && -n "$phase_routed" && "$phase_routed" != "null" ]]; then
+                    elif [[ -z "$role_route_provider" && "$role_route_blocks_phase" != "true" && -n "$phase_routed" && "$phase_routed" != "null" ]]; then
                         [[ -n "$_trace" ]] && echo "[model-trace] Tier 3 (role routing): SKIP (bare role route $routed is unscoped and phase route exists); checking phase route" >&2
                         routed=""
                     fi
                 fi
             fi
-            if [[ -z "$routed" || "$routed" == "null" ]] && [[ -n "$phase_routed" && "$phase_routed" != "null" ]]; then
+            if [[ -z "$routed" || "$routed" == "null" ]] && [[ "$role_route_blocks_phase" != "true" ]] && [[ -n "$phase_routed" && "$phase_routed" != "null" ]]; then
                 routed="$phase_routed"
             fi
 

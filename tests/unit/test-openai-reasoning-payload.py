@@ -60,6 +60,7 @@ assert mod.normalize_reasoning_effort("medium") == "medium"
 for generic_body in (
     b'{"error":"invalid reasoning_effort value"}',
     b'{"error":"unsupported value for reasoning_effort"}',
+    b'{"error":"unsupported field: reasoning_effort_mode"}',
 ):
     error = urllib.error.HTTPError(
         "https://example.test/chat/completions",

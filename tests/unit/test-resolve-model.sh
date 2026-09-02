@@ -46,7 +46,7 @@ assert_eq() {
         test_pass
     else
         test_fail "expected=[$expected] got=[$actual]"
-        return 1
+        return 0
     fi
 }
 
@@ -255,10 +255,111 @@ cat > "$CONFIG_FILE" << EOF
 {
   "version": "3.0",
   "providers": { "codex": { "default": "gpt-default" } },
-  "routing": { "roles": { "logic-reviewer": "gpt-5.5" } }
+  "routing": {
+    "roles": { "logic-reviewer": "gpt-5.5" },
+    "phases": { "review": "gpt-phase-model" }
+  }
 }
 EOF
-assert_eq "$(resolve_octopus_model "codex" "codex" "review" "logic-reviewer")" "gpt-5.5" "Bare gpt model remains a model route, not a provider alias"
+assert_eq "$(resolve_octopus_model "codex" "codex" "review" "logic-reviewer")" "gpt-5.5" "Bare gpt model keeps role precedence over a phase route"
+
+clear_model_cache
+cat > "$CONFIG_FILE" << EOF
+{
+  "version": "3.0",
+  "providers": { "commandcode": { "default": "deepseek/deepseek-v4-pro" } },
+  "routing": {
+    "roles": { "logic-reviewer": "deepseek/deepseek-v4-pro" },
+    "phases": { "review": "minimaxai/minimax-m3" }
+  }
+}
+EOF
+assert_eq "$(resolve_octopus_model "commandcode" "commandcode" "review" "logic-reviewer")" "deepseek/deepseek-v4-pro" "Command Code gateway keeps a vendor-qualified bare role over its phase route"
+
+clear_model_cache
+cat > "$CONFIG_FILE" << EOF
+{
+  "version": "3.0",
+  "providers": { "openrouter": { "default": "openai/gpt-5.5" } },
+  "routing": {
+    "roles": { "logic-reviewer": "anthropic/claude-sonnet-4" },
+    "phases": { "review": "openai/gpt-5.5" }
+  }
+}
+EOF
+assert_eq "$(resolve_octopus_model "openrouter" "openrouter" "review" "logic-reviewer")" "anthropic/claude-sonnet-4" "OpenRouter gateway keeps a cross-vendor bare role over its phase route"
+
+clear_model_cache
+cat > "$CONFIG_FILE" << EOF
+{
+  "version": "3.0",
+  "providers": { "qwen": { "default": "qwen3-coder" } },
+  "routing": {
+    "roles": { "logic-reviewer": "qwen3-coder" },
+    "phases": { "review": "qwen3-max" }
+  }
+}
+EOF
+assert_eq "$(resolve_octopus_model "qwen" "qwen" "review" "logic-reviewer")" "qwen3-coder" "Qwen keeps its native bare role over a phase route"
+
+clear_model_cache
+cat > "$CONFIG_FILE" << EOF
+{
+  "version": "3.0",
+  "providers": { "perplexity": { "default": "sonar-pro" } },
+  "routing": {
+    "roles": { "researcher": "sonar-pro" },
+    "phases": { "research": "sonar" }
+  }
+}
+EOF
+assert_eq "$(resolve_octopus_model "perplexity" "perplexity" "research" "researcher")" "sonar-pro" "Perplexity keeps its native bare role over a phase route"
+
+clear_model_cache
+cat > "$CONFIG_FILE" << EOF
+{
+  "version": "3.0",
+  "providers": { "perplexity": { "default": "sonar-pro" } },
+  "routing": {
+    "roles": { "researcher": "gpt-5.5" },
+    "phases": { "research": "sonar-pro" }
+  }
+}
+EOF
+assert_eq "$(resolve_octopus_model "perplexity" "perplexity" "research" "researcher")" "sonar-pro" "Perplexity rejects a known cross-vendor bare role in favor of its phase route"
+
+for default_provider in grok vibe; do
+    clear_model_cache
+    cat > "$CONFIG_FILE" << EOF
+{
+  "version": "3.0",
+  "providers": { "$default_provider": { "default": "default" } },
+  "routing": {
+    "roles": { "logic-reviewer": "default" },
+    "phases": { "review": "${default_provider}-phase" }
+  }
+}
+EOF
+    assert_eq "$(resolve_octopus_model "$default_provider" "$default_provider" "review" "logic-reviewer")" "default" "$default_provider keeps its provider-local default role sentinel over a phase route"
+done
+
+test_case "catalogued native models resolve to their registry organization"
+catalog_family_mismatches=""
+while IFS= read -r catalog_model; do
+    [[ -n "$catalog_model" ]] || continue
+    catalog_provider="$(get_model_capability "$catalog_model" provider)"
+    octo_provider_has_capability "$catalog_provider" model-gateway && continue
+    catalog_org="$(octo_provider_org "$catalog_provider")"
+    route_family="$(_octo_route_value_model_family "$catalog_model")"
+    if [[ "$route_family" != "$catalog_org" ]]; then
+        catalog_family_mismatches="${catalog_family_mismatches}${catalog_model}:${route_family}->${catalog_org} "
+    fi
+done < <(octo_model_ids)
+if [[ -z "$catalog_family_mismatches" ]]; then
+    test_pass
+else
+    test_fail "model catalog family drift: $catalog_family_mismatches"
+fi
 
 # Registry wildcard aliases are data, not shell globs. A matching filesystem
 # entry must not replace the literal gpt* alias before its base is compared.

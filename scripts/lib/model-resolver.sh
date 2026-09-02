@@ -888,6 +888,8 @@ is_agent_available_v2() {
     esac
 }
 
+# Print one verified available agent and return 0. If neither the preferred
+# agent nor any fallback is available, print nothing and return non-zero.
 get_fallback_agent() {
     local preferred="$1"
     local task_type="$2"
@@ -921,8 +923,10 @@ get_fallback_agent() {
         return 0
     fi
 
-    # Fail closed on the preferred identity when the configured/default chain
-    # has no available candidate. Callers retain the historical contract of
-    # receiving an agent identity rather than an empty string.
-    echo "$preferred"
+    if declare -f log >/dev/null 2>&1; then
+        log ERROR "No available agent for '$preferred' and fallback chain 'default'"
+    else
+        printf "No available agent for '%s' and fallback chain 'default'\n" "$preferred" >&2
+    fi
+    return 1
 }

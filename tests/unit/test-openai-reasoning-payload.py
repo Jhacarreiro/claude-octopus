@@ -81,4 +81,42 @@ with patch.object(mod.urllib.request, "urlopen", side_effect=error) as mocked:
         raise AssertionError("generic reasoning error unexpectedly triggered fallback")
 assert mocked.call_count == 1, mocked.call_count
 
+# A 400 response that explicitly rejects the reasoning_effort field retries
+# once without that field when best-effort reasoning is enabled.
+field_error = urllib.error.HTTPError(
+    "https://example.test/chat/completions",
+    400,
+    "bad request",
+    {},
+    io.BytesIO(b'{"error":"unsupported field: reasoning_effort"}'),
+)
+fallback_seen = []
+
+
+def fake_reasoning_fallback(req, timeout=None):
+    del timeout
+    fallback_seen.append(json.loads(req.data.decode()))
+    if len(fallback_seen) == 1:
+        raise field_error
+    return Resp()
+
+
+with patch.object(
+    mod.urllib.request, "urlopen", side_effect=fake_reasoning_fallback
+) as mocked:
+    result = mod.api_call(
+        "https://example.test",
+        "k",
+        "m",
+        {},
+        [{"role": "user", "content": "x"}],
+        reasoning_effort="medium",
+        reasoning_policy="best_effort",
+    )
+
+assert result["choices"][0]["message"]["content"] == "ok", result
+assert mocked.call_count == 2, mocked.call_count
+assert fallback_seen[0]["reasoning_effort"] == "medium", fallback_seen
+assert "reasoning_effort" not in fallback_seen[1], fallback_seen
+
 print("PASS test-openai-reasoning-payload")

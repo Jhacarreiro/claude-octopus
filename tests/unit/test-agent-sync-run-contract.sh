@@ -24,7 +24,7 @@ attempt=0
 attempt=$((attempt + 1))
 printf '%s\n' "$attempt" >> "$FIXTURE_CALLS"
 case "$FIXTURE_SCENARIO" in
-    success) printf '%s\n' 'Substantive provider result.' ;;
+    success|exact-seat) printf '%s\n' 'Substantive provider result.' ;;
     empty) : ;;
     whitespace) printf ' \n\t\n' ;;
     placeholder) printf '%s\n' 'Provider available' ;;
@@ -71,13 +71,21 @@ octo_dispatch_command_model() {
 }
 get_agent_model() {
     [[ "${FIXTURE_SCENARIO:-}" == model-fail ]] && return 1
+    if [[ "${1:-}" == *:* ]]; then
+        printf '%s\n' "${1#*:}"
+        return 0
+    fi
     printf '%s\n' fixture-model
 }
 estimate_agent_call_cost() { printf '%s\n' 0.000000; }
 record_agent_call() { :; }
 get_agent_command() {
+    local command_model="routed-model"
+    if [[ "${1:-}" == *:* ]]; then
+        command_model="${1#*:}"
+    fi
     printf '%s\n' "${4:-missing}" > "$FIXTURE_ROOT/prompt-bytes"
-    printf '%s\n' "$fixture_provider --model routed-model"
+    printf '%s\n' "$fixture_provider --model $command_model"
 }
 build_provider_env() { PROVIDER_ENV_ARRAY=(); }
 run_with_timeout() { shift; "$@"; }
@@ -100,6 +108,11 @@ export CODEX_SUBAGENT_PREAMBLE=""
 
 run_fixture() {
     local scenario="$1" agent_type="${2:-codex}"
+    local role="reviewer" phase="probe"
+    if [[ "$scenario" == exact-seat ]]; then
+        role="implementation-verifier"
+        phase="review"
+    fi
     export FIXTURE_SCENARIO="$scenario"
     export FIXTURE_ROOT="$TEST_TMP_DIR/$scenario"
     export FIXTURE_CALLS="$FIXTURE_ROOT/provider-calls"
@@ -114,7 +127,7 @@ run_fixture() {
     mkdir -p "$RESULTS_DIR"
 
     set +e
-    run_agent_sync "$agent_type" 'Review the fixture.' 5 reviewer probe \
+    run_agent_sync "$agent_type" 'Review the fixture.' 5 "$role" "$phase" \
         > "$FIXTURE_ROOT/stdout" 2> "$FIXTURE_ROOT/stderr"
     fixture_rc=$?
     set -e
@@ -161,6 +174,9 @@ assert_scenario() {
 assert_scenario success 0 1 \
     planned,starting,authenticated,running,output_received,validated,contributed \
     contributed eligible ''
+assert_scenario exact-seat 0 1 \
+    planned,starting,authenticated,running,output_received,validated,contributed \
+    contributed eligible '' 'command-code:thinkingmachines/inkling-small'
 assert_scenario auth-fail 1 0 planned,starting,failed failed none \
     'Provider unavailable: fixture authentication rejected'
 assert_scenario health-fail-qwen 1 0 planned,starting,failed failed none \
@@ -240,6 +256,22 @@ if [[ "$(jq -r '.seats[0].resolved.model' "$success_snapshot")" == routed-model 
     test_pass
 else
     test_fail "manifest retained the pre-routing model identity"
+fi
+
+test_case "exact synchronous seat records canonical provider and literal model"
+exact_sync_model="thinkingmachines/inkling-small"
+exact_sync_snapshot="$TEST_TMP_DIR/exact-seat/workspace/runs/sync-exact-seat/seats.json"
+if jq -e --arg model "$exact_sync_model" '
+    .seats[0].requested.provider == "commandcode" and
+    .seats[0].requested.model == $model and
+    .seats[0].resolved.provider == "commandcode" and
+    .seats[0].resolved.model == $model and
+    .seats[0].execution.phase == "review" and
+    .seats[0].execution.role == "implementation-verifier"
+' "$exact_sync_snapshot" >/dev/null; then
+    test_pass
+else
+    test_fail "exact synchronous lifecycle did not split canonical provider from literal model"
 fi
 
 test_summary

@@ -284,8 +284,12 @@ get_agent_command() {
         octo_real_get_agent_command "$@"
         return
     fi
+    local command_model="routed-model"
+    if [[ "${1:-}" == *:* ]]; then
+        command_model="${1#*:}"
+    fi
     printf '%s\n' "${4:-missing}" > "$TEST_TMP_DIR/background-prompt-bytes"
-    printf '%s\n' "$fake_provider --model routed-model"
+    printf '%s\n' "$fake_provider --model $command_model"
 }
 validate_agent_command() {
     if [[ "$1" == "$fake_provider "* || "$1" == "$fake_provider" ]]; then
@@ -295,6 +299,10 @@ validate_agent_command() {
 }
 get_agent_model() {
     [[ "${FAKE_SCENARIO:-}" == model-fail ]] && return 1
+    if [[ "${1:-}" == *:* ]]; then
+        printf '%s\n' "${1#*:}"
+        return 0
+    fi
     printf '%s\n' fixture-model
 }
 record_agent_call() { :; }
@@ -336,9 +344,10 @@ octopus_capture_provider_output() {
 }
 
 run_external_fixture() {
-    local scenario="$1" task="$2" pid
+    local scenario="$1" task="$2" agent_type="${3:-fake-api}"
+    local role="${4:-reviewer}" phase="${5:-probe}" pid
     export FAKE_SCENARIO="$scenario"
-    pid="$(spawn_agent fake-api "External $scenario fixture" "$task" reviewer probe)" || return $?
+    pid="$(spawn_agent "$agent_type" "External $scenario fixture" "$task" "$role" "$phase")" || return $?
     wait "$pid" 2>/dev/null || true
 }
 
@@ -392,6 +401,25 @@ if [[ "$external_success_transitions" == "planned,starting,authenticated,running
     test_pass
 else
     test_fail "supervised success contract mismatch (transitions=${external_success_transitions:-missing}, eligible=$external_success_eligible, model=${external_success_model:-missing}, reason=${external_success_reason:-none})"
+fi
+
+test_case "exact background seat records canonical provider and literal model"
+exact_background_model="thinkingmachines/inkling-small"
+run_external_fixture success external-exact "command-code:${exact_background_model}" \
+    implementation-logic-reviewer review
+if jq -e --arg model "$exact_background_model" '
+    .seats[] |
+    select(.seat_id == "spawn-external-exact") |
+    .requested.provider == "commandcode" and
+    .requested.model == $model and
+    .resolved.provider == "commandcode" and
+    .resolved.model == $model and
+    .execution.phase == "review" and
+    .execution.role == "implementation-logic-reviewer"
+' "$WORKSPACE_DIR/runs/$OCTOPUS_RUN_ID/seats.json" >/dev/null; then
+    test_pass
+else
+    test_fail "exact background lifecycle did not split canonical provider from literal model"
 fi
 
 test_case "background model-resolution failure terminalizes before provider execution"

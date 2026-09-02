@@ -53,6 +53,28 @@ octo_agent_spec_explicit_model() {
     printf '%s\n' "$model"
 }
 
+# Run-contract identity keeps legacy executor aliases unchanged, but exact
+# provider:model seats must use separate canonical provider and model fields.
+octo_agent_spec_contract_provider() {
+    local spec="${1:-unknown}" provider
+    if [[ "$spec" != *:* ]]; then
+        printf '%s\n' "$spec"
+        return 0
+    fi
+    provider="$(octo_agent_spec_provider "$spec")" || return 1
+    [[ -n "$provider" ]] || return 1
+    printf '%s\n' "$provider"
+}
+
+octo_agent_spec_contract_model() {
+    local spec="${1:-}" fallback="${2:-}"
+    if [[ "$spec" == *:* ]]; then
+        octo_agent_spec_explicit_model "$spec"
+    else
+        printf '%s\n' "$fallback"
+    fi
+}
+
 # Normalize a model-qualified seat to the executable name consumed by
 # dispatch.sh. Provider aliases belong at the configuration boundary; runtime
 # agent specs must use dispatchable executors.

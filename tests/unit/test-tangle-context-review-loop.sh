@@ -53,6 +53,112 @@ else
     test_fail "warning must not alter the number of severity=normal findings"
 fi
 
+test_case "malformed review findings remain fail-closed"
+malformed_findings="$TEST_TMP_DIR/review-malformed.json"
+printf '%s\n' '{"findings":[' > "$malformed_findings"
+if [[ "$(tangle_review_blocking_count "$malformed_findings")" == "1" ]]; then
+    test_pass
+else
+    test_fail "malformed review findings must retain one blocking failure"
+fi
+
+run_warning_review_gate() {
+    local case_name="$1"
+    local initial_findings="$2"
+    local initial_rc="$3"
+    local recovery_findings="$4"
+    local recovery_rc="$5"
+    local case_dir="$TEST_TMP_DIR/review-gate-$case_name"
+    rm -rf "$case_dir"
+    mkdir -p "$case_dir"
+
+    bash -c '
+        set -u
+        project_root="$1"
+        case_dir="$2"
+        initial_findings="$3"
+        initial_rc="$4"
+        recovery_findings="$5"
+        recovery_rc="$6"
+        export RESULTS_DIR="$case_dir/results"
+        mkdir -p "$RESULTS_DIR"
+
+        initial_file="$case_dir/initial.json"
+        recovery_file="$case_dir/recovery.json"
+        review_calls_file="$case_dir/review-calls"
+        correction_calls_file="$case_dir/correction-calls"
+        validation_file="$case_dir/validation.md"
+        printf "%s\n" "$initial_findings" > "$initial_file"
+        printf "%s\n" "$recovery_findings" > "$recovery_file"
+        printf "0" > "$review_calls_file"
+        printf "0" > "$correction_calls_file"
+        : > "$validation_file"
+
+        source "$project_root/scripts/lib/workflows.sh" 2>/dev/null
+        log() { :; }
+        tangle_build_develop_review_context() {
+            printf "%s\n" "$case_dir/context-$7.md"
+        }
+        tangle_run_context_code_review() {
+            local calls rc
+            calls=$(<"$review_calls_file")
+            if [[ "$calls" -eq 0 ]]; then
+                TANGLE_REVIEW_FINDINGS_FILE="$initial_file"
+                rc="$initial_rc"
+            else
+                TANGLE_REVIEW_FINDINGS_FILE="$recovery_file"
+                rc="$recovery_rc"
+            fi
+            printf "%s" "$((calls + 1))" > "$review_calls_file"
+            return "$rc"
+        }
+        tangle_apply_review_corrections() {
+            local calls
+            calls=$(<"$correction_calls_file")
+            printf "%s" "$((calls + 1))" > "$correction_calls_file"
+            TANGLE_CORRECTION_STATUS="completed"
+            TANGLE_CORRECTION_CHANGED=1
+            TANGLE_CORRECTION_CONTAMINATION=""
+            TANGLE_CORRECTION_FILE="$case_dir/correction.md"
+            return 0
+        }
+        validate_tangle_results() { return 0; }
+
+        rc=0
+        OCTOPUS_TANGLE_REVIEW_CORRECTION_MODE=bounded \
+        OCTOPUS_TANGLE_REVIEW_CORRECTION_ROUNDS=1 \
+            tangle_contextual_review_gate \
+                test "prompt" "context" "subtasks" \
+                "$validation_file" "$case_dir/worktree-before" 0 codex || rc=$?
+
+        printf "rc=%s corrections=%s reviews=%s\n" \
+            "$rc" "$(<"$correction_calls_file")" "$(<"$review_calls_file")"
+    ' _ "$PROJECT_ROOT" "$case_dir" "$initial_findings" "$initial_rc" \
+        "$recovery_findings" "$recovery_rc"
+}
+
+test_case "warning-only review is fatal without a correction call"
+out=$(run_warning_review_gate \
+    warning-only \
+    '{"findings":[],"warning":"Round 1 was partial"}' 1 \
+    '{"findings":[]}' 0)
+if [[ "$out" == "rc=1 corrections=0 reviews=1" ]]; then
+    test_pass
+else
+    test_fail "warning-only review entered correction or lost fatal status: $out"
+fi
+
+test_case "warning with a real blocker can recover after one bounded correction"
+out=$(run_warning_review_gate \
+    warning-with-blocker \
+    '{"findings":[{"severity":"normal","title":"real blocker","file":"src/app.sh","line":1}],"warning":"Round 1 was partial"}' 1 \
+    '{"findings":[]}' 0)
+if [[ "$out" == "rc=0 corrections=1 reviews=2" ]]; then
+    test_pass
+else
+    test_fail "actionable warning did not complete one bounded recovery: $out"
+fi
+
 assert_contains "$WORKFLOWS" "tangle_build_develop_review_context" "tangle builds review context"
 assert_contains "$WORKFLOWS" "tangle_run_context_code_review" "tangle runs contextual code review"
 assert_contains "$WORKFLOWS" "contextFile" "review profile passes contextFile"

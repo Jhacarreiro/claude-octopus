@@ -35,7 +35,7 @@ assert_eq() {
     test_pass
   else
     test_fail "expected=[$expected] got=[$actual]"
-    return 1
+    return 0
   fi
 }
 assert_eq "$(octopus_profile_provider council logic-reviewer fallback)" codex

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, json, os, subprocess, sys, time, urllib.parse, urllib.request, urllib.error
+import argparse, json, os, re, subprocess, sys, time, urllib.parse, urllib.request, urllib.error
 from pathlib import Path
 
 PROVIDERS = {
@@ -127,6 +127,19 @@ def normalize_reasoning_effort(value):
     return value
 
 
+def rejects_reasoning_effort(body_text):
+    text = body_text.lower()
+    field = r"reasoning(?:_effort| effort|-effort)"
+    kind = r"(?:field|parameter|argument|property)"
+    rejection = r"(?:unsupported|not supported|unrecognized|unknown|unexpected|not allowed|not permitted)"
+    patterns = (
+        rf"{rejection}\s+{kind}\s*:?\s*[\"'`]?{field}",
+        rf"{kind}\s+[\"'`]?{field}[\"'`]?\s+(?:is\s+)?{rejection}",
+        rf"{field}[\"'`]?\s+(?:{kind}\s+)?(?:is\s+)?{rejection}",
+    )
+    return any(re.search(pattern, text) for pattern in patterns)
+
+
 def api_call(base_url, key, model, headers_extra, messages, max_tokens=0, request_timeout=60.0, max_retries=3, reasoning_effort=None, reasoning_policy="best_effort", tool_policy="auto"):
     payload = {"model": model, "messages": messages, "temperature": 0}
     if tool_policy == "auto":
@@ -159,7 +172,7 @@ def api_call(base_url, key, model, headers_extra, messages, max_tokens=0, reques
                 reasoning_effort
                 and reasoning_policy == "best_effort"
                 and e.code in {400, 422}
-                and any(token in body_text.lower() for token in ("reasoning_effort", "reasoning effort", "reasoning-effort"))
+                and rejects_reasoning_effort(body_text)
             ):
                 print("chat_reasoning_fallback unsupported reasoning_effort; retrying without it", file=sys.stderr)
                 return api_call(

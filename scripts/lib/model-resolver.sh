@@ -200,7 +200,8 @@ validate_model_name_for_provider() {
 }
 
 _octo_canonical_known_provider_name() {
-    local requested normalized id aliases command org caps alias alias_base old_ifs
+    local requested normalized id aliases command org caps alias alias_base
+    local -a aliases_list
     requested="${1:-}"
     normalized="$(octo_provider_normalize "$requested")"
     [[ -n "$normalized" ]] || return 1
@@ -214,24 +215,24 @@ _octo_canonical_known_provider_name() {
             printf '%s\n' "$id"
             return 0
         fi
-        old_ifs="$IFS"
-        IFS=','
-        for alias in $aliases; do
-            IFS="$old_ifs"
-            [[ -n "$alias" ]] || continue
-            case "$alias" in
-                *'*')
-                    alias_base="${alias%\*}"
-                    [[ "$normalized" == "$alias_base" ]] || continue
-                    ;;
-                *)
-                    [[ "$normalized" == "$alias" ]] || continue
-                    ;;
-            esac
-            printf '%s\n' "$id"
-            return 0
-        done
-        IFS="$old_ifs"
+        aliases_list=()
+        if [[ -n "$aliases" ]]; then
+            IFS=',' read -r -a aliases_list <<< "$aliases"
+            for alias in "${aliases_list[@]}"; do
+                [[ -n "$alias" ]] || continue
+                case "$alias" in
+                    *'*')
+                        alias_base="${alias%\*}"
+                        [[ "$normalized" == "$alias_base" ]] || continue
+                        ;;
+                    *)
+                        [[ "$normalized" == "$alias" ]] || continue
+                        ;;
+                esac
+                printf '%s\n' "$id"
+                return 0
+            done
+        fi
     done <<EOF
 $(octo_provider_registry_rows)
 EOF

@@ -260,6 +260,17 @@ cat > "$CONFIG_FILE" << EOF
 EOF
 assert_eq "$(resolve_octopus_model "codex" "codex" "review" "logic-reviewer")" "gpt-5.5" "Bare gpt model remains a model route, not a provider alias"
 
+# Registry wildcard aliases are data, not shell globs. A matching filesystem
+# entry must not replace the literal gpt* alias before its base is compared.
+alias_glob_dir="$TEST_TMP_DIR/provider-alias-glob"
+mkdir -p "$alias_glob_dir"
+: > "$alias_glob_dir/gpt-collision"
+previous_pwd="$PWD"
+cd "$alias_glob_dir"
+alias_glob_result="$(_octo_canonical_known_provider_name "gpt")"
+cd "$previous_pwd"
+assert_eq "$alias_glob_result" "codex" "Provider wildcard aliases ignore matching filesystem entries"
+
 # Test 6: Recursive reference (codex:spark)
 clear_model_cache
 cat > "$CONFIG_FILE" << EOF

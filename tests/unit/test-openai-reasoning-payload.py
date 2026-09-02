@@ -55,31 +55,35 @@ assert mod.normalize_reasoning_effort("xhigh") == "high"
 assert mod.normalize_reasoning_effort("max") == "high"
 assert mod.normalize_reasoning_effort("medium") == "medium"
 
-# A generic reasoning validation error must not be mistaken for rejection of
-# the reasoning_effort field and retried without that field.
-error = urllib.error.HTTPError(
-    "https://example.test/chat/completions",
-    400,
-    "bad request",
-    {},
-    io.BytesIO(b'{"error":"reasoning trace is invalid"}'),
-)
-with patch.object(mod.urllib.request, "urlopen", side_effect=error) as mocked:
-    try:
-        mod.api_call(
-            "https://example.test",
-            "k",
-            "m",
-            {},
-            [{"role": "user", "content": "x"}],
-            reasoning_effort="medium",
-            reasoning_policy="best_effort",
-        )
-    except RuntimeError:
-        pass
-    else:
-        raise AssertionError("generic reasoning error unexpectedly triggered fallback")
-assert mocked.call_count == 1, mocked.call_count
+# A field-named value error must not be mistaken for rejection of the field and
+# retried without it.
+for generic_body in (
+    b'{"error":"invalid reasoning_effort value"}',
+    b'{"error":"unsupported value for reasoning_effort"}',
+):
+    error = urllib.error.HTTPError(
+        "https://example.test/chat/completions",
+        400,
+        "bad request",
+        {},
+        io.BytesIO(generic_body),
+    )
+    with patch.object(mod.urllib.request, "urlopen", side_effect=error) as mocked:
+        try:
+            mod.api_call(
+                "https://example.test",
+                "k",
+                "m",
+                {},
+                [{"role": "user", "content": "x"}],
+                reasoning_effort="medium",
+                reasoning_policy="best_effort",
+            )
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("generic reasoning error unexpectedly triggered fallback")
+    assert mocked.call_count == 1, (generic_body, mocked.call_count)
 
 # A 400 response that explicitly rejects the reasoning_effort field retries
 # once without that field when best-effort reasoning is enabled.

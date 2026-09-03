@@ -53,13 +53,22 @@ else
     test_fail "warning must not alter the number of severity=normal findings"
 fi
 
-test_case "malformed review findings remain fail-closed"
+test_case "schema-invalid review findings remain fail-closed"
 malformed_findings="$TEST_TMP_DIR/review-malformed.json"
+missing_findings="$TEST_TMP_DIR/review-missing.json"
+null_findings="$TEST_TMP_DIR/review-null.json"
+non_object_findings="$TEST_TMP_DIR/review-non-object.json"
 printf '%s\n' '{"findings":[' > "$malformed_findings"
-if [[ "$(tangle_review_blocking_count "$malformed_findings")" == "1" ]]; then
+printf '%s\n' '{}' > "$missing_findings"
+printf '%s\n' '{"findings":null}' > "$null_findings"
+printf '%s\n' '{"findings":["not-an-object"]}' > "$non_object_findings"
+if [[ "$(tangle_review_blocking_count "$malformed_findings")" == "1" ]] &&
+   [[ "$(tangle_review_blocking_count "$missing_findings")" == "1" ]] &&
+   [[ "$(tangle_review_blocking_count "$null_findings")" == "1" ]] &&
+   [[ "$(tangle_review_blocking_count "$non_object_findings")" == "1" ]]; then
     test_pass
 else
-    test_fail "malformed review findings must retain one blocking failure"
+    test_fail "invalid review schemas must retain one blocking failure"
 fi
 
 run_warning_review_gate() {
@@ -157,6 +166,28 @@ if [[ "$out" == "rc=0 corrections=1 reviews=2" ]]; then
     test_pass
 else
     test_fail "actionable warning did not complete one bounded recovery: $out"
+fi
+
+test_case "missing findings array is fatal without a correction call"
+out=$(run_warning_review_gate \
+    missing-findings \
+    '{}' 0 \
+    '{"findings":[]}' 0)
+if [[ "$out" == "rc=1 corrections=0 reviews=1" ]]; then
+    test_pass
+else
+    test_fail "missing findings array entered correction or passed: $out"
+fi
+
+test_case "truncated findings are fatal without a correction call"
+out=$(run_warning_review_gate \
+    truncated-findings \
+    '{"findings":[' 0 \
+    '{"findings":[]}' 0)
+if [[ "$out" == "rc=1 corrections=0 reviews=1" ]]; then
+    test_pass
+else
+    test_fail "truncated findings entered correction or passed: $out"
 fi
 
 assert_contains "$WORKFLOWS" "tangle_build_develop_review_context" "tangle builds review context"

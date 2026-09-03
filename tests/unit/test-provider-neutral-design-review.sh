@@ -43,7 +43,7 @@ cat >"$TMP_HOME/.claude-octopus/config/providers.json" <<'EOF'
 EOF
 
 export HOME="$TMP_HOME"
-export OCTOPUS_PROVIDERS_CONFIG="$TMP_HOME/.claude-octopus/config/providers.json"
+export "OCTOPUS_PROVIDERS_CONFIG=$TMP_HOME/.claude-octopus/config/providers.json"
 export OCTOPUS_PROVIDER_CHECKER="$CHECKER"
 export OCTO_ALLOWED_PROVIDERS="codex commandcode claude"
 export PLUGIN_DIR="$PROJECT_ROOT"

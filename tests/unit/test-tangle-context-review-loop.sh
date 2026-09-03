@@ -62,7 +62,8 @@ printf '%s\n' '{"findings":[' > "$malformed_findings"
 printf '%s\n' '{}' > "$missing_findings"
 printf '%s\n' '{"findings":null}' > "$null_findings"
 printf '%s\n' '{"findings":["not-an-object"]}' > "$non_object_findings"
-if [[ "$(tangle_review_blocking_count "$malformed_findings")" == "1" ]] &&
+if [[ "$(tangle_review_blocking_count "$TEST_TMP_DIR/review-absent.json")" == "1" ]] &&
+   [[ "$(tangle_review_blocking_count "$malformed_findings")" == "1" ]] &&
    [[ "$(tangle_review_blocking_count "$missing_findings")" == "1" ]] &&
    [[ "$(tangle_review_blocking_count "$null_findings")" == "1" ]] &&
    [[ "$(tangle_review_blocking_count "$non_object_findings")" == "1" ]]; then

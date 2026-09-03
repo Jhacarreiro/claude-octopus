@@ -1958,7 +1958,7 @@ tangle_review_findings_valid() {
 
 tangle_review_blocking_count() {
     local findings_file="$1"
-    [[ -f "$findings_file" ]] || { echo 0; return 0; }
+    [[ -f "$findings_file" ]] || { echo 1; return 0; }
     local count
     if ! tangle_review_findings_valid "$findings_file" \
           || ! count=$(jq '[.findings[] | select((.severity // "") == "normal")] | length' "$findings_file" 2>/dev/null); then

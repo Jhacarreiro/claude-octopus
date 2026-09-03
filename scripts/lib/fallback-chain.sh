@@ -36,6 +36,8 @@ octo_fallback_chain_json() {
         selection="$(jq -ce --arg name "$name" '
             if type != "object" then error("providers config must be an object")
             elif (has("routing") and .routing != null and (.routing | type) != "object") then error("routing must be an object")
+            elif (.routing != null and (.routing | has("roles")) and .routing.roles != null and (.routing.roles | type) != "object") then error("routing.roles must be an object")
+            elif (.routing != null and (.routing | has("phases")) and .routing.phases != null and (.routing.phases | type) != "object") then error("routing.phases must be an object")
             else (.routing.fallbackChains? // null) as $chains
             | if $chains == null then {found:false}
               elif ($chains | type) != "object" then error("routing.fallbackChains must be an object")
@@ -109,7 +111,7 @@ octo_fallback_role_agent_spec() {
 
     provider="$routed_provider"
     if declare -f _octopus_profile_route_json >/dev/null 2>&1; then
-        route="$(_octopus_profile_route_json "$phase" "$role" 2>/dev/null || printf '%s\n' null)"
+        route="$(_octopus_profile_route_json "$phase" "$role" 2>/dev/null)" || return 2
         route_type="$(jq -r 'type' <<<"$route" 2>/dev/null || printf '%s\n' null)"
     fi
 

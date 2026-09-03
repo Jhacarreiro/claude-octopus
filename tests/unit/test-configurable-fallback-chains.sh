@@ -131,11 +131,35 @@ assert_invalid_chain_fails_closed \
     "wrong routing object type fails closed" \
     '{"routing":"codex"}'
 assert_invalid_chain_fails_closed \
+    "wrong routing roles type fails closed" \
+    '{"routing":{"roles":"broken"}}'
+assert_invalid_chain_fails_closed \
+    "wrong routing phases type fails closed" \
+    '{"routing":{"phases":["codex"]}}'
+assert_invalid_chain_fails_closed \
     "unknown fallback role fails closed" \
     '{"routing":{"fallbackChains":{"default":[{"role":"made-up-role"}]}}}'
 assert_invalid_chain_fails_closed \
     "invalid fallback candidate fails the whole chain" \
     '{"routing":{"fallbackChains":{"default":[{"provider":"claude"},{"provider":"not-a-provider"}]}}}'
+
+test_case "malformed nested routing blocks every runtime dispatch"
+printf '%s\n' '{"routing":{"roles":"broken"}}' > "$CFG"
+dispatch_marker="$TEST_TMP_DIR/malformed-routing-dispatched"
+rm -f "$dispatch_marker"
+malformed_rc=0
+malformed_output="$({
+    run_agent_sync() {
+        : > "$dispatch_marker"
+        printf '%s\n' 'usable result'
+    }
+    run_agent_sync_fallback_chain agy 'plan it' 30 researcher tangle '' default
+} 2>/dev/null)" || malformed_rc=$?
+if [[ "$malformed_rc" -ne 0 && -z "$malformed_output" && ! -e "$dispatch_marker" ]]; then
+    test_pass
+else
+    test_fail "malformed nested routing dispatched: rc=$malformed_rc output=[$malformed_output]"
+fi
 
 write_config
 is_agent_available_v2() { [[ "$1" == "claude" ]]; }

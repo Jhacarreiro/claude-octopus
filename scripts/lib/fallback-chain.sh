@@ -94,6 +94,13 @@ _octo_fallback_bare_route_provider() {
     done <<EOF
 $(octo_provider_registry_rows)
 EOF
+
+    # Keep the legacy AGY research seat aligned with model-resolver's bare-route
+    # classifier. It predates registry-backed canonical provider prefixes.
+    if [[ "$normalized" == "agy-research" ]]; then
+        printf '%s\n' "agy"
+        return 0
+    fi
     return 1
 }
 

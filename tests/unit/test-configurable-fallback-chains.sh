@@ -85,6 +85,12 @@ mv "$CFG.tmp" "$CFG"
 specs=$(octo_fallback_chain_agent_specs default)
 if [[ "$specs" == "claude" ]]; then test_pass; else test_fail "bare provider retained the prior role model: [$specs]"; fi
 
+test_case "legacy agy-research role routes remain on the AGY provider"
+jq '.routing.roles["code-reviewer"]="agy-research" | .routing.fallbackChains.default=[{"role":"code-reviewer"}]' "$CFG" > "$CFG.tmp"
+mv "$CFG.tmp" "$CFG"
+specs=$(octo_fallback_chain_agent_specs default)
+if [[ "$specs" == "agy" ]]; then test_pass; else test_fail "agy-research was treated as a model or rerouted: [$specs]"; fi
+
 test_case "provider capability role routes resolve to a concrete model"
 jq '.routing.roles["code-reviewer"]="codex:council" | .routing.fallbackChains.default=[{"role":"code-reviewer"}]' "$CFG" > "$CFG.tmp"
 mv "$CFG.tmp" "$CFG"

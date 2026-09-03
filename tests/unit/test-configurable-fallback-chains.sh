@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/../helpers/test-framework.sh"
 source "$PROJECT_ROOT/scripts/lib/model-resolver.sh"
+source "$PROJECT_ROOT/scripts/lib/workflows.sh"
 
 test_suite "configurable fallback chains"
 
@@ -47,6 +48,37 @@ specs=$(octo_fallback_chain_agent_specs default)
 expected=$'codex:gpt-luna-test\ncodex:gpt-sol-test\nclaude:claude-opus-test'
 if [[ "$specs" == "$expected" ]]; then test_pass; else test_fail "unexpected specs: [$specs]"; fi
 
+test_case "built-in role defaults remain bare so session model precedence is preserved"
+printf '%s\n' '{"routing":{"fallbackChains":{"default":[{"role":"code-reviewer"}]}}}' > "$CFG"
+specs=$(octo_fallback_chain_agent_specs default)
+resolved=$(OCTOPUS_CODEX_MODEL=gpt-session-override resolve_octopus_model codex "$specs" "tangle" "code-reviewer")
+if [[ "$specs" == "codex-review" && "$resolved" == "gpt-session-override" ]]; then
+    test_pass
+else
+    test_fail "role default became an exact pin or bypassed session precedence: spec=[$specs] model=[$resolved]"
+fi
+write_config
+
+test_case "session model overrides beat configured fallback role models"
+printf '%s\n' '{"routing":{"roles":{"code-reviewer":{"provider":"codex","model":"gpt-role-default"}},"fallbackChains":{"default":[{"role":"code-reviewer"}]}}}' > "$CFG"
+specs=$(OCTOPUS_CODEX_MODEL=gpt-session-override octo_fallback_chain_agent_specs default)
+if [[ "$specs" == "codex:gpt-session-override" ]]; then
+    test_pass
+else
+    test_fail "configured role model bypassed session precedence: [$specs]"
+fi
+write_config
+
+test_case "session model overrides beat legacy string role models"
+printf '%s\n' '{"routing":{"roles":{"code-reviewer":"gpt-role-default"},"fallbackChains":{"default":[{"role":"code-reviewer"}]}}}' > "$CFG"
+specs=$(OCTOPUS_CODEX_MODEL=gpt-session-override octo_fallback_chain_agent_specs default)
+if [[ "$specs" == "codex-review:gpt-session-override" ]]; then
+    test_pass
+else
+    test_fail "legacy role model bypassed session precedence: [$specs]"
+fi
+write_config
+
 test_case "bare-provider role routes clear the inherited static-role model"
 jq '.routing.roles["code-reviewer"]="claude" | .routing.fallbackChains.default=[{"role":"code-reviewer"}]' "$CFG" > "$CFG.tmp"
 mv "$CFG.tmp" "$CFG"
@@ -66,6 +98,44 @@ mv "$CFG.tmp" "$CFG"
 specs=$(octo_fallback_chain_agent_specs default)
 expected=$'claude:claude-opus-test\ncommandcode:custom/model'
 if [[ "$specs" == "$expected" ]]; then test_pass; else test_fail "override not honored: [$specs]"; fi
+
+test_case "provider aliases canonicalize and equivalent candidates are deduplicated"
+printf '%s\n' '{"routing":{"fallbackChains":{"default":[{"provider":"anthropic","model":"claude-opus-test"},{"provider":"agy"},{"provider":"antigravity"},{"provider":"gemini"}]}}}' > "$CFG"
+specs=$(octo_fallback_chain_agent_specs default)
+expected=$'claude:claude-opus-test\nagy'
+if [[ "$specs" == "$expected" ]]; then
+    test_pass
+else
+    test_fail "aliases were rejected or retried: [$specs]"
+fi
+
+assert_invalid_chain_fails_closed() {
+    local description="$1" contents="$2" output="" rc=0
+    test_case "$description"
+    printf '%s\n' "$contents" > "$CFG"
+    output=$(octo_fallback_chain_agent_specs default 2>/dev/null) || rc=$?
+    if [[ "$rc" -ne 0 && -z "$output" ]]; then
+        test_pass
+    else
+        test_fail "invalid chain fell back or partially dispatched: rc=$rc output=[$output]"
+    fi
+}
+
+assert_invalid_chain_fails_closed \
+    "malformed providers JSON fails closed" \
+    '{"routing":{"fallbackChains":'
+assert_invalid_chain_fails_closed \
+    "wrong fallback chain type fails closed" \
+    '{"routing":{"fallbackChains":{"default":{"attempts":"codex"}}}}'
+assert_invalid_chain_fails_closed \
+    "wrong routing object type fails closed" \
+    '{"routing":"codex"}'
+assert_invalid_chain_fails_closed \
+    "unknown fallback role fails closed" \
+    '{"routing":{"fallbackChains":{"default":[{"role":"made-up-role"}]}}}'
+assert_invalid_chain_fails_closed \
+    "invalid fallback candidate fails the whole chain" \
+    '{"routing":{"fallbackChains":{"default":[{"provider":"claude"},{"provider":"not-a-provider"}]}}}'
 
 write_config
 is_agent_available_v2() { [[ "$1" == "claude" ]]; }
@@ -99,11 +169,13 @@ chosen=$(octo_fallback_first_available default commandcode)
 if [[ "$chosen" == "claude:claude-pinned-test" ]]; then test_pass; else test_fail "explicit model was lost: $chosen"; fi
 write_config
 
-test_case "technical fallback skips an invalid qualified candidate"
+test_case "technical fallback rejects a chain containing an invalid qualified candidate"
 jq '.routing.fallbackChains.default=[{"provider":"claude","model":"bad model"},{"provider":"claude","model":"claude-pinned-test"}]' "$CFG" > "$CFG.tmp"
 mv "$CFG.tmp" "$CFG"
-chosen=$(octo_fallback_first_available default commandcode)
-if [[ "$chosen" == "claude:claude-pinned-test" ]]; then test_pass; else test_fail "invalid qualified candidate blocked the valid fallback: $chosen"; fi
+chosen=""
+rc=0
+chosen=$(octo_fallback_first_available default commandcode) || rc=$?
+if [[ "$rc" -ne 0 && -z "$chosen" ]]; then test_pass; else test_fail "invalid qualified candidate was skipped: rc=$rc chosen=[$chosen]"; fi
 
 test_case "technical fallback fails closed when every qualified candidate is invalid"
 jq '.routing.fallbackChains.default=[{"provider":"claude","model":"bad model"},{"provider":"claude","model":"also\tbad"}]' "$CFG" > "$CFG.tmp"
@@ -168,5 +240,34 @@ run_agent_sync() {
 rc=0
 run_agent_sync_fallback_chain commandcode:primary 'plan it' 30 researcher tangle validate_protocol default >/dev/null || rc=$?
 if [[ "$rc" -ne 0 ]] && grep -c 'claude:claude-opus-test' "$ATTEMPTS" >/dev/null; then test_pass; else test_fail "chain did not exhaust safely"; fi
+
+test_case "runtime, empty, and semantic failures use one real decomposition fallback path"
+if (
+    : > "$ATTEMPTS"
+    tangle_decomposition_output_usable() { validate_protocol "$1"; }
+    octo_fallback_chain_agent_specs() {
+        printf '%s\n' agy antigravity gemini codex:gpt-luna-test codex:gpt-sol-test
+    }
+    run_agent_sync() {
+        local spec="$1" role="$4" phase="$5"
+        printf '%s|%s|%s\n' "$spec" "$role" "$phase" >> "$ATTEMPTS"
+        case "$spec" in
+            commandcode:primary) return 42 ;;
+            codex:explicit-fallback) printf '   \n' ;;
+            agy) printf 'not a decomposition\n' ;;
+            codex:gpt-luna-test) printf 'still not a decomposition\n' ;;
+            codex:gpt-sol-test) printf 'DECISIONS:\n- ACCEPT\nDECOMPOSITION:\n1. [CODING] valid\n' ;;
+            *) return 7 ;;
+        esac
+    }
+    out=$(tangle_run_decomposition_fallbacks commandcode:primary codex:explicit-fallback 'plan it' 30)
+    attempted_specs=$(cut -d'|' -f1 "$ATTEMPTS" | paste -sd, -)
+    [[ "$out" == *"DECOMPOSITION:"* ]] && \
+        [[ "$attempted_specs" == "commandcode:primary,codex:explicit-fallback,agy,codex:gpt-luna-test,codex:gpt-sol-test" ]]
+); then
+    test_pass
+else
+    test_fail "real fallback path did not handle all failure classes or deduplicate aliases"
+fi
 
 test_summary

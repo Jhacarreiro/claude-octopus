@@ -159,6 +159,11 @@ failures, empty output, and caller-defined semantic/protocol validation
 failures. The task's semantic role and phase remain unchanged while the routing
 candidate changes. Exhausting the chain fails closed.
 
+Invalid JSON, unknown roles, malformed candidates, and incorrect chain types
+stop fallback dispatch. Provider aliases are canonicalized, equivalent attempts
+are deduplicated, and session model overrides retain precedence over role
+defaults.
+
 The existing model-version fallbacks below are separate: they resolve a model
 within a provider family rather than selecting a different dispatch candidate.
 

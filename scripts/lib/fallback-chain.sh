@@ -2,6 +2,12 @@
 # Unified configurable fallback-chain helpers.
 # Source-safe: defines functions only and resolves providers/models lazily.
 
+_octo_fallback_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! declare -f octo_provider_canonical >/dev/null 2>&1; then
+    source "${_octo_fallback_lib_dir}/provider-registry.sh" 2>/dev/null || true
+fi
+unset _octo_fallback_lib_dir
+
 _octo_fallback_config_file() {
     if declare -f _octopus_profile_config_file >/dev/null 2>&1; then
         _octopus_profile_config_file
@@ -23,45 +29,82 @@ octo_fallback_builtin_chain_json() {
 }
 
 octo_fallback_chain_json() {
-    local name="${1:-default}" cfg configured=""
+    local name="${1:-default}" cfg selection="" configured=""
     cfg="$(_octo_fallback_config_file)"
 
     if [[ -f "$cfg" ]]; then
-        configured="$(jq -c --arg name "$name" '
-            (.routing.fallbackChains[$name] //
-             (if $name != "default" then .routing.fallbackChains.default else null end) //
-             null) as $chain
-            | if $chain == null then empty
-              elif ($chain | type) == "array" then $chain
-              elif (($chain | type) == "object" and (($chain.attempts // null) | type) == "array") then $chain.attempts
-              else empty end
-        ' "$cfg" 2>/dev/null || true)"
+        selection="$(jq -ce --arg name "$name" '
+            if type != "object" then error("providers config must be an object")
+            elif (has("routing") and .routing != null and (.routing | type) != "object") then error("routing must be an object")
+            else (.routing.fallbackChains? // null) as $chains
+            | if $chains == null then {found:false}
+              elif ($chains | type) != "object" then error("routing.fallbackChains must be an object")
+              elif ($chains | has($name)) then {found:true,value:$chains[$name]}
+              elif ($name != "default" and ($chains | has("default"))) then {found:true,value:$chains.default}
+              else {found:false} end end
+        ' "$cfg" 2>/dev/null)" || return 2
+
+        if [[ "$(jq -r '.found' <<<"$selection")" == "true" ]]; then
+            configured="$(jq -ce '
+                .value as $chain
+                | if ($chain | type) == "array" then $chain
+                  elif (($chain | type) == "object" and ($chain | has("attempts")) and ($chain.attempts | type) == "array") then $chain.attempts
+                  else error("fallback chain must be an array or an object with an attempts array") end
+            ' <<<"$selection" 2>/dev/null)" || return 2
+            printf '%s\n' "$configured"
+            return 0
+        fi
     fi
 
-    if [[ -n "$configured" ]]; then
-        printf '%s\n' "$configured"
-    else
-        octo_fallback_builtin_chain_json "$name"
-    fi
+    octo_fallback_builtin_chain_json "$name"
 }
 
 _octo_fallback_ensure_role_resolver() {
-    declare -f get_role_agent >/dev/null 2>&1 && declare -f get_role_model >/dev/null 2>&1 && return 0
+    declare -f get_role_agent >/dev/null 2>&1 && return 0
     local lib_dir nounset_was_on="false"
     lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     [[ "$-" == *u* ]] && nounset_was_on="true" && set +u
     source "${lib_dir}/agent-utils.sh" 2>/dev/null || true
     [[ "$nounset_was_on" == "true" ]] && set -u
-    declare -f get_role_agent >/dev/null 2>&1 && declare -f get_role_model >/dev/null 2>&1
+    declare -f get_role_agent >/dev/null 2>&1
+}
+
+_octo_fallback_bare_route_provider() {
+    local requested="${1:-}" normalized="" id aliases command org caps alias old_ifs
+    declare -f octo_provider_normalize >/dev/null 2>&1 || return 1
+    normalized="$(octo_provider_normalize "$requested")"
+    [[ -n "$normalized" ]] || return 1
+
+    while IFS='|' read -r id aliases command org caps; do
+        [[ "$normalized" == "$id" ]] && { printf '%s\n' "$id"; return 0; }
+        old_ifs="$IFS"
+        IFS=','
+        for alias in $aliases; do
+            IFS="$old_ifs"
+            alias="${alias%\*}"
+            if [[ -n "$alias" && "$normalized" == "$alias" ]]; then
+                printf '%s\n' "$id"
+                return 0
+            fi
+            IFS=','
+        done
+        IFS="$old_ifs"
+    done <<EOF
+$(octo_provider_registry_rows)
+EOF
+    return 1
 }
 
 octo_fallback_role_agent_spec() {
     local role="$1" phase="${2:-}" provider="" model="" routed_provider=""
     local route="null" route_type="null" route_value="" route_provider="" route_model=""
 
+    case "$role" in
+        architect|researcher|reviewer|code-reviewer|security-reviewer|implementer|implementer-heavy|synthesizer|strategist) ;;
+        *) return 1 ;;
+    esac
     _octo_fallback_ensure_role_resolver || return 1
     routed_provider="$(get_role_agent "$role" 2>/dev/null || true)"
-    model="$(get_role_model "$role" 2>/dev/null || true)"
     [[ -n "$routed_provider" ]] || return 1
 
     provider="$routed_provider"
@@ -72,13 +115,21 @@ octo_fallback_role_agent_spec() {
 
     case "$route_type" in
         object)
-            route_provider="$(jq -r '.provider // empty' <<<"$route" 2>/dev/null || true)"
-            route_model="$(jq -r '.model // empty' <<<"$route" 2>/dev/null || true)"
-            if [[ -n "$route_provider" ]]; then
-                provider="$route_provider"
-                model=""
+            jq -e '
+                ((has("provider") | not) or (.provider | type) == "string") and
+                ((has("model") | not) or (.model | type) == "string") and
+                ((.provider // "") != "" or (.model // "") != "")
+            ' <<<"$route" >/dev/null 2>&1 || return 1
+            route_provider="$(jq -r '.provider // empty' <<<"$route")"
+            route_model="$(jq -r '.model // empty' <<<"$route")"
+            local route_has_provider=false resolution_provider=""
+            [[ -n "$route_provider" ]] && { provider="$route_provider"; route_has_provider=true; }
+            if [[ -n "$route_model" ]]; then
+                declare -f resolve_octopus_model >/dev/null 2>&1 || return 1
+                resolution_provider="$(octo_provider_canonical "$provider" 2>/dev/null)" || return 1
+                model="$(resolve_octopus_model "$resolution_provider" "$provider" "$phase" "$role")" || return 1
+                [[ "$route_has_provider" == true ]] && provider="$resolution_provider"
             fi
-            [[ -n "$route_model" ]] && model="$route_model"
             ;;
         string)
             route_value="$(jq -r '.' <<<"$route" 2>/dev/null || true)"
@@ -90,21 +141,43 @@ octo_fallback_role_agent_spec() {
                 model="$(resolve_octopus_model "$route_provider" "$route_model" "" "")" || return 1
                 provider="$route_provider"
             elif [[ -n "$route_value" ]]; then
-                if declare -f octo_provider_canonical >/dev/null 2>&1 && \
-                   route_provider="$(octo_provider_canonical "$route_value" 2>/dev/null)"; then
+                if route_provider="$(_octo_fallback_bare_route_provider "$route_value" 2>/dev/null)"; then
                     provider="$route_provider"
-                    model=""
                 else
-                    model="$route_value"
+                    declare -f resolve_octopus_model >/dev/null 2>&1 || return 1
+                    route_provider="$(octo_provider_canonical "$provider" 2>/dev/null)" || return 1
+                    model="$(resolve_octopus_model "$route_provider" "$provider" "$phase" "$role")" || return 1
                 fi
             fi
             ;;
+        null) ;;
+        *) return 1 ;;
     esac
 
-    if [[ -n "$model" ]]; then
-        printf '%s:%s\n' "$provider" "$model"
+    octo_fallback_canonical_agent_spec "${provider}${model:+:$model}"
+}
+
+octo_fallback_canonical_agent_spec() {
+    local spec="${1:-}" executor="" provider="" model="" canonical_executor=""
+    executor="${spec%%:*}"
+    [[ -n "$executor" ]] || return 1
+    declare -f octo_provider_canonical >/dev/null 2>&1 || return 1
+    provider="$(octo_provider_canonical "$executor" 2>/dev/null)" || return 1
+
+    canonical_executor="$executor"
+    case "$executor" in
+        "$provider"|"$provider"-*) ;;
+        *) canonical_executor="$provider" ;;
+    esac
+
+    if [[ "$spec" == *:* ]]; then
+        model="${spec#*:}"
+        [[ -n "$model" ]] || return 1
+        declare -f validate_model_name_for_provider >/dev/null 2>&1 || return 1
+        validate_model_name_for_provider "$provider" "$model" >/dev/null 2>&1 || return 1
+        printf '%s:%s\n' "$canonical_executor" "$model"
     else
-        printf '%s\n' "$provider"
+        printf '%s\n' "$canonical_executor"
     fi
 }
 
@@ -114,10 +187,19 @@ octo_fallback_candidate_agent_spec() {
 
     if [[ "$type" == "string" ]]; then
         role="$(jq -r '.' <<<"$candidate")"
+        [[ -n "$role" ]] || return 1
         octo_fallback_role_agent_spec "$role" "$phase"
         return
     fi
     [[ "$type" == "object" ]] || return 1
+
+    jq -e '
+        (([has("role"),has("agent"),has("provider")] | map(select(.)) | length) == 1) and
+        ((keys - ["agent","model","provider","role"]) | length == 0) and
+        ((has("role") | not) or ((.role | type) == "string" and .role != "" and (has("agent") | not) and (has("provider") | not) and (has("model") | not))) and
+        ((has("agent") | not) or ((.agent | type) == "string" and .agent != "" and (has("model") | not))) and
+        ((has("provider") | not) or ((.provider | type) == "string" and .provider != "" and ((has("model") | not) or ((.model | type) == "string" and .model != ""))))
+    ' <<<"$candidate" >/dev/null 2>&1 || return 1
 
     role="$(jq -r '.role // empty' <<<"$candidate")"
     if [[ -n "$role" ]]; then
@@ -127,28 +209,32 @@ octo_fallback_candidate_agent_spec() {
 
     agent="$(jq -r '.agent // empty' <<<"$candidate")"
     if [[ -n "$agent" ]]; then
-        printf '%s\n' "$agent"
+        octo_fallback_canonical_agent_spec "$agent"
         return
     fi
 
     provider="$(jq -r '.provider // empty' <<<"$candidate")"
     model="$(jq -r '.model // empty' <<<"$candidate")"
     [[ -n "$provider" ]] || return 1
-    if [[ -n "$model" ]]; then
-        printf '%s:%s\n' "$provider" "$model"
-    else
-        printf '%s\n' "$provider"
-    fi
+    octo_fallback_canonical_agent_spec "${provider}${model:+:$model}"
 }
 
 octo_fallback_chain_agent_specs() {
-    local name="${1:-default}" phase="${2:-}" chain candidate spec
-    chain="$(octo_fallback_chain_json "$name")"
+    local name="${1:-default}" phase="${2:-}" chain candidates candidate spec specs="" seen="|"
+    chain="$(octo_fallback_chain_json "$name")" || return $?
+    candidates="$(jq -ce '.[]' <<<"$chain" 2>/dev/null)" || {
+        [[ "$chain" == "[]" ]] && return 0
+        return 2
+    }
     while IFS= read -r candidate; do
         [[ -n "$candidate" ]] || continue
-        spec="$(octo_fallback_candidate_agent_spec "$candidate" "$phase" 2>/dev/null || true)"
-        [[ -n "$spec" ]] && printf '%s\n' "$spec"
-    done < <(jq -c '.[]' <<<"$chain" 2>/dev/null)
+        spec="$(octo_fallback_candidate_agent_spec "$candidate" "$phase" 2>/dev/null)" || return 2
+        [[ -n "$spec" ]] || return 2
+        [[ "$seen" == *"|$spec|"* ]] && continue
+        seen+="$spec|"
+        specs+="${spec}"$'\n'
+    done <<<"$candidates"
+    printf '%s' "$specs"
 }
 
 octo_fallback_agent_available() {
@@ -194,9 +280,10 @@ _octo_fallback_provider_identity() {
 }
 
 octo_fallback_first_available() {
-    local name="${1:-default}" preferred="${2:-}" phase="${3:-}" spec executor
+    local name="${1:-default}" preferred="${2:-}" phase="${3:-}" spec executor specs
     local preferred_provider="" candidate_provider=""
     preferred_provider="$(_octo_fallback_provider_identity "$preferred")"
+    specs="$(octo_fallback_chain_agent_specs "$name" "$phase")" || return $?
     while IFS= read -r spec; do
         [[ -n "$spec" ]] || continue
         executor="${spec%%:*}"
@@ -206,7 +293,7 @@ octo_fallback_first_available() {
             printf '%s\n' "$spec"
             return 0
         fi
-    done < <(octo_fallback_chain_agent_specs "$name" "$phase")
+    done <<<"$specs"
     return 1
 }
 
@@ -223,14 +310,27 @@ octo_fallback_output_usable() {
 
 run_agent_sync_fallback_chain() {
     local primary_agent="$1" prompt="$2" timeout_secs="${3:-120}" semantic_role="${4:-}" phase="${5:-}"
-    local validator="${6:-}" chain_name="${7:-default}"
-    local spec output="" rc=0 reason="" attempted="|"
+    local validator="${6:-}" chain_name="${7:-default}" preferred_fallback="${8:-}"
+    local spec raw_spec output="" rc=0 reason="" candidates="" fallback_specs="" seen="|"
+
+    fallback_specs="$(octo_fallback_chain_agent_specs "$chain_name" "$phase")" || return $?
+    for raw_spec in "$primary_agent" "$preferred_fallback"; do
+        [[ -n "$raw_spec" ]] || continue
+        spec="$(octo_fallback_canonical_agent_spec "$raw_spec")" || return 2
+        [[ "$seen" == *"|$spec|"* ]] && continue
+        seen+="$spec|"
+        candidates+="${spec}"$'\n'
+    done
+    while IFS= read -r raw_spec; do
+        [[ -n "$raw_spec" ]] || continue
+        spec="$(octo_fallback_canonical_agent_spec "$raw_spec")" || return 2
+        [[ "$seen" == *"|$spec|"* ]] && continue
+        seen+="$spec|"
+        candidates+="${spec}"$'\n'
+    done <<<"$fallback_specs"
 
     while IFS= read -r spec; do
         [[ -n "$spec" ]] || continue
-        [[ "$attempted" == *"|$spec|"* ]] && continue
-        attempted+="$spec|"
-
         output=""
         rc=0
         if output=$(run_agent_sync "$spec" "$prompt" "$timeout_secs" "$semantic_role" "$phase"); then
@@ -246,10 +346,7 @@ run_agent_sync_fallback_chain() {
         if declare -f log >/dev/null 2>&1; then
             log WARN "Fallback chain '$chain_name': $spec failed ($reason); trying next candidate"
         fi
-    done < <(
-        printf '%s\n' "$primary_agent"
-        octo_fallback_chain_agent_specs "$chain_name" "$phase"
-    )
+    done <<<"$candidates"
 
     if declare -f log >/dev/null 2>&1; then
         log ERROR "Fallback chain '$chain_name' exhausted without a usable result"

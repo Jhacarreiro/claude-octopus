@@ -44,6 +44,29 @@ fleet_dispatch_end() {
     unset OCTOPUS_FORCE_LEGACY_DISPATCH
 }
 
+# Bind a resolved AGY model to the exact argv environment used by agy-exec.
+# This keeps provider execution aligned with lifecycle and cost records, while
+# preserving model labels containing spaces as one environment argument.
+octopus_sync_bind_resolved_model() {
+    local agent_type="${1:-}" model="${2:-}" provider="" entry
+    local -a filtered_env
+    provider="$(octo_agent_spec_provider "$agent_type" 2>/dev/null || true)"
+    [[ "$provider" == "agy" && -n "$model" ]] || return 0
+
+    filtered_env=()
+    if [[ ${#PROVIDER_ENV_ARRAY[@]} -gt 0 ]]; then
+        for entry in "${PROVIDER_ENV_ARRAY[@]}"; do
+            [[ "$entry" == OCTOPUS_AGY_MODEL=* ]] && continue
+            filtered_env+=("$entry")
+        done
+    fi
+    if [[ ${#filtered_env[@]} -eq 0 ]]; then
+        filtered_env=(env)
+    fi
+    filtered_env+=("OCTOPUS_AGY_MODEL=$model")
+    PROVIDER_ENV_ARRAY=("${filtered_env[@]}")
+}
+
 # Claude Code's native Agent Teams API does not expose a provider PID or a
 # timeout/cancellation handle to plugin scripts. A positive Octopus timeout
 # therefore cannot be enforced on that path: Claude Code documents that team
@@ -457,6 +480,7 @@ ${provider_ctx}"
     local -a cmd_array
     local -a inner_cmd_array
     build_provider_env "$agent_type"
+    octopus_sync_bind_resolved_model "$agent_type" "$model"
     read -ra inner_cmd_array <<< "$cmd"
     if [[ ${#PROVIDER_ENV_ARRAY[@]} -gt 0 ]]; then
         cmd_array=("${PROVIDER_ENV_ARRAY[@]}" "${inner_cmd_array[@]}")

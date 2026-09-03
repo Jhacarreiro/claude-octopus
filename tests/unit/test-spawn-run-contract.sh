@@ -427,6 +427,7 @@ fi
 test_case "exact background Fable SDK seat executes with no retry and retains lifecycle identity"
 sdk_stub_dir="$TEST_TMP_DIR/fable-sdk-bin"
 sdk_capture="$TEST_TMP_DIR/spawn-fable-sdk-capture"
+sdk_health_capture="$TEST_TMP_DIR/spawn-fable-sdk-health-capture"
 mkdir -p "$sdk_stub_dir"
 printf '%s\n' \
     '#!/usr/bin/env bash' \
@@ -438,11 +439,22 @@ chmod 755 "$sdk_stub_dir/claude-agent"
 export SDK_CAPTURE="$sdk_capture" CLAUDE_SDK_API_KEY=fixture-key
 old_path="$PATH"
 PATH="$sdk_stub_dir:$PATH"
-run_external_fixture exact-fable-contract external-exact-fable \
-    'claude-sdk:claude-fable-5' implementation-logic-reviewer review
+eval "$(declare -f check_provider_health | sed '1s/check_provider_health/octo_real_check_provider_health/')"
+check_provider_health() {
+    printf '%s\n' "$1" >> "$sdk_health_capture"
+    octo_real_check_provider_health "$@"
+}
+exact_fable_ran=false
+if run_external_fixture exact-fable-contract external-exact-fable \
+    'claude-sdk:claude-fable-5' implementation-logic-reviewer review; then
+    exact_fable_ran=true
+fi
+eval "$(declare -f octo_real_check_provider_health | sed '1s/octo_real_check_provider_health/check_provider_health/')"
 PATH="$old_path"
 unset CLAUDE_SDK_API_KEY SDK_CAPTURE
-if grep -Fxq 'no_retry=1' "$sdk_capture" && \
+if [[ "$exact_fable_ran" == true ]] && \
+   grep -Fxq 'claude-sdk' "$sdk_health_capture" && \
+   grep -Fxq 'no_retry=1' "$sdk_capture" && \
    grep -Fxq 'claude-fable-5' "$sdk_capture" && \
    jq -e '
        .seats[] |

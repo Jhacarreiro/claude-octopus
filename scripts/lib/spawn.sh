@@ -735,6 +735,7 @@ ${heuristic_ctx}"
     case "$agent_type" in
         codex*) _provider_for_health="codex" ;;
         gemini*|agy*|antigravity) _provider_for_health="agy" ;;
+        claude-sdk*) _provider_for_health="claude-sdk" ;;
         claude*) _provider_for_health="claude" ;;
         openrouter*) _provider_for_health="openrouter" ;;
         perplexity*) _provider_for_health="perplexity" ;;

@@ -117,11 +117,12 @@ test_case "provider-local model keeps provider identity separate from role model
 log() { :; }
 export OCTOPUS_PLATFORM=Linux
 source "$PROJECT_ROOT/scripts/lib/model-resolver.sh"
+expected_model="$(jq -r '.providers.commandcode.roles.researcher' "$TMP_HOME/.claude-octopus/config/providers.json")"
 model="$(resolve_octopus_model commandcode commandcode ceremony researcher)"
-if [[ "$model" == "minimaxai/minimax-m3" ]]; then
+if [[ "$model" == "$expected_model" ]]; then
   test_pass
 else
-  test_fail "expected provider-local MiniMax researcher model, got '$model'"
+  test_fail "expected provider-local researcher model '$expected_model', got '$model'"
 fi
 
 test_case "design review retries the same model before falling back"

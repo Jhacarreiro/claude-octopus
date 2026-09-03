@@ -505,7 +505,11 @@ get_agent_command() {
             if ! model=$(get_agent_model "$agent_type" "$phase" "$role"); then return 1; fi
             _octopus_validate_exact_claude_dispatch_model "$model" "$role" "$agent_type" "$phase" || return 1
             if [[ -n "$model" && "$model" != "default" ]]; then
-                echo "env OCTOPUS_CLAUDE_SDK_MODEL=${model} ${PLUGIN_DIR}/scripts/helpers/claude-sdk-exec.sh"
+                if [[ "$agent_type" == *:* && "$model" == "${FABLE5_MODEL_ID:-claude-fable-5}" ]]; then
+                    echo "env OCTOPUS_CLAUDE_SDK_MODEL=${model} OCTOPUS_FABLE5_NO_RETRY=1 ${PLUGIN_DIR}/scripts/helpers/claude-sdk-exec.sh"
+                else
+                    echo "env OCTOPUS_CLAUDE_SDK_MODEL=${model} ${PLUGIN_DIR}/scripts/helpers/claude-sdk-exec.sh"
+                fi
             else
                 echo "${PLUGIN_DIR}/scripts/helpers/claude-sdk-exec.sh"
             fi

@@ -117,6 +117,16 @@ else
   test_fail "unsafe exact Fable security pin was dispatched rc=$fable_security_rc out=[$fable_security_out]"
 fi
 
+test_case "an exact Claude SDK Fable seat disables the shim retry without changing compatibility routes"
+exact_fable_sdk_cmd="$(get_agent_command 'claude-sdk:claude-fable-5' review implementation-logic-reviewer 2>/dev/null || true)"
+compat_fable_sdk_cmd="$(OCTOPUS_CLAUDE_SDK_MODEL=claude-fable-5 get_agent_command claude-sdk review implementation-logic-reviewer 2>/dev/null || true)"
+if [[ "$exact_fable_sdk_cmd" == "env OCTOPUS_CLAUDE_SDK_MODEL=claude-fable-5 OCTOPUS_FABLE5_NO_RETRY=1 $PROJECT_ROOT/scripts/helpers/claude-sdk-exec.sh" ]] && \
+   [[ "$compat_fable_sdk_cmd" == "env OCTOPUS_CLAUDE_SDK_MODEL=claude-fable-5 $PROJECT_ROOT/scripts/helpers/claude-sdk-exec.sh" ]]; then
+  test_pass
+else
+  test_fail "exact/default Fable retry contract mismatch: exact=[$exact_fable_sdk_cmd] compatibility=[$compat_fable_sdk_cmd]"
+fi
+
 test_case "review order keeps same-provider model variants and Ox Alpha before Luna"
 fake="$TEST_TMP_DIR/provider-check.sh"
 cat > "$fake" <<'CHECK'

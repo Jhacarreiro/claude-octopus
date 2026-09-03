@@ -61,16 +61,49 @@ else
   test_fail "fleet review did not render all effective overrides: $(tr '\n' ';' <<< "$fleet")"
 fi
 
-test_case "single-provider override takes precedence over all seat overrides in fleet review"
+test_case "single-provider override takes precedence and canonicalizes registry aliases"
 fleet="$(run_fleet \
-  "OCTOPUS_REVIEW_SINGLE_PROVIDER=codex" \
+  "OCTOPUS_REVIEW_SINGLE_PROVIDER=openai" \
   "OCTOPUS_REVIEW_LOGIC_AGENT=commandcode:model-a" \
   "OCTOPUS_REVIEW_SYNTHESIZER_AGENT=vibe:model-b")"
 if [[ "$(printf '%s\n' "$fleet" | grep -c .)" -eq 8 ]] && \
    [[ "$(printf '%s\n' "$fleet" | cut -d'|' -f1 | grep -vc '^codex$' || true)" -eq 0 ]]; then
   test_pass
 else
-  test_fail "single-provider precedence was not reflected in fleet review: $(tr '\n' ';' <<< "$fleet")"
+  test_fail "single-provider precedence or canonical identity was not reflected in fleet review: $(tr '\n' ';' <<< "$fleet")"
+fi
+
+test_case "fleet review rejects an unavailable single-provider override"
+unavailable_rc=0
+unavailable_fleet="$(run_fleet \
+  "OCTO_ALLOWED_PROVIDERS=codex commandcode claude agy openrouter orcarouter vibe atlascloud perplexity" \
+  "OCTOPUS_REVIEW_SINGLE_PROVIDER=perplexity" 2>/dev/null)" || unavailable_rc=$?
+if [[ "$unavailable_rc" -ne 0 && -z "$unavailable_fleet" ]]; then
+  test_pass
+else
+  test_fail "unavailable single-provider override escaped admission: rc=$unavailable_rc fleet=[$unavailable_fleet]"
+fi
+
+test_case "fleet review rejects an unknown single-provider override"
+unknown_rc=0
+unknown_fleet="$(run_fleet \
+  "OCTO_ALLOWED_PROVIDERS=mystery-provider" \
+  "OCTOPUS_REVIEW_SINGLE_PROVIDER=mystery-provider" 2>/dev/null)" || unknown_rc=$?
+if [[ "$unknown_rc" -ne 0 && -z "$unknown_fleet" ]]; then
+  test_pass
+else
+  test_fail "unknown single-provider override escaped registry validation: rc=$unknown_rc fleet=[$unknown_fleet]"
+fi
+
+test_case "fleet review rejects a policy-disallowed single-provider override"
+disallowed_rc=0
+disallowed_fleet="$(run_fleet \
+  "OCTO_ALLOWED_PROVIDERS=agy" \
+  "OCTOPUS_REVIEW_SINGLE_PROVIDER=codex" 2>/dev/null)" || disallowed_rc=$?
+if [[ "$disallowed_rc" -ne 0 && -z "$disallowed_fleet" ]]; then
+  test_pass
+else
+  test_fail "policy-disallowed single-provider override escaped admission: rc=$disallowed_rc fleet=[$disallowed_fleet]"
 fi
 
 test_case "fleet review rejects an exact model outside the dispatch allowlist"

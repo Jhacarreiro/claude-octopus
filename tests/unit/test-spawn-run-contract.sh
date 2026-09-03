@@ -280,10 +280,12 @@ octo_dispatch_command_model() {
 }
 is_provider_available() { return 0; }
 get_agent_command() {
-    if [[ "${FAKE_SCENARIO:-}" == claude-contract ]]; then
-        octo_real_get_agent_command "$@"
-        return
-    fi
+    case "${FAKE_SCENARIO:-}" in
+        claude-contract|exact-fable-contract)
+            octo_real_get_agent_command "$@"
+            return
+            ;;
+    esac
     local command_model="routed-model"
     if [[ "${1:-}" == *:* ]]; then
         command_model="${1#*:}"
@@ -420,6 +422,40 @@ if jq -e --arg model "$exact_background_model" '
     test_pass
 else
     test_fail "exact background lifecycle did not split canonical provider from literal model"
+fi
+
+test_case "exact background Fable SDK seat executes with no retry and retains lifecycle identity"
+sdk_stub_dir="$TEST_TMP_DIR/fable-sdk-bin"
+sdk_capture="$TEST_TMP_DIR/spawn-fable-sdk-capture"
+mkdir -p "$sdk_stub_dir"
+printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf "%s\n" "no_retry=${OCTOPUS_FABLE5_NO_RETRY:-unset}" > "$SDK_CAPTURE"' \
+    'printf "%s\n" "$@" >> "$SDK_CAPTURE"' \
+    'cat >/dev/null' \
+    'printf "%s\n" "Substantive exact Fable background result."' > "$sdk_stub_dir/claude-agent"
+chmod 755 "$sdk_stub_dir/claude-agent"
+export SDK_CAPTURE="$sdk_capture" CLAUDE_SDK_API_KEY=fixture-key
+old_path="$PATH"
+PATH="$sdk_stub_dir:$PATH"
+run_external_fixture exact-fable-contract external-exact-fable \
+    'claude-sdk:claude-fable-5' implementation-logic-reviewer review
+PATH="$old_path"
+unset CLAUDE_SDK_API_KEY SDK_CAPTURE
+if grep -Fxq 'no_retry=1' "$sdk_capture" && \
+   grep -Fxq 'claude-fable-5' "$sdk_capture" && \
+   jq -e '
+       .seats[] |
+       select(.seat_id == "spawn-external-exact-fable") |
+       .requested.provider == "claude-sdk" and
+       .requested.model == "claude-fable-5" and
+       .resolved.provider == "claude-sdk" and
+       .resolved.model == "claude-fable-5" and
+       .transition == "contributed"
+   ' "$WORKSPACE_DIR/runs/$OCTOPUS_RUN_ID/seats.json" >/dev/null; then
+    test_pass
+else
+    test_fail "background exact Fable execution retried or lost its lifecycle identity"
 fi
 
 test_case "background model-resolution failure terminalizes before provider execution"

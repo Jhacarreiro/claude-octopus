@@ -274,4 +274,61 @@ else
     test_fail "exact synchronous lifecycle did not split canonical provider from literal model"
 fi
 
+test_case "exact synchronous Fable SDK seat executes with no retry and retains lifecycle identity"
+if (
+    export FIXTURE_SCENARIO=exact-fable-runtime
+    export FIXTURE_ROOT="$TEST_TMP_DIR/exact-fable-runtime"
+    export FIXTURE_CALLS="$FIXTURE_ROOT/provider-calls"
+    export WORKSPACE_DIR="$FIXTURE_ROOT/workspace"
+    export RESULTS_DIR="$FIXTURE_ROOT/results"
+    export OCTOPUS_RUN_ID=sync-exact-fable-runtime
+    export OCTOPUS_PERSISTENCE_AVAILABLE=true
+    export OCTOPUS_AGENT_MAX_OUTPUT_BYTES=262144
+    export CLAUDE_SDK_API_KEY=fixture-key
+    export PLUGIN_DIR="$PROJECT_ROOT"
+    mkdir -p "$RESULTS_DIR" "$FIXTURE_ROOT/bin"
+    sdk_capture="$FIXTURE_ROOT/sdk-capture"
+    export SDK_CAPTURE="$sdk_capture"
+    printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        'printf "%s\n" "no_retry=${OCTOPUS_FABLE5_NO_RETRY:-unset}" > "$SDK_CAPTURE"' \
+        'printf "%s\n" "$@" >> "$SDK_CAPTURE"' \
+        'cat >/dev/null' \
+        'printf "%s\n" "Substantive exact Fable SDK result."' > "$FIXTURE_ROOT/bin/claude-agent"
+    chmod 755 "$FIXTURE_ROOT/bin/claude-agent"
+    export PATH="$FIXTURE_ROOT/bin:$PATH"
+    source "$PROJECT_ROOT/scripts/lib/provider-registry.sh"
+    source "$PROJECT_ROOT/scripts/lib/validation.sh"
+    source "$PROJECT_ROOT/scripts/lib/model-cache-path.sh"
+    source "$PROJECT_ROOT/scripts/lib/model-resolver.sh"
+    source "$PROJECT_ROOT/scripts/lib/provider-routing.sh"
+    source "$PROJECT_ROOT/scripts/lib/dispatch.sh"
+    apply_persona() { printf '%s\n' "$2"; }
+    load_earned_skills() { :; }
+    build_provider_context() { :; }
+    enforce_context_budget() { printf '%s\n' "$1"; }
+    build_provider_env() { PROVIDER_ENV_ARRAY=(); }
+    sync_rc=0
+    run_agent_sync 'claude-sdk:claude-fable-5' 'Review the exact Fable fixture.' 5 \
+        implementation-logic-reviewer review > "$FIXTURE_ROOT/stdout" 2> "$FIXTURE_ROOT/stderr" || sync_rc=$?
+    if [[ "$sync_rc" -ne 0 ]]; then
+        printf 'exact Fable sync rc=%s stderr=%s\n' "$sync_rc" "$(tr '\n' ';' < "$FIXTURE_ROOT/stderr")" >&2
+        exit 1
+    fi
+    snapshot="$WORKSPACE_DIR/runs/$OCTOPUS_RUN_ID/seats.json"
+    grep -Fxq 'no_retry=1' "$sdk_capture" &&
+    grep -Fxq 'claude-fable-5' "$sdk_capture" &&
+    jq -e '
+        .seats[0].requested.provider == "claude-sdk" and
+        .seats[0].requested.model == "claude-fable-5" and
+        .seats[0].resolved.provider == "claude-sdk" and
+        .seats[0].resolved.model == "claude-fable-5" and
+        .seats[0].transition == "contributed"
+    ' "$snapshot" >/dev/null
+); then
+    test_pass
+else
+    test_fail "synchronous exact Fable execution retried or lost its lifecycle identity"
+fi
+
 test_summary

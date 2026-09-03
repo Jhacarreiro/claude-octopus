@@ -108,8 +108,8 @@ else
 fi
 
 test_case "single-provider override keeps every review phase on the requested provider"
-override_fleet="$(OCTOPUS_REVIEW_SINGLE_PROVIDER=openai-compatible-agent build_review_fleet)"
-override_phase="$(OCTOPUS_REVIEW_SINGLE_PROVIDER=openai-compatible-agent review_phase_provider claude-sonnet)"
+override_fleet="$(OCTO_ALLOWED_PROVIDERS=openai-compatible-agent AVAILABLE_AGENTS=openai-compatible-agent OCTOPUS_REVIEW_SINGLE_PROVIDER=openai-compatible-agent build_review_fleet)"
+override_phase="$(OCTO_ALLOWED_PROVIDERS=openai-compatible-agent AVAILABLE_AGENTS=openai-compatible-agent OCTOPUS_REVIEW_SINGLE_PROVIDER=openai-compatible-agent review_phase_provider claude-sonnet)"
 debate_block="$(sed -n '/# ── Debate gate/,/# ── ROUND 3/p' "$PROJECT_ROOT/scripts/lib/review.sh")"
 if [[ "$(wc -l <<< "$override_fleet" | tr -d ' ')" -eq 1 ]] &&
    [[ "$override_fleet" == openai-compatible-agent:general-reviewer:* ]] &&
@@ -120,6 +120,15 @@ if [[ "$(wc -l <<< "$override_fleet" | tr -d ' ')" -eq 1 ]] &&
     test_pass
 else
     test_fail "single-provider review escaped to another provider: fleet=$override_fleet phase=$override_phase"
+fi
+
+test_case "single-provider override fails closed without caller availability authority"
+override_rc=0
+override_output="$(unset AVAILABLE_AGENTS; OCTO_ALLOWED_PROVIDERS=openai-compatible-agent OCTOPUS_REVIEW_SINGLE_PROVIDER=openai-compatible-agent review_single_provider_override 2>/dev/null)" || override_rc=$?
+if [[ "$override_rc" -ne 0 && -z "$override_output" ]]; then
+    test_pass
+else
+    test_fail "override was accepted without an availability authority: rc=$override_rc output=[$override_output]"
 fi
 
 test_case "review provider mapping keeps claude-sdk before the broad Claude glob"
@@ -194,6 +203,43 @@ if [[ "$status_records" == *'v2|commandcode|model-one.v1|ok|completed'* ]] && \
     test_pass
 else
     test_fail "same-provider model identities collapsed in report: $report"
+fi
+
+test_case "v2 provider status keeps exact OpenAI-compatible registry identities"
+: > "$status_file"
+for exact_provider in openai-compatible openai-tools openai-compatible-agent; do
+    review_append_provider_status "$status_file" "${exact_provider}:shared-model" implementation-logic-reviewer ok completed
+done
+status_records="$(cat "$status_file")"
+report="$(env "HOME=${TEST_TMP_DIR}" bash -c '
+    source "$1/scripts/lib/provider-registry.sh"
+    source "$1/scripts/lib/review.sh"
+    print_provider_report "$2"
+' _ "$PROJECT_ROOT" "$status_file")"
+if [[ "$status_records" == *'v2|openai-compatible|shared-model|ok|completed'* ]] && \
+   [[ "$status_records" == *'v2|openai-tools|shared-model|ok|completed'* ]] && \
+   [[ "$status_records" == *'v2|openai-compatible-agent|shared-model|ok|completed'* ]] && \
+   [[ "$(grep -cE 'Openai-(compatible|tools|compatible-agent)/shared-model:.*OK' <<< "$report")" -eq 3 ]]; then
+    test_pass
+else
+    test_fail "exact v2 provider identities collided: records=[$status_records] report=[$report]"
+fi
+
+test_case "legacy OpenAI-compatible status still aggregates by provider family"
+printf '%s\n' \
+  'openai-compatible|ok|completed' \
+  'openai-tools|fallback|tool loop failed' \
+  'openai-compatible-agent|ok|completed' > "$status_file"
+report="$(env "HOME=${TEST_TMP_DIR}" bash -c '
+    source "$1/scripts/lib/provider-registry.sh"
+    source "$1/scripts/lib/review.sh"
+    print_provider_report "$2"
+' _ "$PROJECT_ROOT" "$status_file")"
+if [[ "$(grep -cE 'Compatible:[[:space:]]+' <<< "$report")" -eq 1 ]] && \
+   ! grep -Eq 'Openai-(tools|compatible-agent):' <<< "$report"; then
+    test_pass
+else
+    test_fail "legacy provider family status stopped aggregating: $report"
 fi
 
 test_case "synthesis lifecycle event uses the canonical provider key"

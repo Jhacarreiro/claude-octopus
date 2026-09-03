@@ -97,6 +97,28 @@ is_available() {
     _contains "${AVAILABLE_CLI[*]:-}" "$p"
 }
 
+# review.sh validates identity, capability, and policy. This caller supplies
+# the authoritative live admission decision produced by check-providers.sh.
+review_single_provider_is_available() {
+    local canonical="$1" executor="$2" status_provider="$1" available_executor="$2"
+    case "$canonical" in
+        claude)
+            # Claude is the host runtime and is intentionally absent from
+            # AVAILABLE_CLI/check-providers admission.
+            return 0
+            ;;
+        atlascloud)
+            status_provider=atlascloud
+            available_executor=atlascloud-agent
+            ;;
+        openai-tools|openai-compatible-agent)
+            status_provider=openai-compatible
+            available_executor=openai-compatible
+            ;;
+    esac
+    provider_status_is_available "$status_provider" && is_available "$available_executor"
+}
+
 # Pick first available provider from a preference list, with fallback
 pick_provider() {
     local fallback="${1}"
@@ -330,14 +352,7 @@ build_council_order() {
 }
 
 build_review_fleet() {
-    local order
     review_validate_configured_seat_overrides || return $?
-    order="$(build_council_order)" || return $?
-    # shellcheck disable=SC2206
-    local providers=($order)
-    local count=${#providers[@]}
-    [[ $count -gt 0 ]] || return 0
-
     local roles=(
         implementation-logic-reviewer
         implementation-security-reviewer
@@ -359,6 +374,23 @@ build_review_fleet() {
         "Challenge disputed findings and test competing interpretations in: $PROMPT"
         "Synthesize the verified review findings for: $PROMPT"
     )
+
+    local i provider
+    if [[ -n "${OCTOPUS_REVIEW_SINGLE_PROVIDER:-}" ]]; then
+        provider="$(review_single_provider_override)" || return $?
+        for ((i=0; i<8; i++)); do
+            emit "$provider" "${labels[$i]}" "${prompts[$i]}"
+        done
+        return 0
+    fi
+
+    local order
+    order="$(build_council_order)" || return $?
+    # shellcheck disable=SC2206
+    local providers=($order)
+    local count=${#providers[@]}
+    [[ $count -gt 0 ]] || return 0
+
     local verifier_default="${providers[0]}" synthesis_default="${providers[0]}"
     if is_available codex && octo_provider_allowed codex; then
         verifier_default=codex
@@ -377,7 +409,6 @@ build_review_fleet() {
         "$verifier_default"
         "$synthesis_default"
     )
-    local i provider
     for ((i=0; i<8; i++)); do
         provider="$(review_agent_for_seat "${defaults[$i]}" "${roles[$i]}")" || return $?
         emit "$provider" "${labels[$i]}" "${prompts[$i]}"

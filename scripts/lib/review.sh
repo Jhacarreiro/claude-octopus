@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 _agent_spec_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_agent_spec_lib_dir}/agent-spec.sh" 2>/dev/null || true
+source "${_agent_spec_lib_dir}/provider-allowlist.sh" 2>/dev/null || true
 # Claude Octopus — Code Review Pipeline
 # Extracted from orchestrate.sh
 # Source-safe: no main execution block.
@@ -157,17 +158,66 @@ _review_fleet_from_config() {
 # Returns a newline-separated list of "agent_type:role:specialty" triples.
 # NOTE: Uses command -v for provider detection — safe with set -euo pipefail.
 review_single_provider_override() {
-    local provider="${OCTOPUS_REVIEW_SINGLE_PROVIDER:-}"
+    local provider="${OCTOPUS_REVIEW_SINGLE_PROVIDER:-}" canonical="" executor=""
     [[ -n "$provider" ]] || return 1
     [[ "$provider" =~ ^[A-Za-z0-9_-]+$ ]] || {
         log ERROR "Invalid OCTOPUS_REVIEW_SINGLE_PROVIDER: $provider"
         return 2
     }
-    if [[ -n "${AVAILABLE_AGENTS:-}" && " $AVAILABLE_AGENTS " != *" $provider "* ]]; then
+
+    if ! declare -f octo_provider_canonical >/dev/null 2>&1 ||
+       ! canonical="$(octo_provider_canonical "$provider" 2>/dev/null)"; then
         log ERROR "Unknown OCTOPUS_REVIEW_SINGLE_PROVIDER: $provider"
         return 2
     fi
-    printf '%s\n' "$provider"
+    if ! declare -f octo_provider_has_capability >/dev/null 2>&1 ||
+       ! octo_provider_has_capability "$canonical" dispatch; then
+        log ERROR "OCTOPUS_REVIEW_SINGLE_PROVIDER '$canonical' does not support dispatch"
+        return 2
+    fi
+    if ! declare -f octo_provider_allowed >/dev/null 2>&1 ||
+       ! octo_provider_allowed "$canonical"; then
+        log ERROR "OCTOPUS_REVIEW_SINGLE_PROVIDER '$canonical' is not admitted by the active allowlist"
+        return 2
+    fi
+
+    case "$canonical" in
+        atlascloud) executor="atlascloud-agent" ;;
+        *) executor="$canonical" ;;
+    esac
+
+    if declare -f review_single_provider_is_available >/dev/null 2>&1; then
+        if ! review_single_provider_is_available "$canonical" "$executor"; then
+            log ERROR "OCTOPUS_REVIEW_SINGLE_PROVIDER '$canonical' is unavailable"
+            return 2
+        fi
+    elif [[ -n "${AVAILABLE_AGENTS:-}" ]]; then
+        local candidate candidate_canonical available=false had_noglob=false
+        local -a available_candidates
+        local IFS=$' \t\n'
+        case "$-" in *f*) had_noglob=true ;; esac
+        set -f
+        # shellcheck disable=SC2206 # Deliberate trusted inventory split; globbing is disabled.
+        available_candidates=($AVAILABLE_AGENTS)
+        [[ "$had_noglob" == true ]] || set +f
+        for candidate in "${available_candidates[@]}"; do
+            candidate="${candidate%%:*}"
+            candidate_canonical="$(octo_provider_canonical "$candidate" 2>/dev/null || true)"
+            if [[ "$candidate" == "$executor" || "$candidate_canonical" == "$canonical" ]]; then
+                available=true
+                break
+            fi
+        done
+        if [[ "$available" != true ]]; then
+            log ERROR "OCTOPUS_REVIEW_SINGLE_PROVIDER '$canonical' is unavailable"
+            return 2
+        fi
+    else
+        log ERROR "OCTOPUS_REVIEW_SINGLE_PROVIDER '$canonical' cannot be validated without provider availability data"
+        return 2
+    fi
+
+    printf '%s\n' "$executor"
 }
 
 review_seat_override_env_name() {
@@ -756,21 +806,37 @@ review_provider_key_from_agent_type() {
     esac
 }
 
+# Versioned provider records represent one exact dispatch seat. Preserve the
+# registry ID instead of applying the broad legacy reporting-family mapping.
+review_exact_provider_key_from_agent_type() {
+    local executor="${1%%:*}" canonical=""
+    canonical="$(octo_provider_canonical "$executor" 2>/dev/null || true)"
+    if [[ -n "$canonical" ]]; then
+        printf '%s\n' "$canonical"
+        return 0
+    fi
+    case "$executor" in
+        openai-compatible|openai-tools|openai-compatible-agent) printf '%s\n' "$executor" ;;
+        *) review_provider_key_from_agent_type "$executor" ;;
+    esac
+}
+
 # Versioned records carry provider and model as separate fields. The marker
 # avoids confusing a model named "ok" or "fallback" with a legacy status.
 # The report parser still accepts provider|status|detail records.
 review_append_provider_status() {
     local status_file="$1" agent_type="$2" role="$3" status="$4" detail="$5"
     local provider model=""
-    provider="$(review_provider_key_from_agent_type "$agent_type")"
     model="$(octo_agent_spec_explicit_model "$agent_type" 2>/dev/null || true)"
     if [[ -z "$model" ]] && declare -f get_agent_model >/dev/null 2>&1; then
         model="$(get_agent_model "$agent_type" review "$role" 2>/dev/null || true)"
     fi
 
     if [[ -n "$model" ]]; then
+        provider="$(review_exact_provider_key_from_agent_type "$agent_type")"
         printf 'v2|%s|%s|%s|%s\n' "$provider" "$model" "$status" "$detail" >> "$status_file"
     else
+        provider="$(review_provider_key_from_agent_type "$agent_type")"
         printf '%s|%s|%s\n' "$provider" "$status" "$detail" >> "$status_file"
     fi
 }
@@ -778,8 +844,12 @@ review_append_provider_status() {
 review_parse_provider_status_record() {
     local record="$1"
     octo_parse_provider_status_record "$record" || return $?
-    REVIEW_STATUS_PROVIDER="$(review_provider_key_from_agent_type "$OCTO_PROVIDER_STATUS_PROVIDER")"
     REVIEW_STATUS_MODEL="$OCTO_PROVIDER_STATUS_MODEL"
+    if [[ -n "$REVIEW_STATUS_MODEL" ]]; then
+        REVIEW_STATUS_PROVIDER="$(review_exact_provider_key_from_agent_type "$OCTO_PROVIDER_STATUS_PROVIDER")"
+    else
+        REVIEW_STATUS_PROVIDER="$(review_provider_key_from_agent_type "$OCTO_PROVIDER_STATUS_PROVIDER")"
+    fi
     REVIEW_STATUS_VALUE="$OCTO_PROVIDER_STATUS_VALUE"
     REVIEW_STATUS_DETAIL="$OCTO_PROVIDER_STATUS_DETAIL"
 }
@@ -1162,7 +1232,7 @@ print_provider_report() {
                 agy) agy_model_status=true ;;
                 claude) claude_model_status=true ;;
                 perplexity) perplexity_model_status=true ;;
-                openai-compatible) compatible_model_status=true ;;
+                openai-compatible|openai-tools|openai-compatible-agent) compatible_model_status=true ;;
                 copilot) copilot_model_status=true ;;
                 commandcode) commandcode_model_status=true ;;
             esac

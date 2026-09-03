@@ -316,6 +316,41 @@ else
     test_fail "expected env-prefixed claude-sdk-exec shim path to be accepted"
 fi
 
+test_case "validate_agent_command allows the exact Fable no-retry SDK command"
+if validate_agent_command "env OCTOPUS_CLAUDE_SDK_MODEL=claude-fable-5 OCTOPUS_FABLE5_NO_RETRY=1 $PROJECT_ROOT/scripts/helpers/claude-sdk-exec.sh"; then
+    test_pass
+else
+    test_fail "expected exact Fable no-retry command to be accepted"
+fi
+
+test_case "validate_agent_command rejects no-retry on a non-Fable SDK model"
+if validate_agent_command "env OCTOPUS_CLAUDE_SDK_MODEL=claude-opus-5 OCTOPUS_FABLE5_NO_RETRY=1 $PROJECT_ROOT/scripts/helpers/claude-sdk-exec.sh" >/dev/null 2>&1; then
+    test_fail "expected non-Fable no-retry assignment to be rejected"
+else
+    test_pass
+fi
+
+test_case "validate_agent_command rejects a forged Fable no-retry value"
+if validate_agent_command "env OCTOPUS_CLAUDE_SDK_MODEL=claude-fable-5 OCTOPUS_FABLE5_NO_RETRY=0 $PROJECT_ROOT/scripts/helpers/claude-sdk-exec.sh" >/dev/null 2>&1; then
+    test_fail "expected forged no-retry value to be rejected"
+else
+    test_pass
+fi
+
+test_case "validate_agent_command rejects reordered Fable SDK assignments"
+if validate_agent_command "env OCTOPUS_FABLE5_NO_RETRY=1 OCTOPUS_CLAUDE_SDK_MODEL=claude-fable-5 $PROJECT_ROOT/scripts/helpers/claude-sdk-exec.sh" >/dev/null 2>&1; then
+    test_fail "expected reordered SDK assignments to be rejected"
+else
+    test_pass
+fi
+
+test_case "validate_agent_command rejects an executable injected before the Fable SDK shim"
+if validate_agent_command "env OCTOPUS_CLAUDE_SDK_MODEL=claude-fable-5 OCTOPUS_FABLE5_NO_RETRY=1 echo pwned $PROJECT_ROOT/scripts/helpers/claude-sdk-exec.sh" >/dev/null 2>&1; then
+    test_fail "expected injected executable before the SDK shim to be rejected"
+else
+    test_pass
+fi
+
 test_case "validate_agent_command rejects embedded claude-sdk-exec shim path"
 if validate_agent_command "echo $PROJECT_ROOT/scripts/helpers/claude-sdk-exec.sh" >/dev/null 2>&1; then
     test_fail "expected embedded claude-sdk-exec shim path to be rejected"

@@ -228,6 +228,30 @@ _validate_env_prefixed_shim_command() {
     return 0
 }
 
+_validate_claude_sdk_env_command() {
+    local cmd="$1" shim_suffix="/scripts/helpers/claude-sdk-exec.sh"
+    local -a parts
+    local model=""
+    [[ "$cmd" != *$'\n'* && "$cmd" != *$'\r'* ]] || return 1
+    read -r -a parts <<< "$cmd"
+    [[ "${parts[0]:-}" == env ]] || return 1
+    [[ "${parts[1]:-}" == OCTOPUS_CLAUDE_SDK_MODEL=* ]] || return 1
+    model="${parts[1]#OCTOPUS_CLAUDE_SDK_MODEL=}"
+    _octopus_is_safe_openai_compatible_value "$model" || return 1
+
+    case "${#parts[@]}" in
+        3)
+            [[ "${parts[2]}" == *"$shim_suffix" ]]
+            ;;
+        4)
+            [[ "$model" == "${FABLE5_MODEL_ID:-claude-fable-5}" ]] || return 1
+            [[ "${parts[2]}" == OCTOPUS_FABLE5_NO_RETRY=1 ]] || return 1
+            [[ "${parts[3]}" == *"$shim_suffix" ]]
+            ;;
+        *) return 1 ;;
+    esac
+}
+
 _validate_openai_compatible_agent_command() {
     local cmd="$1"
     local -a parts
@@ -431,7 +455,7 @@ validate_agent_command() {
         if _validate_env_prefixed_shim_command "$cmd" "OCTOPUS_COPILOT_MODEL" "/scripts/helpers/copilot-exec.sh"; then
             return 0
         fi
-        if _validate_env_prefixed_shim_command "$cmd" "OCTOPUS_CLAUDE_SDK_MODEL" "/scripts/helpers/claude-sdk-exec.sh"; then
+        if _validate_claude_sdk_env_command "$cmd"; then
             return 0
         fi
         if _validate_env_prefixed_shim_command "$cmd" "OCTOPUS_AGY_MODEL" "/scripts/helpers/agy-exec.sh"; then

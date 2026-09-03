@@ -1159,13 +1159,11 @@ review_local_synthesis_json() {
     fi
 }
 
-# review_collect_working_tree_diff: collects tracked and untracked working-tree changes.
-review_collect_working_tree_diff() {
+# review_collect_untracked_diff: collects untracked, non-ignored files as unified diffs.
+review_collect_untracked_diff() {
     local diff_content=""
     local path=""
     local file_diff=""
-    diff_content=$(git diff 2>/dev/null || true)
-
     while IFS= read -r -d '' path; do
         file_diff=$(git diff --no-index -- /dev/null "$path" 2>/dev/null || true)
         if [[ -n "$file_diff" ]]; then
@@ -1173,13 +1171,39 @@ review_collect_working_tree_diff() {
             diff_content+="$file_diff"
         fi
     done < <(git ls-files --others --exclude-standard -z 2>/dev/null)
+    printf '%s' "$diff_content"
+}
 
+# review_collect_working_tree_diff: collects unstaged tracked changes plus untracked files.
+review_collect_working_tree_diff() {
+    local diff_content=""
+    local untracked_content=""
+    diff_content=$(git diff 2>/dev/null || true)
+    untracked_content=$(review_collect_untracked_diff)
+    if [[ -n "$untracked_content" ]]; then
+        [[ -n "$diff_content" ]] && diff_content+=$'\n'
+        diff_content+="$untracked_content"
+    fi
+    printf '%s' "$diff_content"
+}
+
+# review_collect_all_changes_diff: collects the effective tracked worktree against HEAD
+# plus untracked files. Unlike working-tree, this includes staged-only changes too.
+review_collect_all_changes_diff() {
+    local diff_content=""
+    local untracked_content=""
+    diff_content=$(git diff HEAD 2>/dev/null || true)
+    untracked_content=$(review_collect_untracked_diff)
+    if [[ -n "$untracked_content" ]]; then
+        [[ -n "$diff_content" ]] && diff_content+=$'\n'
+        diff_content+="$untracked_content"
+    fi
     printf '%s' "$diff_content"
 }
 
 # review_collect_diff: resolves a review target to unified diff content.
-# Targets can be built-in scopes (staged, working-tree), a PR number, a git
-# pathspec, or an already-generated .diff/.patch file.
+# Targets can be built-in scopes (staged, working-tree, all-changes), a PR number,
+# a git pathspec, or an already-generated .diff/.patch file.
 review_collect_diff() {
     local target="$1"
     local diff_content=""
@@ -1187,6 +1211,7 @@ review_collect_diff() {
     case "$target" in
         staged)       diff_content=$(git diff --cached 2>/dev/null || true) ;;
         working-tree) diff_content=$(review_collect_working_tree_diff) ;;
+        all-changes)  diff_content=$(review_collect_all_changes_diff) ;;
         [0-9]*)       diff_content=$(gh pr diff "$target" 2>/dev/null || true) ;;
         *)
             if [[ -f "$target" ]] && [[ -r "$target" ]] && head -n 20 "$target" 2>/dev/null | grep -Ec "^(diff --git|--- |\+\+\+ |@@ )" >/dev/null; then

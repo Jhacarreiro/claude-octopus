@@ -193,6 +193,9 @@ fi
 
 assert_contains "$WORKFLOWS" "tangle_build_develop_review_context" "tangle builds review context"
 assert_contains "$WORKFLOWS" "tangle_run_context_code_review" "tangle runs contextual code review"
+assert_contains "$WORKFLOWS" "tangle_build_review_diff_snapshot" "tangle snapshots complete review input"
+assert_contains "$WORKFLOWS" "all-changes" "tangle snapshot includes staged and unstaged changes"
+assert_contains "$WORKFLOWS" "regenerating immutable review snapshot once" "dirty no-diff review retries exactly once"
 assert_contains "$WORKFLOWS" "contextFile" "review profile passes contextFile"
 assert_contains "$WORKFLOWS" ".claude-octopus/results" "review context is stored inside workspace"
 assert_contains "$WORKFLOWS" "plan-conformance" "review focus includes plan conformance"
@@ -214,6 +217,28 @@ assert_contains "$HELP" "Contextual code review" "develop help documents context
 assert_contains "$HELP" "OCTOPUS_TANGLE_REVIEW_CORRECTION_MODE" "develop help documents bounded mode"
 assert_contains "$HELP" "OCTOPUS_TANGLE_CORRECTION_STALL_WINDOW" "develop help documents stall window"
 assert_contains "$WORKFLOWS" "OCTOPUS_INK_REVIEW_TIMEOUT:-0" "ink review has no wall timeout by default"
+
+test_case "review snapshot captures staged, unstaged, and untracked changes"
+workspace=$(make_test_dir workspace-review-snapshot)
+git -C "$workspace" init -q
+git -C "$workspace" config user.email test@example.com
+git -C "$workspace" config user.name "Octopus Test"
+printf 'base-a\n' > "$workspace/a.txt"
+printf 'base-b\n' > "$workspace/b.txt"
+git -C "$workspace" add a.txt b.txt
+git -C "$workspace" commit -q -m init
+printf 'staged-a\n' > "$workspace/a.txt"
+git -C "$workspace" add a.txt
+printf 'unstaged-b\n' > "$workspace/b.txt"
+printf 'untracked-c\n' > "$workspace/c.txt"
+snapshot_results=$(make_test_dir snapshot-results)
+if snapshot=$(cd "$workspace" && RESULTS_DIR="$snapshot_results" tangle_build_review_diff_snapshot "test" "initial") &&
+   [[ -f "$snapshot" ]] && [[ ! -w "$snapshot" ]] &&
+   grep -q 'a.txt' "$snapshot" && grep -q 'b.txt' "$snapshot" && grep -q 'c.txt' "$snapshot"; then
+    test_pass
+else
+    test_fail "review snapshot must immutably cover staged, unstaged, and untracked changes"
+fi
 
 test_case "generated review context stays inside the workspace"
 workspace=$(make_test_dir workspace-context)

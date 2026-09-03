@@ -241,6 +241,34 @@ assert_contains "$(cat "$TMPDIR_TEST/working-tree.diff")" \
 assert_not_contains "$(cat "$TMPDIR_TEST/working-tree.diff")" \
   "noise.ignored" "review_collect_diff: working-tree excludes ignored untracked files"
 
+# ── all-changes diff includes staged, unstaged, and untracked files ───────────
+
+ALL_CHANGES_REPO="$TMPDIR_TEST/review-all-changes"
+mkdir -p "$ALL_CHANGES_REPO"
+(
+  cd "$ALL_CHANGES_REPO"
+  git init -q
+  git config user.email test@example.com
+  git config user.name "Octopus Test"
+  printf 'base staged\n' > staged.txt
+  printf 'base unstaged\n' > unstaged.txt
+  git add staged.txt unstaged.txt
+  git commit -q -m init
+  printf 'changed staged\n' > staged.txt
+  git add staged.txt
+  printf 'changed unstaged\n' > unstaged.txt
+  printf 'brand new\n' > untracked.txt
+  review_collect_diff all-changes > "$TMPDIR_TEST/all-changes.diff"
+)
+assert_contains "$(cat "$TMPDIR_TEST/all-changes.diff")" \
+  "staged.txt" "review_collect_diff: all-changes includes staged-only changes"
+assert_contains "$(cat "$TMPDIR_TEST/all-changes.diff")" \
+  "unstaged.txt" "review_collect_diff: all-changes includes unstaged changes"
+assert_contains "$(cat "$TMPDIR_TEST/all-changes.diff")" \
+  "untracked.txt" "review_collect_diff: all-changes includes untracked files"
+assert_contains "$(cat "$TMPDIR_TEST/all-changes.diff")" \
+  "\+changed staged" "review_collect_diff: all-changes includes staged content"
+
 # ── MCP schema ───────────────────────────────────────────────────────────────
 
 MCP_INDEX="$PROJECT_ROOT/mcp-server/src/index.ts"

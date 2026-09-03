@@ -2449,11 +2449,65 @@ tangle_build_develop_review_context() {
 
 TANGLE_REVIEW_FINDINGS_FILE=""
 
+# Materialize exactly what Tangle intends to review. The snapshot is immutable and
+# independent of the transient Git index state, so staged-only changes cannot vanish.
+tangle_build_review_diff_snapshot() {
+    local task_group="$1"
+    local round_label="${2:-initial}"
+    local results_dir="${RESULTS_DIR:-${HOME}/.claude-octopus/results}"
+    local snapshot_name snapshot_path snapshot_tmp status_text hash_value
+
+    if [[ -z "$task_group" || "$task_group" == "." || "$task_group" == ".." ||
+          "$task_group" == *[![:alnum:]_.-]* || "$task_group" == *..* ||
+          -z "$round_label" || "$round_label" == "." || "$round_label" == ".." ||
+          "$round_label" == *[![:alnum:]_.-]* || "$round_label" == *..* ]]; then
+        log ERROR "tangle review snapshot labels contain unsafe path characters"
+        return 1
+    fi
+
+    mkdir -p "$results_dir" || return 1
+    snapshot_name="tangle-review-input-${task_group}-${round_label}-$(date +%s)-$$.diff"
+    snapshot_path="${results_dir}/${snapshot_name}"
+    snapshot_tmp="${snapshot_path}.tmp.$RANDOM"
+    if [[ -L "$results_dir" || -e "$snapshot_path" || -L "$snapshot_path" || -e "$snapshot_tmp" || -L "$snapshot_tmp" ]]; then
+        log ERROR "tangle review snapshot path is unsafe"
+        return 1
+    fi
+
+    if ! review_collect_diff all-changes > "$snapshot_tmp"; then
+        rm -f "$snapshot_tmp" 2>/dev/null || true
+        return 1
+    fi
+    status_text=$(git status --porcelain --untracked-files=all 2>/dev/null || true)
+    if [[ ! -s "$snapshot_tmp" && -n "$status_text" ]]; then
+        # One bounded regeneration handles transient index/worktree races. If the
+        # invariant still fails, stop instead of asking reviewers to inspect nothing.
+        review_collect_diff all-changes > "$snapshot_tmp" 2>/dev/null || true
+        if [[ ! -s "$snapshot_tmp" ]]; then
+            rm -f "$snapshot_tmp" 2>/dev/null || true
+            log ERROR "tangle review snapshot invariant failed: git status is dirty but all-changes diff is empty"
+            return 1
+        fi
+    fi
+    if [[ ! -s "$snapshot_tmp" ]]; then
+        rm -f "$snapshot_tmp" 2>/dev/null || true
+        log WARN "No changes found to review"
+        return 2
+    fi
+
+    mv -f "$snapshot_tmp" "$snapshot_path" || { rm -f "$snapshot_tmp" 2>/dev/null || true; return 1; }
+    chmod 0444 "$snapshot_path" 2>/dev/null || true
+    hash_value=$(sha256sum "$snapshot_path" 2>/dev/null | awk '{print $1}' || true)
+    log INFO "Tangle review snapshot: ${snapshot_path}${hash_value:+ (sha256=${hash_value})}"
+    printf '%s\n' "$snapshot_path"
+}
+
 tangle_run_context_code_review() {
     local task_group="$1"
     local context_file="$2"
     local round_label="${3:-initial}"
-    local marker findings_file review_profile review_rc
+    local marker findings_file review_profile review_rc review_target review_log retry_target
+    local explicit_review_target="${OCTOPUS_TANGLE_REVIEW_TARGET:-}"
     TANGLE_REVIEW_FINDINGS_FILE=""
 
     if ! declare -F review_run >/dev/null 2>&1; then
@@ -2467,8 +2521,14 @@ tangle_run_context_code_review() {
     _marker_cleanup_trap=$(trap -p RETURN || true)
     trap 'rm -f "${marker:-}" 2>/dev/null || true' RETURN
 
+    if [[ -n "$explicit_review_target" ]]; then
+        review_target="$explicit_review_target"
+    else
+        review_target=$(tangle_build_review_diff_snapshot "$task_group" "$round_label") || return $?
+    fi
+
     review_profile=$(jq -n \
-        --arg target "${OCTOPUS_TANGLE_REVIEW_TARGET:-working-tree}" \
+        --arg target "$review_target" \
         --arg contextFile "$context_file" \
         --arg contextLabel "Octopus tangle develop review context (${round_label})" \
         --arg provenance "octopus-tangle" \
@@ -2478,8 +2538,24 @@ tangle_run_context_code_review() {
         '{target:$target, contextFile:$contextFile, contextLabel:$contextLabel, focus:["correctness","security","architecture","tdd","plan-conformance"], provenance:$provenance, autonomy:$autonomy, publish:$publish, history:$history}')
 
     log INFO "Step 4: Contextual code review (${round_label})..."
-    review_run "$review_profile"
+    review_log=$(mktemp "${TMPDIR:-/tmp}/octopus-tangle-review-output.XXXXXX")
+    review_run "$review_profile" > >(tee "$review_log") 2>&1
     review_rc=$?
+
+    if [[ "$review_rc" -ne 0 && -z "$explicit_review_target" ]] &&
+       grep -qi "No changes found to review" "$review_log" 2>/dev/null &&
+       [[ -n "$(git status --porcelain --untracked-files=all 2>/dev/null || true)" ]]; then
+        log WARN "Contextual reviewer reported no changes despite a dirty repository; regenerating immutable review snapshot once"
+        retry_target=$(tangle_build_review_diff_snapshot "$task_group" "${round_label}-retry1") || {
+            rm -f "$review_log" 2>/dev/null || true
+            return 1
+        }
+        review_profile=$(printf '%s' "$review_profile" | jq -c --arg target "$retry_target" '.target=$target')
+        touch "$marker"
+        : > "$review_log"
+        review_run "$review_profile" > >(tee "$review_log") 2>&1
+        review_rc=$?
+    fi
 
     findings_file=""
     local _findings_candidate _findings_mtime _best_findings_mtime=0
@@ -2493,7 +2569,7 @@ tangle_run_context_code_review() {
             findings_file="$_findings_candidate"
         fi
     done < <(find "${RESULTS_DIR:-${HOME}/.claude-octopus/results}" -maxdepth 1 -type f -name 'review-findings-*.json' 2>/dev/null || true)
-    rm -f "$marker" 2>/dev/null || true
+    rm -f "$marker" "$review_log" 2>/dev/null || true
     trap - RETURN
     if [[ -n "$_marker_cleanup_trap" ]]; then
         eval "$_marker_cleanup_trap"

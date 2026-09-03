@@ -99,7 +99,10 @@ fi
 
 test_case "single-provider override keeps global precedence"
 OCTOPUS_REVIEW_SINGLE_PROVIDER=codex
-if [[ "$(AVAILABLE_AGENTS=codex review_agent_for_seat claude-sonnet implementation-synthesizer)" == 'codex' ]]; then
+if [[ "$({
+  review_single_provider_is_available() { [[ "$1" == codex ]]; }
+  review_agent_for_seat claude-sonnet implementation-synthesizer
+})" == 'codex' ]]; then
   test_pass
 else
   test_fail "single-provider override did not take precedence"

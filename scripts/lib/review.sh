@@ -191,24 +191,12 @@ review_single_provider_override() {
             log ERROR "OCTOPUS_REVIEW_SINGLE_PROVIDER '$canonical' is unavailable"
             return 2
         fi
-    elif [[ -n "${AVAILABLE_AGENTS:-}" ]]; then
-        local candidate candidate_canonical available=false had_noglob=false
-        local -a available_candidates
-        local IFS=$' \t\n'
-        case "$-" in *f*) had_noglob=true ;; esac
-        set -f
-        # shellcheck disable=SC2206 # Deliberate trusted inventory split; globbing is disabled.
-        available_candidates=($AVAILABLE_AGENTS)
-        [[ "$had_noglob" == true ]] || set +f
-        for candidate in "${available_candidates[@]}"; do
-            candidate="${candidate%%:*}"
-            candidate_canonical="$(octo_provider_canonical "$candidate" 2>/dev/null || true)"
-            if [[ "$candidate" == "$executor" || "$candidate_canonical" == "$canonical" ]]; then
-                available=true
-                break
-            fi
-        done
-        if [[ "$available" != true ]]; then
+    elif [[ "$canonical" == claude ]]; then
+        # Claude is the host runtime and intentionally absent from external
+        # provider admission inventories.
+        :
+    elif declare -f is_agent_available_v2 >/dev/null 2>&1; then
+        if ! is_agent_available_v2 "$executor"; then
             log ERROR "OCTOPUS_REVIEW_SINGLE_PROVIDER '$canonical' is unavailable"
             return 2
         fi

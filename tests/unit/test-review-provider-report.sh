@@ -108,8 +108,14 @@ else
 fi
 
 test_case "single-provider override keeps every review phase on the requested provider"
-override_fleet="$(OCTO_ALLOWED_PROVIDERS=openai-compatible-agent AVAILABLE_AGENTS=openai-compatible-agent OCTOPUS_REVIEW_SINGLE_PROVIDER=openai-compatible-agent build_review_fleet)"
-override_phase="$(OCTO_ALLOWED_PROVIDERS=openai-compatible-agent AVAILABLE_AGENTS=openai-compatible-agent OCTOPUS_REVIEW_SINGLE_PROVIDER=openai-compatible-agent review_phase_provider claude-sonnet)"
+override_fleet="$({
+    review_single_provider_is_available() { [[ "$1" == openai-compatible-agent ]]; }
+    OCTO_ALLOWED_PROVIDERS=openai-compatible-agent OCTOPUS_REVIEW_SINGLE_PROVIDER=openai-compatible-agent build_review_fleet
+})"
+override_phase="$({
+    review_single_provider_is_available() { [[ "$1" == openai-compatible-agent ]]; }
+    OCTO_ALLOWED_PROVIDERS=openai-compatible-agent OCTOPUS_REVIEW_SINGLE_PROVIDER=openai-compatible-agent review_phase_provider claude-sonnet
+})"
 debate_block="$(sed -n '/# ── Debate gate/,/# ── ROUND 3/p' "$PROJECT_ROOT/scripts/lib/review.sh")"
 if [[ "$(wc -l <<< "$override_fleet" | tr -d ' ')" -eq 1 ]] &&
    [[ "$override_fleet" == openai-compatible-agent:general-reviewer:* ]] &&
@@ -129,6 +135,34 @@ if [[ "$override_rc" -ne 0 && -z "$override_output" ]]; then
     test_pass
 else
     test_fail "override was accepted without an availability authority: rc=$override_rc output=[$override_output]"
+fi
+
+test_case "static provider inventory is not live availability authority"
+override_rc=0
+override_output="$({
+    is_agent_available_v2() { return 1; }
+    AVAILABLE_AGENTS=perplexity \
+        OCTO_ALLOWED_PROVIDERS=perplexity \
+        OCTOPUS_REVIEW_SINGLE_PROVIDER=perplexity \
+        review_single_provider_override 2>/dev/null
+})" || override_rc=$?
+if [[ "$override_rc" -ne 0 && -z "$override_output" ]]; then
+    test_pass
+else
+    test_fail "static inventory admitted an unavailable provider: rc=$override_rc output=[$override_output]"
+fi
+
+test_case "shared live resolver may admit a non-host single provider"
+override_output="$({
+    is_agent_available_v2() { [[ "$1" == perplexity ]]; }
+    OCTO_ALLOWED_PROVIDERS=perplexity \
+        OCTOPUS_REVIEW_SINGLE_PROVIDER=perplexity \
+        review_single_provider_override 2>/dev/null
+})"
+if [[ "$override_output" == perplexity ]]; then
+    test_pass
+else
+    test_fail "live resolver did not admit the available provider: output=[$override_output]"
 fi
 
 test_case "review provider mapping keeps claude-sdk before the broad Claude glob"

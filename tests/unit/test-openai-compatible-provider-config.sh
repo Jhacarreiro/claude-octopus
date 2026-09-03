@@ -60,6 +60,40 @@ else
   test_pass
 fi
 
+test_case "credentialed public HTTP endpoint is rejected before helper launch"
+write_config <<'JSON'
+{"providers":{"openai-compatible-agent":{"default":"deepseek-ai/DeepSeek-V4-Pro","base_url":"http://api.example.com/v1","api_key_env":"DEEPSEEK_API_KEY"}}}
+JSON
+export DEEPSEEK_API_KEY="test-secret"
+if get_agent_command openai-compatible-agent tangle implementer >/dev/null 2>&1; then
+  test_fail "credentialed public HTTP endpoint was accepted"
+else
+  test_pass
+fi
+
+test_case "loopback HTTP endpoints remain available for local development"
+loopback_ok=true
+for loopback_url in http://localhost:8000/v1 http://127.0.0.1:8000/v1; do
+  printf '%s\n' '{"providers":{"openai-compatible-agent":{"default":"deepseek-ai/DeepSeek-V4-Pro","base_url":"'"$loopback_url"'","api_key_env":"DEEPSEEK_API_KEY"}}}' > "$HOME/.claude-octopus/config/providers.json"
+  cmd=$(get_agent_command openai-compatible-agent tangle implementer)
+  [[ "$cmd" == *"--base-url $loopback_url"* ]] || loopback_ok=false
+done
+if [[ "$loopback_ok" == true ]]; then
+  test_pass
+else
+  test_fail "a loopback OpenAI-compatible endpoint was rejected"
+fi
+
+test_case "lookalike loopback authority cannot bypass HTTPS"
+write_config <<'JSON'
+{"providers":{"openai-compatible-agent":{"default":"deepseek-ai/DeepSeek-V4-Pro","base_url":"http://localhost:8000@api.example.com/v1","api_key_env":"DEEPSEEK_API_KEY"}}}
+JSON
+if get_agent_command openai-compatible-agent tangle implementer >/dev/null 2>&1; then
+  test_fail "lookalike loopback authority was accepted"
+else
+  test_pass
+fi
+
 test_case "legacy environment fallback remains supported"
 write_config <<'JSON'
 {"providers":{"openai-compatible-agent":{"default":"deepseek-ai/DeepSeek-V4-Pro"}}}

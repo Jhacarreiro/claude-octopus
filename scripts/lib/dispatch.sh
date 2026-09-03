@@ -91,6 +91,11 @@ _octopus_openai_compatible_runtime_config() {
         log ERROR "Invalid OpenAI-compatible base_url for provider '$provider'"
         return 1
     fi
+    if [[ "$base_url" == http://* ]] &&
+       [[ ! "$base_url" =~ ^http://(localhost|127\.0\.0\.1)(:[0-9]+)?(/|$) ]]; then
+        log ERROR "OpenAI-compatible provider '$config_provider' requires HTTPS for non-loopback endpoints"
+        return 1
+    fi
     if ! _octopus_is_safe_env_var_name "$api_key_env"; then
         log ERROR "Invalid api_key_env for OpenAI-compatible provider '$provider': '$api_key_env'"
         return 1

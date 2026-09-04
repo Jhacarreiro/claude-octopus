@@ -34,6 +34,18 @@ else
     fi
 fi
 
+test_case "parent-owned result channel cannot overlap the worktree"
+if ! octopus_tangle_boundary_paths_are_disjoint \
+    "$BOUNDARY_WORKTREE" "$BOUNDARY_WORKTREE/results" && \
+   ! octopus_tangle_boundary_paths_are_disjoint \
+    "$BOUNDARY_WORKTREE" "$BOUNDARY_ROOT" && \
+   octopus_tangle_boundary_paths_are_disjoint \
+    "$BOUNDARY_WORKTREE" "$BOUNDARY_RESULTS"; then
+    test_pass
+else
+    test_fail "overlapping worktree/result authority paths were accepted"
+fi
+
 if octopus_tangle_execution_boundary_probe; then
     test_case "boundary leaves only the worktree writable"
     cmd_array=(bash -c 'touch "$1" 2>/dev/null || true; touch "$2/inside.txt"; touch "$3/forged.txt" 2>/dev/null || true' _ "$BOUNDARY_OUTSIDE" "$BOUNDARY_WORKTREE" "$BOUNDARY_RESULTS")

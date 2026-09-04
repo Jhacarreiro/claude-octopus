@@ -103,7 +103,19 @@ test_multi_agent_parallel_execution() {
     # Check probe function code directly to avoid dry-run hang
     local probe_code=""
     if [[ -f "$ALL_SRC" ]]; then
-        probe_code=$(grep -A 80 "probe_discover()" "$ALL_SRC" 2>/dev/null) || probe_code=""
+        # Search for the function definition rather than the explanatory
+        # probe_discover() references that precede it in the concatenated
+        # source. The implementation has grown beyond a fixed line window.
+        probe_code=$(awk '
+            /^[[:space:]]*probe_discover\(\)[[:space:]]*\{/ { capture=1; depth=0 }
+            capture {
+                print
+                opens=gsub(/\{/, "{")
+                closes=gsub(/\}/, "}")
+                depth += opens - closes
+                if (depth == 0) exit
+            }
+        ' "$ALL_SRC") || probe_code=""
     fi
 
     ((TESTS_RUN++)) || true
@@ -181,7 +193,16 @@ test_multi_perspective_research() {
     # Check probe function for multi-perspective logic
     local probe_code=""
     if [[ -f "$ALL_SRC" ]]; then
-        probe_code=$(grep -A 100 "probe_discover()" "$ALL_SRC" 2>/dev/null) || probe_code=""
+        probe_code=$(awk '
+            /^[[:space:]]*probe_discover\(\)[[:space:]]*\{/ { capture=1; depth=0 }
+            capture {
+                print
+                opens=gsub(/\{/, "{")
+                closes=gsub(/\}/, "}")
+                depth += opens - closes
+                if (depth == 0) exit
+            }
+        ' "$ALL_SRC") || probe_code=""
     fi
 
     ((TESTS_RUN++)) || true

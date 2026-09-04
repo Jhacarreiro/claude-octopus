@@ -20,6 +20,7 @@ run_decision() {
     printf '%s' "$before_state" > "$before"
     bash -c '
         set -u
+        source "$1/scripts/lib/testing.sh" 2>/dev/null
         source "$1/scripts/lib/workflows.sh" 2>/dev/null
         AFTER_STATE="$3"
         snapshot_tangle_worktree_state() { printf "%s" "$AFTER_STATE"; }
@@ -82,6 +83,7 @@ out=$(bash -c '
     ink_deliver() { :; }
     run_agent_sync() { :; }
     octopus_agent_override() { echo codex; }
+    source "$1/scripts/lib/testing.sh" 2>/dev/null
     source "$1/scripts/lib/workflows.sh" 2>/dev/null
 
     COUNT_FILE="$RESULTS_DIR/recovery-count"

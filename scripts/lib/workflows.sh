@@ -1723,24 +1723,41 @@ tangle_decomposition_output_usable() {
 
 tangle_run_decomposition_fallbacks() {
     local primary_agent="$1" preferred_fallback="$2" prompt="$3" timeout_secs="${4:-0}"
-    if run_agent_sync_fallback_chain \
+    local explicit_primary explicit_fallback
+    if declare -F octopus_explicit_provider_override >/dev/null 2>&1; then
+        explicit_primary="$(octopus_explicit_provider_override tangle decompose 2>/dev/null || true)"
+        explicit_fallback="$(octopus_explicit_provider_override tangle decompose_fallback 2>/dev/null || true)"
+    else
+        explicit_primary=""
+        explicit_fallback=""
+    fi
+    for explicit_provider in "$explicit_primary" "$explicit_fallback"; do
+        [[ -n "$explicit_provider" ]] || continue
+        if ! declare -F octo_fallback_canonical_agent_spec >/dev/null 2>&1 || \
+           ! octo_fallback_canonical_agent_spec "$explicit_provider" >/dev/null 2>&1; then
+            log ERROR "Invalid explicit Tangle decomposition provider: $explicit_provider"
+            return 2
+        fi
+    done
+
+    # Hosts with the v2 availability contract use the configured chain, which
+    # is responsible for skipping unavailable providers. Older source-only
+    # hosts retain the direct compatibility path, but only after explicit
+    # provider names have been validated above.
+    if ! declare -F is_agent_available_v2 >/dev/null 2>&1; then
+        if run_agent_sync "$primary_agent" "$prompt" "$timeout_secs" researcher tangle; then
+            return 0
+        fi
+        run_agent_sync "$preferred_fallback" "$prompt" "$timeout_secs" researcher tangle
+        return $?
+    fi
+
+    # The configured fallback chain is the single dispatch authority. Do not
+    # bypass it with a direct retry: an invalid explicit provider must fail
+    # closed instead of silently falling through to another agent.
+    run_agent_sync_fallback_chain \
         "$primary_agent" "$prompt" "$timeout_secs" researcher tangle \
-        tangle_decomposition_output_usable default "$preferred_fallback"; then
-        return 0
-    fi
-    # Preserve the direct two-provider path for older hosts whose fallback-chain
-    # configuration cannot be hydrated. The same semantic validator still
-    # rejects unusable decomposition output before dispatch.
-    local output
-    if output=$(run_agent_sync "$primary_agent" "$prompt" "$timeout_secs" researcher tangle); then
-        printf '%s\n' "$output"
-        return 0
-    fi
-    if output=$(run_agent_sync "$preferred_fallback" "$prompt" "$timeout_secs" researcher tangle); then
-        printf '%s\n' "$output"
-        return 0
-    fi
-    return 1
+        tangle_decomposition_output_usable default "$preferred_fallback"
 }
 
 tangle_reformat_decomposition() {

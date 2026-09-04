@@ -93,6 +93,64 @@ snapshot_tangle_worktree_state() {
         printf '%s\t' "$path"
         git -C "$repo_root" hash-object --no-filters -- "$path" 2>/dev/null || printf '%s\n' missing
     done < <(git -C "$repo_root" ls-files --others --exclude-standard 2>/dev/null || true)
+
+    # Keep a path-level, mode-aware manifest in addition to the human-readable
+    # diffs above. A path can already appear in the pre-run snapshot (for
+    # example as a staged symlink), so comparing names alone would let a worker
+    # replace/delete that entry and have the final scan mistake it for baseline
+    # state. The manifest is deliberately derived from Git's index and the
+    # worktree rather than from a worker-controlled report file.
+    printf '%s\n' '## manifest'
+    while IFS= read -r path; do
+        [[ -n "$path" ]] || continue
+        case "$path" in
+            .claude-octopus|.claude-octopus/*|.octo|.octo/*) continue ;;
+        esac
+        local index_entry working_entry
+        index_entry=$(git -C "$repo_root" ls-files --stage -- "$path" 2>/dev/null | head -n 1 || true)
+        if [[ -L "$repo_root/$path" ]]; then
+            working_entry="symlink:$(readlink "$repo_root/$path" 2>/dev/null || printf '%s' '<unreadable>')"
+        elif [[ -e "$repo_root/$path" ]]; then
+            working_entry="file:$(git -C "$repo_root" hash-object --no-filters -- "$path" 2>/dev/null || printf '%s' '<unreadable>')"
+        else
+            working_entry="missing"
+        fi
+        printf 'ENTRY\t%s\t%s\t%s\n' "$path" "$index_entry" "$working_entry"
+    done < <(snapshot_tangle_worktree_paths)
+}
+
+tangle_state_manifest_entries() {
+    local state_file="$1"
+    [[ -f "$state_file" ]] || return 0
+    awk -F '\t' '$1 == "ENTRY" { print $0 }' "$state_file" 2>/dev/null || true
+}
+
+tangle_state_manifest_paths_changed() {
+    local before_state="$1" current_state="$2"
+    local before_entries current_entries
+    before_entries=$(mktemp "${TMPDIR:-/tmp}/octo-tangle-state-before.XXXXXX") || return 1
+    current_entries=$(mktemp "${TMPDIR:-/tmp}/octo-tangle-state-current.XXXXXX") || {
+        rm -f "$before_entries"
+        return 1
+    }
+    tangle_state_manifest_entries "$before_state" | sort > "$before_entries"
+    tangle_state_manifest_entries "$current_state" | sort > "$current_entries"
+    comm -3 "$before_entries" "$current_entries" \
+        | awk -F '\t' 'NF >= 2 { print $2 }' \
+        | sed '/^$/d' | sort -u
+    rm -f "$before_entries" "$current_entries"
+}
+
+tangle_file_digest() {
+    local file="$1"
+    [[ -f "$file" ]] || return 1
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file" | awk '{print $1}'
+    else
+        return 1
+    fi
 }
 
 snapshot_tangle_worktree_paths() {
@@ -144,11 +202,32 @@ tangle_prompt_requires_worktree_changes() {
 check_tangle_worktree_changes() {
     local before_file="$1"
     local baseline_head="${2:-}"
+    local before_state_file="${3:-}"
     local current_file
     current_file=$(mktemp "${TMPDIR:-/tmp}/octo-tangle-worktree-after.XXXXXX") || return 0
 
+    # The snapshot is parent-owned evidence. If a provider can rewrite it,
+    # subtracting the rewritten names would turn an out-of-scope change into
+    # apparent baseline state. The digest lives in the parent shell and is not
+    # available to the provider subprocess.
+    if [[ -n "${TANGLE_WORKTREE_BEFORE_PATHS_DIGEST:-}" && -f "$before_file" ]]; then
+        local before_digest
+        if command -v sha256sum >/dev/null 2>&1; then
+            before_digest=$(sha256sum "$before_file" | awk '{print $1}')
+        elif command -v shasum >/dev/null 2>&1; then
+            before_digest=$(shasum -a 256 "$before_file" | awk '{print $1}')
+        else
+            rm -f "$current_file"
+            return 1
+        fi
+        if [[ "$before_digest" != "$TANGLE_WORKTREE_BEFORE_PATHS_DIGEST" ]]; then
+            rm -f "$current_file"
+            return 1
+        fi
+    fi
+
     if [[ -n "$baseline_head" ]]; then
-        local repo_root baseline_paths baseline_new_paths new_paths
+        local repo_root baseline_paths committed_paths working_paths baseline_new_paths new_paths
         repo_root=$(git -C "${PROJECT_ROOT:-$PWD}" rev-parse --show-toplevel 2>/dev/null) || {
             rm -f "$current_file"
             return 1
@@ -157,10 +236,23 @@ check_tangle_worktree_changes() {
             rm -f "$current_file"
             return 1
         }
-        baseline_paths=$(git -C "$repo_root" diff --name-only "$baseline_head" -- 2>/dev/null) || {
+        local current_head
+        current_head=$(git -C "$repo_root" rev-parse --verify HEAD^{commit} 2>/dev/null) || {
             rm -f "$current_file"
             return 1
         }
+        # Compare the immutable start commit with the final HEAD explicitly.
+        # `git diff <start>` alone is easy to misread and has regressed in the
+        # past when a worker committed and left a clean worktree.
+        committed_paths=$(git -C "$repo_root" diff --name-only "$baseline_head" "$current_head" -- 2>/dev/null) || {
+            rm -f "$current_file"
+            return 1
+        }
+        working_paths=$(git -C "$repo_root" diff --name-only "$current_head" -- 2>/dev/null) || {
+            rm -f "$current_file"
+            return 1
+        }
+        baseline_paths=$(printf '%s\n%s\n' "$committed_paths" "$working_paths" | sed '/^$/d' | sort -u)
         baseline_new_paths="$baseline_paths"
         if [[ -f "$before_file" ]]; then
             baseline_new_paths=$(comm -23 <(printf '%s\n' "$baseline_paths" | sort -u) <(sort -u "$before_file"))
@@ -178,6 +270,20 @@ check_tangle_worktree_changes() {
         {
             printf '%s\n' "$baseline_new_paths"
             printf '%s\n' "$new_paths"
+            if [[ -n "$before_state_file" && -f "$before_state_file" ]]; then
+                local current_state state_delta
+                current_state=$(mktemp "${TMPDIR:-/tmp}/octo-tangle-state-final.XXXXXX") || {
+                    rm -f "$current_file"
+                    return 1
+                }
+                snapshot_tangle_worktree_state > "$current_state" 2>/dev/null || true
+                state_delta=$(tangle_state_manifest_paths_changed "$before_state_file" "$current_state") || {
+                    rm -f "$current_file" "$current_state"
+                    return 1
+                }
+                printf '%s\n' "$state_delta"
+                rm -f "$current_state"
+            fi
         } | sed /^$/d | grep -Ev '^\.claude-octopus(/|$)|^\.octo(/|$)' | sort -u
         rm -f "$current_file"
         return 0
@@ -186,6 +292,20 @@ check_tangle_worktree_changes() {
     snapshot_tangle_worktree_paths > "$current_file" 2>/dev/null || true
     if [[ -f "$before_file" ]]; then
         comm -13 <(sort -u "$before_file") <(sort -u "$current_file")
+    fi
+    if [[ -n "$before_state_file" && -f "$before_state_file" ]]; then
+        local current_state state_delta
+        current_state=$(mktemp "${TMPDIR:-/tmp}/octo-tangle-state-final.XXXXXX") || {
+            rm -f "$current_file"
+            return 1
+        }
+        snapshot_tangle_worktree_state > "$current_state" 2>/dev/null || true
+        state_delta=$(tangle_state_manifest_paths_changed "$before_state_file" "$current_state") || {
+            rm -f "$current_file" "$current_state"
+            return 1
+        }
+        printf '%s\n' "$state_delta"
+        rm -f "$current_state"
     fi
     rm -f "$current_file"
 }

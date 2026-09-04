@@ -143,6 +143,27 @@ else
     test_fail "committed changes disappeared from final worktree evidence"
 fi
 
+test_case "staged symlink replacement remains visible after the path was in the baseline snapshot"
+if (
+    cd "$REPO_DIR"
+    export PROJECT_ROOT="$REPO_DIR"
+    printf '%s\n' 'outside' > staged-target.txt
+    ln -s staged-target.txt staged-link
+    git add staged-target.txt staged-link
+    before_paths="$RESULTS_DIR/before-staged-link-paths.txt"
+    before_state="$RESULTS_DIR/before-staged-link-state.txt"
+    snapshot_tangle_worktree_paths > "$before_paths"
+    snapshot_tangle_worktree_state > "$before_state"
+    rm staged-link
+    printf '%s\n' 'replacement' > staged-link
+    changes=$(check_tangle_worktree_changes "$before_paths" "" "$before_state")
+    [[ "$changes" == *"staged-link"* ]]
+); then
+    test_pass
+else
+    test_fail "staged symlink replacement disappeared from final worktree evidence"
+fi
+
 test_case "implementation prompt with no worktree change fails validation"
 if (
     cd "$REPO_DIR"

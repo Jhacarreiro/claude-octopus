@@ -285,6 +285,35 @@ assert_contains "$(cat "$TMPDIR_TEST/all-changes-unborn.diff")" \
 assert_contains "$(cat "$TMPDIR_TEST/all-changes-unborn.diff")" \
   "\+first staged content" "review_collect_diff: unborn HEAD includes staged file content"
 
+# ── invocation-owned findings identity ───────────────────────────────────────
+
+ARTIFACT_REPO="$TMPDIR_TEST/review-artifact-id"
+ARTIFACT_RESULTS="$TMPDIR_TEST/review-artifact-results"
+mkdir -p "$ARTIFACT_REPO" "$ARTIFACT_RESULTS"
+(
+  cd "$ARTIFACT_REPO"
+  git init -q
+  git config user.email test@example.com
+  git config user.name "Octopus Test"
+  printf 'clean\n' > clean.txt
+  git add clean.txt
+  git commit -q -m init
+  log() { :; }
+  render_terminal_report() { :; }
+  check_codex_auth_freshness() { return 0; }
+  # The no-diff path writes its findings artifact before returning non-zero.
+  RESULTS_DIR="$ARTIFACT_RESULTS" \
+    review_run '{"target":"staged","artifactId":"unit-owned-token"}' >/dev/null 2>&1 || true
+)
+artifact_file=$(find "$ARTIFACT_RESULTS" -maxdepth 1 -type f \
+  -name 'review-findings-*-unit-owned-token.json' -print -quit)
+if [[ -n "$artifact_file" ]] &&
+   [[ "$(find "$ARTIFACT_RESULTS" -maxdepth 1 -type f -name 'review-findings-*.json' | wc -l | tr -d ' ')" == "1" ]]; then
+  pass "review_run: artifactId identifies exactly one findings file"
+else
+  fail "review_run: artifactId identifies exactly one findings file"
+fi
+
 # ── MCP schema ───────────────────────────────────────────────────────────────
 
 MCP_INDEX="$PROJECT_ROOT/mcp-server/src/index.ts"

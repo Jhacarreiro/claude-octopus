@@ -2449,6 +2449,57 @@ tangle_build_develop_review_context() {
 
 TANGLE_REVIEW_FINDINGS_FILE=""
 
+_tangle_review_capture() {
+    local review_profile="$1"
+    local review_log="$2"
+    review_run "$review_profile" 2>&1 | tee "$review_log"
+    return "${PIPESTATUS[0]}"
+}
+
+_tangle_review_restore_traps() {
+    local previous_exit_trap="${1:-}"
+    local previous_int_trap="${2:-}"
+    local previous_term_trap="${3:-}"
+    if [[ -n "$previous_exit_trap" ]]; then eval "$previous_exit_trap"; else trap - EXIT; fi
+    if [[ -n "$previous_int_trap" ]]; then eval "$previous_int_trap"; else trap - INT; fi
+    if [[ -n "$previous_term_trap" ]]; then eval "$previous_term_trap"; else trap - TERM; fi
+}
+
+_tangle_review_invoke_saved_trap() {
+    local saved_trap="$1"
+    [[ -n "$saved_trap" ]] || return 0
+    eval "set -- ${saved_trap#trap -- }"
+    eval "$1"
+}
+
+_tangle_review_handle_signal() {
+    local signal="$1"
+    local signal_status=143
+    local saved_trap="${_review_term_trap:-}"
+    local current_pid=""
+    if [[ "$signal" == "INT" ]]; then
+        signal_status=130
+        saved_trap="${_review_int_trap:-}"
+    fi
+
+    local capture_pid="${_review_capture_pid:-}"
+    if [[ "$capture_pid" =~ ^[1-9][0-9]*$ ]]; then
+        review_terminate_process_tree "$capture_pid" 0 || true
+        wait "$capture_pid" 2>/dev/null || true
+    fi
+    rm -f "${marker:-}" "${review_log:-}" 2>/dev/null || true
+    _tangle_review_restore_traps \
+        "${_review_exit_trap:-}" "${_review_int_trap:-}" "${_review_term_trap:-}"
+
+    if [[ -n "$saved_trap" ]]; then
+        _tangle_review_invoke_saved_trap "$saved_trap"
+    else
+        current_pid=$(sh -c 'printf "%s\n" "$PPID"')
+        kill -s "$signal" "$current_pid" 2>/dev/null || true
+    fi
+    exit "$signal_status"
+}
+
 # Materialize exactly what Tangle intends to review. The snapshot is immutable and
 # independent of the transient Git index state, so staged-only changes cannot vanish.
 tangle_build_review_diff_snapshot() {
@@ -2540,18 +2591,23 @@ tangle_run_context_code_review() {
     local task_group="$1"
     local context_file="$2"
     local round_label="${3:-initial}"
-    local marker findings_file review_profile review_rc review_target review_log retry_target no_changes_count
+    local marker artifact_id findings_file review_profile review_rc review_target review_log retry_target no_changes_count
     local explicit_review_target="${OCTOPUS_TANGLE_REVIEW_TARGET:-}"
     local _review_exit_trap _review_int_trap _review_term_trap _review_traps_installed=0
+    local _review_capture_pid=""
     TANGLE_REVIEW_FINDINGS_FILE=""
 
     if ! declare -F review_run >/dev/null 2>&1; then
         log ERROR "tangle review gate cannot run: review_run is unavailable"
         return 1
     fi
+    if ! declare -F review_terminate_process_tree >/dev/null 2>&1; then
+        log ERROR "tangle review gate cannot run: review process cleanup is unavailable"
+        return 1
+    fi
 
     marker=$(mktemp "${TMPDIR:-/tmp}/octopus-tangle-review-marker.XXXXXX")
-    touch "$marker"
+    artifact_id="${marker##*/}"
     local _marker_cleanup_trap
     _marker_cleanup_trap=$(trap -p RETURN || true)
     trap 'rm -f "${marker:-}" 2>/dev/null || true' RETURN
@@ -2566,22 +2622,28 @@ tangle_run_context_code_review() {
         --arg target "$review_target" \
         --arg contextFile "$context_file" \
         --arg contextLabel "Octopus tangle develop review context (${round_label})" \
+        --arg artifactId "$artifact_id" \
         --arg provenance "octopus-tangle" \
         --arg autonomy "${OCTOPUS_TANGLE_REVIEW_AUTONOMY:-autonomous}" \
         --arg publish "${OCTOPUS_TANGLE_REVIEW_PUBLISH:-never}" \
         --arg history "${OCTOPUS_TANGLE_REVIEW_HISTORY:-fresh}" \
-        '{target:$target, contextFile:$contextFile, contextLabel:$contextLabel, focus:["correctness","security","architecture","tdd","plan-conformance"], provenance:$provenance, autonomy:$autonomy, publish:$publish, history:$history}')
+        '{target:$target, contextFile:$contextFile, contextLabel:$contextLabel, artifactId:$artifactId, focus:["correctness","security","architecture","tdd","plan-conformance"], provenance:$provenance, autonomy:$autonomy, publish:$publish, history:$history}')
 
     log INFO "Step 4: Contextual code review (${round_label})..."
     review_log=$(mktemp "${TMPDIR:-/tmp}/octopus-tangle-review-output.XXXXXX")
     _review_exit_trap=$(trap -p EXIT || true)
     _review_int_trap=$(trap -p INT || true)
     _review_term_trap=$(trap -p TERM || true)
-    trap 'rm -f "${marker:-}" "${review_log:-}" 2>/dev/null || true' EXIT INT TERM
+    trap 'rm -f "${marker:-}" "${review_log:-}" 2>/dev/null || true' EXIT
+    trap '_tangle_review_handle_signal INT' INT
+    trap '_tangle_review_handle_signal TERM' TERM
     _review_traps_installed=1
 
-    review_run "$review_profile" 2>&1 | tee "$review_log"
-    review_rc="${PIPESTATUS[0]}"
+    _tangle_review_capture "$review_profile" "$review_log" &
+    _review_capture_pid=$!
+    review_rc=0
+    wait "$_review_capture_pid" || review_rc=$?
+    _review_capture_pid=""
     no_changes_count=$(grep -ci "No changes found to review" "$review_log" 2>/dev/null || true)
     no_changes_count=${no_changes_count%%$'\n'*}
     no_changes_count=${no_changes_count:-0}
@@ -2598,31 +2660,36 @@ tangle_run_context_code_review() {
             [[ -n "$_review_term_trap" ]] && eval "$_review_term_trap"
             return 1
         }
-        review_profile=$(printf '%s' "$review_profile" | jq -c --arg target "$retry_target" '.target=$target')
-        touch "$marker"
+        artifact_id="${artifact_id}-retry1"
+        review_profile=$(printf '%s' "$review_profile" | jq -c \
+            --arg target "$retry_target" --arg artifactId "$artifact_id" \
+            '.target=$target | .artifactId=$artifactId')
         : > "$review_log"
-        review_run "$review_profile" 2>&1 | tee "$review_log"
-        review_rc="${PIPESTATUS[0]}"
+        _tangle_review_capture "$review_profile" "$review_log" &
+        _review_capture_pid=$!
+        review_rc=0
+        wait "$_review_capture_pid" || review_rc=$?
+        _review_capture_pid=""
     fi
 
     findings_file=""
-    local _findings_candidate _findings_mtime _best_findings_mtime=0
+    local _findings_candidate
     while IFS= read -r _findings_candidate; do
         [[ -f "$_findings_candidate" ]] || continue
-        [[ "$_findings_candidate" -nt "$marker" ]] || continue
-        _findings_mtime=$(stat -c '%Y' "$_findings_candidate" 2>/dev/null || stat -f '%m' "$_findings_candidate" 2>/dev/null || echo 0)
-        [[ "$_findings_mtime" =~ ^[0-9]+$ ]] || _findings_mtime=0
-        if [[ "$_findings_mtime" -ge "$_best_findings_mtime" ]]; then
-            _best_findings_mtime="$_findings_mtime"
-            findings_file="$_findings_candidate"
-        fi
+        case "${_findings_candidate##*/}" in
+            review-findings-*-"${artifact_id}".json)
+                if [[ -n "$findings_file" ]]; then
+                    log ERROR "Contextual code review produced multiple findings files for one invocation"
+                    findings_file=""
+                    break
+                fi
+                findings_file="$_findings_candidate"
+                ;;
+        esac
     done < <(find "${RESULTS_DIR:-${HOME}/.claude-octopus/results}" -maxdepth 1 -type f -name 'review-findings-*.json' 2>/dev/null || true)
     rm -f "$marker" "$review_log" 2>/dev/null || true
     if [[ "$_review_traps_installed" -eq 1 ]]; then
-        trap - EXIT INT TERM
-        [[ -n "$_review_exit_trap" ]] && eval "$_review_exit_trap"
-        [[ -n "$_review_int_trap" ]] && eval "$_review_int_trap"
-        [[ -n "$_review_term_trap" ]] && eval "$_review_term_trap"
+        _tangle_review_restore_traps "$_review_exit_trap" "$_review_int_trap" "$_review_term_trap"
     fi
     trap - RETURN
     if [[ -n "$_marker_cleanup_trap" ]]; then

@@ -1525,7 +1525,7 @@ review_run() {
     local profile_json="${1:-"{}"}"
 
     # Parse profile fields (with defaults)
-    local target focus provenance autonomy publish debate history context_file context_text context_label
+    local target focus provenance autonomy publish debate history context_file context_text context_label artifact_id
     target=$(echo "$profile_json"       | jq -r '.target       // "staged"')
     focus=$(echo "$profile_json"        | jq -r '.focus        // ["correctness","security","architecture","tdd"]  | join(",")')
     provenance=$(echo "$profile_json"   | jq -r '.provenance   // "unknown"')
@@ -1536,6 +1536,7 @@ review_run() {
     context_file=$(echo "$profile_json" | jq -r '.contextFile  // .context_file  // empty')
     context_text=$(echo "$profile_json" | jq -r '.contextText  // .context_text  // empty')
     context_label=$(echo "$profile_json"| jq -r '.contextLabel // .context_label // "Review context / task contract"')
+    artifact_id=$(echo "$profile_json"  | jq -r '.artifactId   // .artifact_id   // empty')
     if [[ "$target" == "fresh" ]]; then
         target="working-tree"
         history="fresh"
@@ -1567,7 +1568,17 @@ review_run() {
     local results_dir="${RESULTS_DIR:-$HOME/.claude-octopus/results}"
     # Sync RESULTS_DIR global so spawn_agent writes to the same directory
     RESULTS_DIR="$results_dir"
-    local findings_file="$results_dir/review-findings-${timestamp}.json"
+    if [[ ${#artifact_id} -gt 96 ]]; then
+        log ERROR "review_run: artifactId exceeds 96 characters"
+        rm -f "$provider_status_file"
+        return 1
+    fi
+    if [[ "$artifact_id" == *[![:alnum:]_.-]* ]]; then
+        log ERROR "review_run: artifactId contains unsafe filename characters"
+        rm -f "$provider_status_file"
+        return 1
+    fi
+    local findings_file="$results_dir/review-findings-${timestamp}${artifact_id:+-${artifact_id}}.json"
     mkdir -p "$results_dir"
 
     local proof_dir=""

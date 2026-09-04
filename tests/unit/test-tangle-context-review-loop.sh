@@ -199,6 +199,13 @@ assert_contains "$WORKFLOWS" "regenerating immutable review snapshot once" "dirt
 assert_contains "$WORKFLOWS" 'review_run "$review_profile" 2>&1 | tee "$review_log"' "review output waits for tee before inspection"
 assert_contains "$WORKFLOWS" 'PIPESTATUS[0]' "review status comes from review_run"
 assert_contains "$WORKFLOWS" '"${review_log:-}"' "review log is covered by cleanup trap"
+assert_contains "$WORKFLOWS" "artifactId" "context review assigns an invocation-owned artifact identity"
+test_case "context review does not use coarse mtime freshness"
+if ! grep -Fq -- '-nt "$marker"' "$WORKFLOWS"; then
+    test_pass
+else
+    test_fail "context review findings must be selected by invocation identity, not mtime"
+fi
 assert_contains "$WORKFLOWS" "contextFile" "review profile passes contextFile"
 assert_contains "$WORKFLOWS" ".claude-octopus/results" "review context is stored inside workspace"
 assert_contains "$WORKFLOWS" "plan-conformance" "review focus includes plan conformance"
@@ -287,14 +294,15 @@ if (
     export RESULTS_DIR="$sync_results"
     tee() { sleep 1; command tee "$@"; }
     review_run() {
-        local calls
+        local calls artifact_id
         calls=$(<"$sync_calls")
+        artifact_id=$(printf '%s' "$1" | jq -r '.artifactId')
         printf '%s\n' "$((calls + 1))" > "$sync_calls"
         if [[ "$calls" -eq 0 ]]; then
             printf '%s\n' "No changes found to review"
             return 1
         fi
-        printf '%s\n' '{"findings":[]}' > "$RESULTS_DIR/review-findings-synchronized.json"
+        printf '%s\n' '{"findings":[]}' > "$RESULTS_DIR/review-findings-synchronized-${artifact_id}.json"
         printf '%s\n' "review recovered"
         return 0
     }
@@ -307,6 +315,81 @@ if (
     test_pass
 else
     test_fail "context review must wait for tee so the dirty no-diff retry is not skipped"
+fi
+
+test_case "TERM stops contextual review and preserves signal status"
+workspace=$(make_test_dir workspace-review-term)
+git -C "$workspace" init -q
+git -C "$workspace" config user.email test@example.com
+git -C "$workspace" config user.name "Octopus Test"
+printf 'base content\n' > "$workspace/tracked.txt"
+git -C "$workspace" add tracked.txt
+git -C "$workspace" commit -q -m init
+printf 'changed content\n' > "$workspace/tracked.txt"
+term_results="$workspace/review-results"
+mkdir -p "$term_results"
+term_output="$TEST_TMP_DIR/review-term-output"
+term_review_pid_file="$TEST_TMP_DIR/review-term-pid"
+bash -c '
+    set -u
+    source "$1/scripts/lib/workflows.sh"
+    export RESULTS_DIR="$2"
+    TERM_REVIEW_PID_FILE="$4"
+    log() { :; }
+    review_run() {
+        sleep 30 &
+        review_sleep_pid=$!
+        printf "%s\n" "$review_sleep_pid" > "$TERM_REVIEW_PID_FILE"
+        wait "$review_sleep_pid"
+        printf "%s\n" "review unexpectedly completed"
+        return 0
+    }
+    cd "$3" || exit 1
+    tangle_run_context_code_review test "$3/context.md" initial
+    printf "%s\n" "pipeline continued"
+' _ "$PROJECT_ROOT" "$term_results" "$workspace" "$term_review_pid_file" > "$term_output" 2>&1 &
+term_runner_pid=$!
+term_ready=false
+term_start_ticks=0
+while [[ "$term_start_ticks" -lt 50 ]]; do
+    if [[ -s "$term_review_pid_file" ]]; then
+        term_ready=true
+        break
+    fi
+    kill -0 "$term_runner_pid" 2>/dev/null || break
+    sleep 0.1
+    term_start_ticks=$((term_start_ticks + 1))
+done
+if [[ "$term_ready" == true ]]; then
+    kill -TERM "$term_runner_pid"
+fi
+term_deadline=0
+while kill -0 "$term_runner_pid" 2>/dev/null && [[ "$term_deadline" -lt 30 ]]; do
+    sleep 0.1
+    term_deadline=$((term_deadline + 1))
+done
+term_rc=0
+if [[ "$term_ready" != true ]]; then
+    kill -TERM "$term_runner_pid" 2>/dev/null || true
+    wait "$term_runner_pid" 2>/dev/null || true
+    term_rc=998
+elif kill -0 "$term_runner_pid" 2>/dev/null; then
+    kill -KILL "$term_runner_pid" 2>/dev/null || true
+    wait "$term_runner_pid" 2>/dev/null || true
+    term_rc=999
+else
+    wait "$term_runner_pid" || term_rc=$?
+fi
+term_review_alive=false
+if [[ -s "$term_review_pid_file" ]] && kill -0 "$(<"$term_review_pid_file")" 2>/dev/null; then
+    term_review_alive=true
+fi
+if [[ "$term_ready" == true ]] && [[ "$term_rc" -eq 143 ]] && [[ "$term_review_alive" == false ]] &&
+   ! grep -Fq "pipeline continued" "$term_output" &&
+   [[ -z "$(find "$term_results" -maxdepth 1 -type f -name 'review-findings-*.json' -print -quit)" ]]; then
+    test_pass
+else
+    test_fail "TERM must stop review promptly with rc=143 and no accepted findings (ready=$term_ready rc=$term_rc output=$(tr '\n' ' ' < "$term_output"))"
 fi
 
 test_case "generated review context stays inside the workspace"

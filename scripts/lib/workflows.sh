@@ -2536,7 +2536,7 @@ tangle_run_context_code_review() {
     local task_group="$1"
     local context_file="$2"
     local round_label="${3:-initial}"
-    local marker findings_file review_profile review_rc review_target review_log retry_target
+    local marker findings_file review_profile review_rc review_target review_log retry_target no_changes_count
     local explicit_review_target="${OCTOPUS_TANGLE_REVIEW_TARGET:-}"
     local _review_exit_trap _review_int_trap _review_term_trap _review_traps_installed=0
     TANGLE_REVIEW_FINDINGS_FILE=""
@@ -2578,9 +2578,12 @@ tangle_run_context_code_review() {
 
     review_run "$review_profile" 2>&1 | tee "$review_log"
     review_rc="${PIPESTATUS[0]}"
+    no_changes_count=$(grep -ci "No changes found to review" "$review_log" 2>/dev/null || true)
+    no_changes_count=${no_changes_count%%$'\n'*}
+    no_changes_count=${no_changes_count:-0}
 
     if [[ "$review_rc" -ne 0 && -z "$explicit_review_target" ]] &&
-       grep -qi "No changes found to review" "$review_log" 2>/dev/null &&
+       [[ "$no_changes_count" -gt 0 ]] &&
        [[ -n "$(git status --porcelain --untracked-files=all 2>/dev/null || true)" ]]; then
         log WARN "Contextual reviewer reported no changes despite a dirty repository; regenerating immutable review snapshot once"
         retry_target=$(tangle_build_review_diff_snapshot "$task_group" "${round_label}-retry1") || {

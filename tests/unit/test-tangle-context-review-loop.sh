@@ -8,6 +8,16 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/../helpers/test-framework.sh"
 test_suite "tangle contextual review loop"
 
+# Bash 5 inherits EXIT traps into subshells. Several fixtures exercise review
+# code that restores its caller's traps, so only the parent test process may
+# run the framework cleanup for this shared temporary directory.
+CONTEXT_REVIEW_TEST_MAIN_PID="${BASHPID:-$$}"
+cleanup_context_review_test_environment() {
+    [[ "${BASHPID:-$$}" == "$CONTEXT_REVIEW_TEST_MAIN_PID" ]] || return 0
+    cleanup_test_environment
+}
+trap cleanup_context_review_test_environment EXIT
+
 WORKFLOWS="$PROJECT_ROOT/scripts/lib/workflows.sh"
 HELP="$PROJECT_ROOT/scripts/lib/usage-help.sh"
 
@@ -465,10 +475,6 @@ printf '%s\n' '{"findings":[]}' > "$retry_results/review-findings-old-${retry_id
 retry_calls="$workspace/review-calls"
 printf '0\n' > "$retry_calls"
 if (
-    # Bash 5 inherits the framework's EXIT cleanup trap into this subshell.
-    # The review function correctly restores caller traps, but this fixture
-    # must not let the child remove the parent suite's shared TEST_TMP_DIR.
-    trap - EXIT
     cd "$workspace" || exit 1
     export RESULTS_DIR="$retry_results"
     mktemp() {

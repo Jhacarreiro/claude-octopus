@@ -2821,8 +2821,8 @@ tangle_run_context_code_review() {
     local task_group="$1"
     local context_file="$2"
     local round_label="${3:-initial}"
-    local marker artifact_id findings_file review_profile review_rc review_target review_log retry_target no_changes_count
-    local review_start_gate _review_claim_dir="" _review_retry_claim_dir=""
+    local marker artifact_id findings_file review_profile review_rc review_target retry_target no_changes_count
+    local review_log="" review_start_gate="" _review_claim_dir="" _review_retry_claim_dir=""
     local _review_claim_candidate="" _review_retry_claim_candidate=""
     local explicit_review_target="${OCTOPUS_TANGLE_REVIEW_TARGET:-}"
     local _review_exit_trap _review_int_trap _review_term_trap _review_traps_installed=0

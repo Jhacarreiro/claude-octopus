@@ -14,6 +14,7 @@ test_suite "tangle validation hard abort"
 # This direct-library regression test exercises the validation gate itself,
 # independent of the orchestrator's clean-baseline policy.
 OCTOPUS_TANGLE_REQUIRE_CLEAN_BASELINE=false
+source "$PROJECT_ROOT/scripts/lib/testing.sh"
 source "$WORKFLOWS"
 
 CYAN=""
@@ -23,13 +24,10 @@ NC=""
 TMUX_MODE=false
 DRY_RUN=false
 SUPPORTS_PARALLEL_FILE_SAFETY=false
-TEST_TMP_DIR="/tmp/octopus-tests-$$"
 RESULTS_DIR="$TEST_TMP_DIR/tangle-validation-abort"
 LOGS_DIR="$RESULTS_DIR/logs"
 WORKSPACE_DIR="$RESULTS_DIR/workspace"
-rm -rf "$TEST_TMP_DIR"
 mkdir -p "$WORKSPACE_DIR/.octo/agents"
-trap 'rm -rf "$TEST_TMP_DIR"' EXIT INT TERM
 
 REVIEW_CALLS=0
 VALIDATION_CALLS=0
@@ -44,7 +42,11 @@ fleet_dispatch_end() { :; }
 record_agents_batch_complete() { :; }
 
 run_agent_sync() {
-    printf '%s\n' '1. [CODING] Verify the existing fix. Files: apps/web/tests/setup.js'
+    if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
+        printf '%s\n' 'VERDICT: PASS' 'SCOPE_REVIEW: NONE' 'REASONS: fixture decomposition is adequate'
+        return 0
+    fi
+    printf '%s\n' '1. [CODING] Verify the existing fix. Files: apps/web/tests/setup.js — Task: verify the existing fix'
 }
 
 spawn_agent_capture_pid() {

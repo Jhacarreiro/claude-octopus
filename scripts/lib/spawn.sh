@@ -328,6 +328,74 @@ octopus_timeout_remaining() {
     printf '%s\n' "$((deadline - now))"
 }
 
+# Tangle coding providers are untrusted workers. Keep the repository worktree
+# writable, but leave Git metadata and the parent-owned result channel outside
+# that writable mount. There is deliberately no fallback to an unconfined
+# provider when the host cannot create this boundary.
+octopus_tangle_execution_boundary_probe() {
+    case "$(uname -s 2>/dev/null || true)" in
+        Linux)
+            command -v bwrap >/dev/null 2>&1 || return 1
+            bwrap --die-with-parent --new-session \
+                --ro-bind / / --tmpfs /tmp --proc /proc --dev /dev -- true \
+                >/dev/null 2>&1
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+octopus_tangle_apply_execution_boundary() {
+    [[ "${OCTOPUS_TANGLE_EXECUTION_BOUNDARY:-false}" == "true" ]] || return 0
+    [[ "${phase:-}" == "tangle" && "${role:-}" == "implementer" ]] || return 0
+
+    local worktree="${OCTOPUS_TANGLE_WORKTREE:-${PROJECT_ROOT:-$PWD}}"
+    local physical_worktree results_dir physical_results git_metadata
+    physical_worktree=$(cd "$worktree" 2>/dev/null && pwd -P) || {
+        log ERROR "Tangle boundary refused: worktree cannot be resolved"
+        return 125
+    }
+    [[ -d "$physical_worktree" && "$physical_worktree" != "/" && ! -L "$worktree" ]] || {
+        log ERROR "Tangle boundary refused: unsafe worktree path"
+        return 125
+    }
+    octopus_tangle_execution_boundary_probe || {
+        log ERROR "Tangle boundary refused: bwrap is unavailable or user namespaces are disabled"
+        return 125
+    }
+
+    local -a boundary_cmd
+    boundary_cmd=(
+        bwrap --die-with-parent --new-session
+        --ro-bind / /
+        --bind "$physical_worktree" "$physical_worktree"
+        --tmpfs /tmp --proc /proc --dev /dev
+    )
+
+    git_metadata="$physical_worktree/.git"
+    if [[ -e "$git_metadata" ]]; then
+        [[ ! -L "$git_metadata" ]] || {
+            log ERROR "Tangle boundary refused: Git metadata is a symlink"
+            return 125
+        }
+        boundary_cmd+=(--ro-bind "$git_metadata" "$git_metadata")
+    fi
+
+    results_dir="${OCTOPUS_TANGLE_RESULTS_DIR:-${RESULTS_DIR:-}}"
+    if [[ -n "$results_dir" && -d "$results_dir" ]]; then
+        physical_results=$(cd "$results_dir" 2>/dev/null && pwd -P) || return 125
+        case "$physical_results" in
+            "$physical_worktree"/*)
+                boundary_cmd+=(--ro-bind "$physical_results" "$physical_results")
+                ;;
+        esac
+    fi
+
+    boundary_cmd+=(--)
+    cmd_array=("${boundary_cmd[@]}" "${cmd_array[@]}")
+}
+
 spawn_agent() {
     local agent_type="$1"
     if [[ "$agent_type" == "claude-opus-fast" ]]; then
@@ -835,6 +903,12 @@ ${heuristic_ctx}"
             log "INFO" "Bounded dispatch (${_eff_timeout}s) uses the supervised provider subprocess; native Agent Teams cannot enforce a wall-clock timeout"
         fi
     fi
+    if [[ "${OCTOPUS_TANGLE_EXECUTION_BOUNDARY:-false}" == "true" && \
+          "${phase:-}" == "tangle" && "${role:-}" == "implementer" ]]; then
+        # Native Agent Teams cannot inherit the sealed filesystem mounts used
+        # by the supervised subprocess path.
+        _use_agent_teams=false
+    fi
     if [[ "$_use_agent_teams" == "true" ]]; then
         log "INFO" "Dispatching via Agent Teams: $agent_type (task: $task_id)"
 
@@ -991,6 +1065,12 @@ ${heuristic_ctx}"
         # Append headless flag (-p "") for CLI providers that read prompt from stdin
         if [[ "$agent_type" == cursor-agent* ]] || [[ "$agent_type" == copilot* ]] || [[ "$agent_type" == qwen* ]]; then
             cmd_array+=(-p "")
+        fi
+
+        if ! octopus_tangle_apply_execution_boundary; then
+            octo_spawn_contract_finish "$_contract_seat_id" failed "" "" \
+                "Tangle coding dispatch has no enforceable filesystem boundary" 125 "" >/dev/null 2>&1 || true
+            return 125
         fi
 
         local auth_attempt=0

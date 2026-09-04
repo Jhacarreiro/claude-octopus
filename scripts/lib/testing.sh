@@ -143,8 +143,45 @@ tangle_prompt_requires_worktree_changes() {
 
 check_tangle_worktree_changes() {
     local before_file="$1"
+    local baseline_head="${2:-}"
     local current_file
     current_file=$(mktemp "${TMPDIR:-/tmp}/octo-tangle-worktree-after.XXXXXX") || return 0
+
+    if [[ -n "$baseline_head" ]]; then
+        local repo_root baseline_paths baseline_new_paths new_paths
+        repo_root=$(git -C "${PROJECT_ROOT:-$PWD}" rev-parse --show-toplevel 2>/dev/null) || {
+            rm -f "$current_file"
+            return 1
+        }
+        git -C "$repo_root" cat-file -e "${baseline_head}^{commit}" 2>/dev/null || {
+            rm -f "$current_file"
+            return 1
+        }
+        baseline_paths=$(git -C "$repo_root" diff --name-only "$baseline_head" -- 2>/dev/null) || {
+            rm -f "$current_file"
+            return 1
+        }
+        baseline_new_paths="$baseline_paths"
+        if [[ -f "$before_file" ]]; then
+            baseline_new_paths=$(comm -23 <(printf '%s\n' "$baseline_paths" | sort -u) <(sort -u "$before_file"))
+        fi
+        # An empty clean snapshot can return grep's no-match status under
+        # pipefail; the Git repository and immutable baseline were already
+        # verified above, so normalize that status to an empty path set.
+        snapshot_tangle_worktree_paths > "$current_file" 2>/dev/null || true
+        new_paths=""
+        if [[ -f "$before_file" ]]; then
+            new_paths=$(comm -13 <(sort -u "$before_file") <(sort -u "$current_file"))
+        else
+            new_paths=$(<"$current_file")
+        fi
+        {
+            printf '%s\n' "$baseline_new_paths"
+            printf '%s\n' "$new_paths"
+        } | sed /^$/d | grep -Ev '^\.claude-octopus(/|$)|^\.octo(/|$)' | sort -u
+        rm -f "$current_file"
+        return 0
+    fi
 
     snapshot_tangle_worktree_paths > "$current_file" 2>/dev/null || true
     if [[ -f "$before_file" ]]; then
@@ -305,6 +342,7 @@ validate_tangle_results() {
     local task_group="$1"
     local original_prompt="$2"
     local worktree_before_file="${3:-}"
+    local baseline_head="${4:-}"
     local validation_file="${RESULTS_DIR}/tangle-validation-${task_group}.md"
     local quality_retry_count=0
     local correction_file="${OCTOPUS_TANGLE_VALIDATION_CORRECTION_FILE:-}"
@@ -373,7 +411,11 @@ validate_tangle_results() {
         local migration_history_details="No changed Supabase migrations."
         local migration_history_failed=false
         if [[ -n "$worktree_before_file" && -f "$worktree_before_file" ]]; then
-            worktree_changes=$(check_tangle_worktree_changes "$worktree_before_file")
+            if ! worktree_changes=$(check_tangle_worktree_changes "$worktree_before_file" "$baseline_head"); then
+                worktree_changes=""
+                hard_gate_retry_feedback="${hard_gate_retry_feedback}"$'Hard gate failure: immutable Tangle start HEAD could not be verified against the final worktree.\n\n'
+                log ERROR "Unable to verify Tangle worktree changes against immutable start HEAD"
+            fi
             if tangle_prompt_requires_worktree_changes "$original_prompt"; then
                 requires_worktree_changes=true
             fi

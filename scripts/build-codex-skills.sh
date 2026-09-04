@@ -21,6 +21,9 @@
 
 set -euo pipefail
 
+# Keep generated metadata byte-stable across CI and contributor locales.
+export LC_ALL=C
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SKILLS_DIR="$PLUGIN_ROOT/.claude/skills"

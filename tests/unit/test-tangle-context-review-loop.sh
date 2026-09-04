@@ -114,6 +114,7 @@ run_warning_review_gate() {
         printf "0" > "$correction_calls_file"
         : > "$validation_file"
 
+        source "$project_root/scripts/lib/testing.sh" 2>/dev/null
         source "$project_root/scripts/lib/workflows.sh" 2>/dev/null
         log() { :; }
         tangle_build_develop_review_context() {

@@ -331,10 +331,11 @@ octopus_timeout_remaining() {
     printf '%s\n' "$((deadline - now))"
 }
 
-# Tangle coding providers are untrusted workers. Keep the repository worktree
-# writable, but leave Git metadata and the parent-owned result channel outside
-# that writable mount. There is deliberately no fallback to an unconfined
-# provider when the host cannot create this boundary.
+# Tangle providers are untrusted workers. Coding gets a writable repository
+# bind, while reasoning gets a read-only bind; both leave Git metadata and the
+# parent-owned result channel outside the writable mount. There is deliberately
+# no fallback to an unconfined provider when the host cannot create this
+# boundary.
 octopus_tangle_execution_boundary_probe() {
     case "$(uname -s 2>/dev/null || true)" in
         Linux)
@@ -349,9 +350,28 @@ octopus_tangle_execution_boundary_probe() {
     esac
 }
 
+octopus_tangle_boundary_paths_are_disjoint() {
+    local physical_worktree="$1"
+    local physical_results="$2"
+
+    [[ -n "$physical_worktree" && -n "$physical_results" ]] || return 1
+    [[ "$physical_worktree" != "/" && "$physical_results" != "/" ]] || return 1
+
+    # Keep the authority channel outside the writable mount. A nested
+    # read-only bind is not enough: the worker could rename the mount's
+    # parent or exploit an alternate path to the same authority directory.
+    case "$physical_results/" in
+        "$physical_worktree/"*) return 1 ;;
+    esac
+    case "$physical_worktree/" in
+        "$physical_results/"*) return 1 ;;
+    esac
+    return 0
+}
+
 octopus_tangle_apply_execution_boundary() {
     [[ "${OCTOPUS_TANGLE_EXECUTION_BOUNDARY:-false}" == "true" ]] || return 0
-    [[ "${phase:-}" == "tangle" && "${role:-}" == "implementer" ]] || return 0
+    [[ "${phase:-}" == "tangle" ]] || return 0
 
     local worktree="${OCTOPUS_TANGLE_WORKTREE:-${PROJECT_ROOT:-$PWD}}"
     local physical_worktree results_dir physical_results git_metadata
@@ -376,8 +396,12 @@ octopus_tangle_apply_execution_boundary() {
         bwrap --die-with-parent --new-session
         --ro-bind / /
         --tmpfs /tmp --proc /proc --dev /dev
-        --bind "$physical_worktree" "$physical_worktree"
     )
+    if [[ "${role:-}" == "implementer" ]]; then
+        boundary_cmd+=(--bind "$physical_worktree" "$physical_worktree")
+    else
+        boundary_cmd+=(--ro-bind "$physical_worktree" "$physical_worktree")
+    fi
 
     git_metadata="$physical_worktree/.git"
     if [[ -e "$git_metadata" ]]; then
@@ -389,22 +413,33 @@ octopus_tangle_apply_execution_boundary() {
     fi
 
     results_dir="${OCTOPUS_TANGLE_RESULTS_DIR:-${RESULTS_DIR:-}}"
+    if [[ -z "$results_dir" ]]; then
+        log ERROR "Tangle boundary refused: parent-owned result channel is unset"
+        return 125
+    fi
     if [[ -n "$results_dir" ]]; then
         [[ -d "$results_dir" && ! -L "$results_dir" ]] || {
             log ERROR "Tangle boundary refused: result channel is not a real directory"
             return 125
         }
-        physical_results=$(cd "$results_dir" 2>/dev/null && pwd -P) || return 125
-        if [[ "$physical_results" == "$physical_worktree" ]]; then
-            log ERROR "Tangle boundary refused: parent-owned results must not equal the writable worktree"
-            return 125
+        # Reject the lexical path before resolving it as well. This closes the
+        # case where a worker-controlled symlink inside the worktree points to
+        # an otherwise unrelated directory that the parent later trusts.
+        local results_path="$results_dir"
+        if [[ "$results_path" != /* ]]; then
+            results_path="$(pwd -P)/$results_path"
         fi
-        case "$physical_worktree/" in
-            "$physical_results/"*)
-                log ERROR "Tangle boundary refused: result channel contains the writable worktree"
+        case "$results_path" in
+            "$physical_worktree"|"$physical_worktree"/*)
+                log ERROR "Tangle boundary refused: result channel path traverses the writable worktree"
                 return 125
                 ;;
         esac
+        physical_results=$(cd "$results_dir" 2>/dev/null && pwd -P) || return 125
+        if ! octopus_tangle_boundary_paths_are_disjoint "$physical_worktree" "$physical_results"; then
+            log ERROR "Tangle boundary refused: parent-owned results overlap the writable worktree"
+            return 125
+        fi
         # Seal the result channel explicitly even when it is on a mount that
         # is not covered by the root read-only bind. Provider stdout/stderr
         # still reaches the parent through already-open descriptors; the
@@ -928,9 +963,10 @@ ${heuristic_ctx}"
         fi
     fi
     if [[ "${OCTOPUS_TANGLE_EXECUTION_BOUNDARY:-false}" == "true" && \
-          "${phase:-}" == "tangle" && "${role:-}" == "implementer" ]]; then
+          "${phase:-}" == "tangle" ]]; then
         # Native Agent Teams cannot inherit the sealed filesystem mounts used
-        # by the supervised subprocess path.
+        # by the supervised subprocess path. This applies to reasoning agents
+        # too: they must not get an unconfined write-capable working directory.
         _use_agent_teams=false
     fi
     if [[ "$_use_agent_teams" == "true" ]]; then

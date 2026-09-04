@@ -16,6 +16,7 @@ test_suite "tangle direct fallback"
 export OCTOPUS_TANGLE_CODE_REVIEW=false
 
 # shellcheck source=/dev/null
+source "$PROJECT_ROOT/scripts/lib/testing.sh"
 source "$WORKFLOWS"
 
 CYAN=""

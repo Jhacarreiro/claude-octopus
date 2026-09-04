@@ -45,7 +45,7 @@ if (
     export OCTOPUS_TANGLE_DECOMPOSE_FALLBACK_AGENT="codex"
     result=$(tangle_reformat_decomposition "task" "bad decomposition" "overlap" "")
     [[ "$result" == *"Reformatted task"* ]] &&
-    [[ "$(sed -n '1p' "$CALL_LOG")" == "agy|0|researcher|tangle" ]] &&
+    [[ "$(sed -n '1p' "$CALL_LOG")" == "gemini|0|researcher|tangle" ]] &&
     [[ "$(wc -l < "$CALL_LOG")" -eq 1 ]]
 ); then
     test_pass

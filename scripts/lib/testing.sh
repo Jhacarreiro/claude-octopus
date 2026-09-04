@@ -237,7 +237,7 @@ check_tangle_worktree_changes() {
             return 1
         }
         local current_head
-        current_head=$(git -C "$repo_root" rev-parse --verify HEAD^{commit} 2>/dev/null) || {
+        current_head=$(git -C "$repo_root" rev-parse --verify "HEAD^{commit}" 2>/dev/null) || {
             rm -f "$current_file"
             return 1
         }

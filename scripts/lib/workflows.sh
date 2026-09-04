@@ -4044,7 +4044,7 @@ _tangle_develop_in_workspace() {
         log ERROR "Tangle requires a Git worktree so the parent can seal the starting commit"
         return 1
     }
-    tangle_start_head=$(git -C "$tangle_repo_root" rev-parse --verify HEAD^{commit} 2>/dev/null) || {
+    tangle_start_head=$(git -C "$tangle_repo_root" rev-parse --verify "HEAD^{commit}" 2>/dev/null) || {
         log ERROR "Tangle requires a committed starting HEAD for immutable final-change validation"
         return 1
     }

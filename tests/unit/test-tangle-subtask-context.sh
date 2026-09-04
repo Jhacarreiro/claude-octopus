@@ -16,6 +16,7 @@ test_suite "tangle subtask context preservation"
 export OCTOPUS_TANGLE_CODE_REVIEW=false
 
 # shellcheck source=/dev/null
+source "$PROJECT_ROOT/scripts/lib/testing.sh"
 source "$WORKFLOWS"
 
 CYAN=""
@@ -63,9 +64,13 @@ else
 fi
 
 run_agent_sync() {
+    if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
+        printf '%s\n' 'VERDICT: PASS' 'SCOPE_REVIEW: NONE' 'REASONS: fixture decomposition covers the requested template work'
+        return 0
+    fi
     cat <<'EOF'
-1. [CODING] Template polish. Files: src/lib/templates/NA10_HANDLE_SILENCE.ts
-2. [REASONING] Integration review
+1. [CODING] Template polish. Files: src/lib/templates/NA10_HANDLE_SILENCE.ts — Task: polish the template
+2. [REASONING] Integration review — Task: review the implementation handoff
 EOF
 }
 

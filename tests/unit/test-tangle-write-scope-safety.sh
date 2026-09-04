@@ -47,6 +47,10 @@ design_review_ceremony() { :; }
 fleet_dispatch_begin() { :; }
 fleet_dispatch_end() { :; }
 run_agent_sync() {
+    if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
+        printf '%s\n' 'VERDICT: PASS' 'SCOPE_REVIEW: NONE' 'REASONS: fixture decomposition is adequate'
+        return 0
+    fi
     cat <<'EOF'
 1. [CODING] Add the reference prefix. Files: src/lib/templates/NA02_REQUEST_REPORT.ts
 2. [CODING] Add legal wording to the same template. Files: src/lib/templates/NA02_REQUEST_REPORT.ts, src/lib/legal/legalReferenceCatalog.ts
@@ -450,6 +454,10 @@ else
 fi
 
 run_agent_sync() {
+    if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
+        printf '%s\n' 'VERDICT: PASS' 'SCOPE_REVIEW: NONE' 'REASONS: fixture decomposition is adequate'
+        return 0
+    fi
     cat <<'EOF'
 1. [CODING] First overlap — Files: scripts/lib/workflows.sh — Task: update workflow
 2. [CODING] Second overlap — Files: scripts/lib/workflows.sh — Task: update tests

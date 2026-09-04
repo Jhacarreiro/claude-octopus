@@ -13,11 +13,8 @@ export OCTOPUS_TANGLE_CODE_REVIEW=false
 export OCTOPUS_TANGLE_RUN_WORKTREE=false
 
 WORKFLOWS="$PROJECT_ROOT/scripts/lib/workflows.sh"
-TEST_TMP_DIR="${TEST_TMP_DIR:-/tmp/octopus-tests-$$}"
-rm -rf "$TEST_TMP_DIR"
-mkdir -p "$TEST_TMP_DIR"
-trap 'rm -rf "$TEST_TMP_DIR"' EXIT INT TERM
 
+source "$PROJECT_ROOT/scripts/lib/testing.sh"
 source "$WORKFLOWS"
 
 CYAN=""
@@ -54,7 +51,11 @@ fleet_dispatch_begin() { :; }
 fleet_dispatch_end() { :; }
 validate_tangle_results() { :; }
 run_agent_sync() {
-    printf '%s\n' "1. [CODING] failed marker task. Files: scripts/lib/workflows.sh"
+    if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
+        printf '%s\n' 'VERDICT: PASS' 'SCOPE_REVIEW: NONE' 'REASONS: fixture decomposition is adequate'
+        return 0
+    fi
+    printf '%s\n' "1. [CODING] failed marker task. Files: scripts/lib/workflows.sh — Task: recover a missing completion marker"
 }
 spawn_agent_capture_pid() {
     local task_id="$3"

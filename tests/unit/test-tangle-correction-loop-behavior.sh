@@ -49,6 +49,7 @@ run_gate() {
         CORRECTION_CALLS=0
         CORRECTION_STRATEGIES=()
 
+        source "$2/scripts/lib/testing.sh" 2>/dev/null
         source "$2/scripts/lib/workflows.sh" 2>/dev/null
 
         tangle_build_develop_review_context() { echo "$RESULTS_DIR/ctx-$7.md"; }
@@ -225,7 +226,7 @@ finding_identity_probe() {
     local findings_file
     findings_file="$(mktemp "$TMP_DIR/findings.XXXXXX")"
     printf '%s\n' "$findings_json" > "$findings_file"
-    bash -c 'source "$1/scripts/lib/workflows.sh" 2>/dev/null; tangle_normal_finding_keys "$2"' \
+    bash -c 'source "$1/scripts/lib/testing.sh" 2>/dev/null; source "$1/scripts/lib/workflows.sh" 2>/dev/null; tangle_normal_finding_keys "$2"' \
         _ "$PROJECT_ROOT" "$findings_file"
 }
 
@@ -240,7 +241,7 @@ fi
 test_case "delimiter-containing file and title tuples cannot collide"
 previous_keys="$(finding_identity_probe '{"findings":[{"severity":"normal","file":"src/a|b.ts","title":"c"},{"severity":"normal","file":"src/a","title":"b.ts|c"}]}')"
 current_keys="$(finding_identity_probe '{"findings":[{"severity":"normal","file":"src/a","title":"b.ts|c"}]}')"
-resolved_count="$(bash -c 'source "$1/scripts/lib/workflows.sh" 2>/dev/null; tangle_resolved_finding_count "$2" "$3"' \
+resolved_count="$(bash -c 'source "$1/scripts/lib/testing.sh" 2>/dev/null; source "$1/scripts/lib/workflows.sh" 2>/dev/null; tangle_resolved_finding_count "$2" "$3"' \
     _ "$PROJECT_ROOT" "$previous_keys" "$current_keys")"
 if [[ "$(printf '%s\n' "$previous_keys" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 2 && "$resolved_count" -eq 1 ]]; then
     test_pass

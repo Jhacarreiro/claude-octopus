@@ -24,7 +24,7 @@ PROJECT_ROOT="$WORKSPACE_DIR"
 decomposition='1. [CODING] Web baseline — Files: apps/web/package.json, apps/web/src/main.jsx — Task: create the web baseline
 2. [CODING] Server — Files: apps/server/package.json, apps/server/data/ — Task: implement the server
 3. [CODING] Web integration — Files: apps/web/package.json — Task: wire the web scripts
-4. [REASONING] Validate the handoff'
+4. [REASONING] Validate the handoff — Task: review the final handoff'
 
 test_case "consolidates only the connected overlapping coding component"
 result=$(tangle_consolidate_overlapping_subtasks "$decomposition")

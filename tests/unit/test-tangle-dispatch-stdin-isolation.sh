@@ -17,6 +17,7 @@ test_suite "tangle dispatch stdin isolation"
 export OCTOPUS_TANGLE_CODE_REVIEW=false
 
 # shellcheck source=/dev/null
+source "$PROJECT_ROOT/scripts/lib/testing.sh"
 source "$WORKFLOWS"
 
 CYAN=""
@@ -47,6 +48,10 @@ mock_command "agy" "exit 0"
 mock_command "codex" "exit 0"
 
 run_agent_sync() {
+    if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
+        printf '%s\n' 'VERDICT: PASS' 'REASONS: fixture decomposition is adequate'
+        return 0
+    fi
     cat <<'EOF'
 <external-cli-output provider="agy" trust="untrusted">
 1. [REASONING] Verify workspace clean state — Task: Check git status.

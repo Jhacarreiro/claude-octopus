@@ -102,6 +102,15 @@ else
   test_fail "expected exact provider/role ceremony sequence; roles=$roles providers=$captured_providers calls=$(tr '\n' ';' < "$CAPTURE")"
 fi
 
+test_case "design review can return its synthesis to the caller without changing stdout contract"
+returned_synthesis=""
+design_review_ceremony "test" "" returned_synthesis >/dev/null
+if [[ "$returned_synthesis" == *"Architecture: keep boundaries explicit"* ]] && [[ "$returned_synthesis" == *"Testing: run focused unit coverage"* ]]; then
+  test_pass
+else
+  test_fail "caller did not receive design-review synthesis: ${returned_synthesis:0:160}"
+fi
+
 test_case "explicit design-review override cannot bypass the provider allowlist"
 : > "$CAPTURE"
 override_rc=0

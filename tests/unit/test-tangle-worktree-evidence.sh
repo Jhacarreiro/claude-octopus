@@ -125,6 +125,24 @@ else
     test_fail "snapshot_tangle_worktree_paths used cwd repo despite explicit non-git PROJECT_ROOT"
 fi
 
+test_case "committed changes remain visible against the immutable start HEAD"
+if (
+    cd "$REPO_DIR"
+    export PROJECT_ROOT="$REPO_DIR"
+    before="$RESULTS_DIR/before-committed.txt"
+    snapshot_tangle_worktree_paths > "$before"
+    baseline_head=$(git rev-parse HEAD)
+    printf 'out of scope\n' > committed-out-of-scope.txt
+    git add committed-out-of-scope.txt
+    git commit -qm "worker commit"
+    changes=$(check_tangle_worktree_changes "$before" "$baseline_head")
+    [[ "$changes" == *"committed-out-of-scope.txt"* ]]
+); then
+    test_pass
+else
+    test_fail "committed changes disappeared from final worktree evidence"
+fi
+
 test_case "implementation prompt with no worktree change fails validation"
 if (
     cd "$REPO_DIR"

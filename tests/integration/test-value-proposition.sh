@@ -135,7 +135,7 @@ test_quality_gates_validation() {
     # wrapper owns isolation/safety preflight; _tangle_develop_in_workspace owns
     # decomposition and validation, so line-proximity to tangle_develop() is not
     # a stable integration boundary.
-    local tangle_entry_code="" tangle_workspace_code=""
+    local tangle_entry_code="" tangle_workspace_code="" tangle_validation_wrapper_code=""
     if [[ -f "$ALL_SRC" ]]; then
         tangle_entry_code=$(awk '
             /^tangle_develop\(\) \{/ { capture=1 }
@@ -147,26 +147,28 @@ test_quality_gates_validation() {
             capture { print }
             capture && /^}$/ { exit }
         ' "$ALL_SRC")
+        tangle_validation_wrapper_code=$(awk '
+            /^tangle_validate_results_with_scope_contract\(\) \{/ { capture=1 }
+            capture { print }
+            capture && /^}$/ { exit }
+        ' "$ALL_SRC")
     fi
 
-    ((TESTS_RUN++)) || true
+    test_case "Tangle includes validation step"
     if grep -c "_tangle_develop_in_workspace" >/dev/null <<< "$tangle_entry_code" && \
-       grep -c 'validate_tangle_results "$task_group"' >/dev/null <<< "$tangle_workspace_code"; then
-        echo -e "${GREEN}✓${NC} Tangle includes validation step"
-        ((TESTS_PASSED++)) || true
+       grep -c 'tangle_validate_results_with_scope_contract "$task_group"' >/dev/null <<< "$tangle_workspace_code" && \
+       grep -c 'validate_tangle_results "$task_group"' >/dev/null <<< "$tangle_validation_wrapper_code"; then
+        test_pass
     else
-        echo -e "${RED}✗${NC} Tangle includes validation step"
-        ((TESTS_FAILED++)) || true
+        test_fail "Tangle validation wrapper/delegation contract is missing"
     fi
 
-    ((TESTS_RUN++)) || true
+    test_case "Tangle decomposes tasks for parallel execution"
     if grep -c "_tangle_develop_in_workspace" >/dev/null <<< "$tangle_entry_code" && \
        grep -c 'Decompose this task into subtasks that can be executed in parallel' >/dev/null <<< "$tangle_workspace_code"; then
-        echo -e "${GREEN}✓${NC} Tangle decomposes tasks for parallel execution"
-        ((TESTS_PASSED++)) || true
+        test_pass
     else
-        echo -e "${RED}✗${NC} Tangle decomposes tasks for parallel execution"
-        ((TESTS_FAILED++)) || true
+        test_fail "Tangle parallel decomposition prompt is missing"
     fi
 }
 
@@ -362,6 +364,10 @@ test_async_performance
 test_tmux_visualization
 
 # Summary
+# This integration file still has legacy assertions that increment TESTS_RUN
+# directly. Add those to framework-native TESTS_TOTAL until the remaining
+# assertions are migrated to test_case/test_pass/test_fail.
+TESTS_TOTAL=$((TESTS_RUN + TESTS_TOTAL))
 echo ""
 echo -e "${YELLOW}═══════════════════════════════════════════════════════════${NC}"
 echo -e "${YELLOW}Test Summary${NC}"

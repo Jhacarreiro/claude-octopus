@@ -2474,32 +2474,45 @@ tangle_build_review_diff_snapshot() {
         return 1
     fi
 
-    if ! review_collect_diff all-changes > "$snapshot_tmp"; then
-        rm -f "$snapshot_tmp" 2>/dev/null || true
-        return 1
-    fi
-    status_text=$(git status --porcelain --untracked-files=all 2>/dev/null || true)
-    if [[ ! -s "$snapshot_tmp" && -n "$status_text" ]]; then
-        # One bounded regeneration handles transient index/worktree races. If the
-        # invariant still fails, stop instead of asking reviewers to inspect nothing.
-        review_collect_diff all-changes > "$snapshot_tmp" 2>/dev/null || true
-        if [[ ! -s "$snapshot_tmp" ]]; then
-            rm -f "$snapshot_tmp" 2>/dev/null || true
-            log ERROR "tangle review snapshot invariant failed: git status is dirty but all-changes diff is empty"
+    (
+        trap 'rm -f "$snapshot_tmp" 2>/dev/null || true' EXIT INT TERM
+
+        if ! review_collect_diff all-changes > "$snapshot_tmp"; then
             return 1
         fi
-    fi
-    if [[ ! -s "$snapshot_tmp" ]]; then
-        rm -f "$snapshot_tmp" 2>/dev/null || true
-        log WARN "No changes found to review"
-        return 2
-    fi
+        status_text=$(git status --porcelain --untracked-files=all 2>/dev/null || true)
+        if [[ ! -s "$snapshot_tmp" && -n "$status_text" ]]; then
+            # One bounded regeneration handles transient index/worktree races. If the
+            # invariant still fails, stop instead of asking reviewers to inspect nothing.
+            review_collect_diff all-changes > "$snapshot_tmp" 2>/dev/null || true
+            if [[ ! -s "$snapshot_tmp" ]]; then
+                log ERROR "tangle review snapshot invariant failed: git status is dirty but all-changes diff is empty"
+                return 1
+            fi
+        fi
+        if [[ ! -s "$snapshot_tmp" ]]; then
+            log WARN "No changes found to review"
+            return 2
+        fi
 
-    mv -f "$snapshot_tmp" "$snapshot_path" || { rm -f "$snapshot_tmp" 2>/dev/null || true; return 1; }
-    chmod 0444 "$snapshot_path" 2>/dev/null || true
-    hash_value=$(sha256sum "$snapshot_path" 2>/dev/null | awk '{print $1}' || true)
-    log INFO "Tangle review snapshot: ${snapshot_path}${hash_value:+ (sha256=${hash_value})}"
-    printf '%s\n' "$snapshot_path"
+        hash_value=""
+        if command -v sha256sum >/dev/null 2>&1; then
+            hash_value=$(sha256sum "$snapshot_tmp" 2>/dev/null | awk '{print $1}' || true)
+        fi
+        if [[ -z "$hash_value" ]] && command -v shasum >/dev/null 2>&1; then
+            hash_value=$(shasum -a 256 "$snapshot_tmp" 2>/dev/null | awk '{print $1}' || true)
+        fi
+        if [[ -z "$hash_value" ]]; then
+            log ERROR "unable to compute SHA-256 for tangle review snapshot"
+            return 1
+        fi
+
+        mv -f "$snapshot_tmp" "$snapshot_path" || return 1
+        chmod 0444 "$snapshot_path" 2>/dev/null || true
+        trap - EXIT INT TERM
+        log INFO "Tangle review snapshot: ${snapshot_path} (sha256=${hash_value})"
+        printf '%s\n' "$snapshot_path"
+    )
 }
 
 tangle_run_context_code_review() {

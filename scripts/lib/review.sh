@@ -1187,16 +1187,39 @@ review_collect_working_tree_diff() {
     printf '%s' "$diff_content"
 }
 
+# review_collect_unborn_worktree_diff: collects the effective worktree of a repository
+# with no commits yet. Every tracked or untracked non-ignored file is an addition relative
+# to the empty repository, and current worktree content wins over transient index state.
+review_collect_unborn_worktree_diff() {
+    local diff_content=""
+    local path=""
+    local file_diff=""
+    while IFS= read -r -d '' path; do
+        [[ -f "$path" || -L "$path" ]] || continue
+        file_diff=$(git diff --no-index -- /dev/null "$path" 2>/dev/null || true)
+        if [[ -n "$file_diff" ]]; then
+            [[ -n "$diff_content" ]] && diff_content+=$'\n'
+            diff_content+="$file_diff"
+        fi
+    done < <(git ls-files --cached --others --exclude-standard -z 2>/dev/null)
+    printf '%s' "$diff_content"
+}
+
 # review_collect_all_changes_diff: collects the effective tracked worktree against HEAD
 # plus untracked files. Unlike working-tree, this includes staged-only changes too.
+# An unborn repository is compared to the empty repository instead of assuming HEAD exists.
 review_collect_all_changes_diff() {
     local diff_content=""
     local untracked_content=""
-    diff_content=$(git diff HEAD 2>/dev/null || true)
-    untracked_content=$(review_collect_untracked_diff)
-    if [[ -n "$untracked_content" ]]; then
-        [[ -n "$diff_content" ]] && diff_content+=$'\n'
-        diff_content+="$untracked_content"
+    if git rev-parse --verify HEAD >/dev/null 2>&1; then
+        diff_content=$(git diff HEAD 2>/dev/null || true)
+        untracked_content=$(review_collect_untracked_diff)
+        if [[ -n "$untracked_content" ]]; then
+            [[ -n "$diff_content" ]] && diff_content+=$'\n'
+            diff_content+="$untracked_content"
+        fi
+    else
+        diff_content=$(review_collect_unborn_worktree_diff)
     fi
     printf '%s' "$diff_content"
 }

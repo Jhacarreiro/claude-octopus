@@ -269,6 +269,22 @@ assert_contains "$(cat "$TMPDIR_TEST/all-changes.diff")" \
 assert_contains "$(cat "$TMPDIR_TEST/all-changes.diff")" \
   "\+changed staged" "review_collect_diff: all-changes includes staged content"
 
+# ── all-changes diff supports an unborn HEAD ─────────────────────────────────
+
+UNBORN_REPO="$TMPDIR_TEST/review-all-changes-unborn"
+mkdir -p "$UNBORN_REPO"
+(
+  cd "$UNBORN_REPO"
+  git init -q
+  printf 'first staged content\n' > first.txt
+  git add first.txt
+  review_collect_diff all-changes > "$TMPDIR_TEST/all-changes-unborn.diff"
+)
+assert_contains "$(cat "$TMPDIR_TEST/all-changes-unborn.diff")" \
+  "first.txt" "review_collect_diff: all-changes handles staged files with unborn HEAD"
+assert_contains "$(cat "$TMPDIR_TEST/all-changes-unborn.diff")" \
+  "\+first staged content" "review_collect_diff: unborn HEAD includes staged file content"
+
 # ── MCP schema ───────────────────────────────────────────────────────────────
 
 MCP_INDEX="$PROJECT_ROOT/mcp-server/src/index.ts"

@@ -386,17 +386,27 @@ octopus_tangle_apply_execution_boundary() {
     fi
 
     results_dir="${OCTOPUS_TANGLE_RESULTS_DIR:-${RESULTS_DIR:-}}"
-    if [[ -n "$results_dir" && -d "$results_dir" ]]; then
+    if [[ -n "$results_dir" ]]; then
+        [[ -d "$results_dir" && ! -L "$results_dir" ]] || {
+            log ERROR "Tangle boundary refused: result channel is not a real directory"
+            return 125
+        }
         physical_results=$(cd "$results_dir" 2>/dev/null && pwd -P) || return 125
         if [[ "$physical_results" == "$physical_worktree" ]]; then
             log ERROR "Tangle boundary refused: parent-owned results must not equal the writable worktree"
             return 125
         fi
-        case "$physical_results" in
-            "$physical_worktree"/*)
-                boundary_cmd+=(--ro-bind "$physical_results" "$physical_results")
+        case "$physical_worktree/" in
+            "$physical_results/"*)
+                log ERROR "Tangle boundary refused: result channel contains the writable worktree"
+                return 125
                 ;;
         esac
+        # Seal the result channel explicitly even when it is on a mount that
+        # is not covered by the root read-only bind. Provider stdout/stderr
+        # still reaches the parent through already-open descriptors; the
+        # provider cannot forge result artifacts by pathname.
+        boundary_cmd+=(--ro-bind "$physical_results" "$physical_results")
     fi
 
     boundary_cmd+=(--)

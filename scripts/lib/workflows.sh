@@ -1685,8 +1685,21 @@ tangle_parseable_coding_subtask_count() {
     echo "$count"
 }
 
+tangle_validate_subtask_task_clauses() {
+    local subtasks="$1" line subtask
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        tangle_line_is_numbered_subtask "$line" || continue
+        subtask=$(printf '%s\n' "$line" | sed -E 's/^[[:space:]]*(\*\*)?[0-9]+[\.\)][[:space:]]*//; s/^[[:space:]]+//')
+        if [[ "$subtask" =~ \[REASONING\] ]] && ! tangle_task_clause_is_valid "$subtask"; then
+            return 1
+        fi
+    done <<< "$subtasks"
+}
+
 tangle_decomposition_output_usable() {
     local subtasks="${1:-}" parseable_count coding_count line subtask scopes
+    tangle_validate_subtask_task_clauses "$subtasks" || return 1
     parseable_count="$(tangle_parseable_subtask_count "$subtasks")"
     coding_count="$(tangle_parseable_coding_subtask_count "$subtasks")"
     [[ "$parseable_count" -gt 0 && "$coding_count" -gt 0 ]] || return 1
@@ -1775,17 +1788,17 @@ ${previous_decomposition}
 
 tangle_task_clause_is_valid() {
     local text="$1"
-    local structured task_count task_text
-    structured=$(printf '%s\n' "$text" | sed -E 's/[[:space:]]+[—-][[:space:]]+(Files|Creates|Reads|Task):/\n\1:/g')
-    task_count=$(printf '%s\n' "$structured" | grep -c '^Task:' || true)
-    if [[ "$task_count" -eq 0 ]]; then
-        task_count=$(printf '%s\n' "$text" | grep -oE '[[:space:]]Task:' | wc -l | tr -d ' ')
-        [[ "$task_count" -eq 1 ]] || return 1
-        task_text=$(printf '%s\n' "$text" | sed -n 's/.*[[:space:]]Task:[[:space:]]*//p' | head -n 1)
-    else
-        [[ "$task_count" -eq 1 ]] || return 1
-        task_text=$(printf '%s\n' "$structured" | sed -n 's/^Task:[[:space:]]*//p' | head -n 1)
-    fi
+    local segment task_count=0 task_text=""
+    # Use the same clause boundary parser as scope extraction. In particular,
+    # do not accept a reasoning line merely because it contains some prose
+    # after a malformed or repeated Task: label.
+    while IFS= read -r segment; do
+        [[ "$segment" == Task:* ]] || continue
+        ((task_count++)) || true
+        task_text="${segment#Task:}"
+        task_text="${task_text#"${task_text%%[![:space:]]*}"}"
+    done < <(tangle_structured_clause_segments "$text")
+    [[ "$task_count" -eq 1 ]] || return 1
     [[ -n "${task_text//[[:space:]]/}" ]]
 }
 
@@ -3533,6 +3546,15 @@ _tangle_develop_in_workspace() {
     else
         : > "$worktree_before_state_file"
     fi
+    TANGLE_WORKTREE_BEFORE_PATHS_DIGEST=$(tangle_file_digest "$worktree_before_file") || {
+        log ERROR "Tangle could not seal the parent-owned worktree path snapshot"
+        return 1
+    }
+    TANGLE_WORKTREE_BEFORE_STATE_DIGEST=$(tangle_file_digest "$worktree_before_state_file") || {
+        log ERROR "Tangle could not seal the parent-owned worktree state snapshot"
+        return 1
+    }
+    export TANGLE_WORKTREE_BEFORE_PATHS_DIGEST TANGLE_WORKTREE_BEFORE_STATE_DIGEST
 
     # Initialize tmux if enabled
     if [[ "$TMUX_MODE" == "true" ]]; then
@@ -4036,7 +4058,7 @@ Every [CODING] line must include at least one same-line Files: or Creates: claus
     log INFO "Step 3: Validation gate..."
     local validation_file="${RESULTS_DIR:-${HOME}/.claude-octopus/results}/tangle-validation-${task_group}.md"
     local validation_rc=0
-    tangle_validate_results_with_scope_contract "$task_group" "$resolved_prompt" "$worktree_before_file" "$subtasks" "$tangle_start_head" "$tangle_scope_manifest" || validation_rc=$?
+    tangle_validate_results_with_scope_contract "$task_group" "$resolved_prompt" "$worktree_before_file" "$subtasks" "$tangle_start_head" "$tangle_scope_manifest" "$worktree_before_state_file" || validation_rc=$?
 
     if ! tangle_should_attempt_contextual_review "$validation_rc" "$worktree_before_state_file"; then
         log ERROR "Tangle validation failed with status ${validation_rc}; no recoverable worktree progress detected, stopping before contextual review and corrections"
@@ -4047,7 +4069,7 @@ Every [CODING] line must include at least one same-line Files: or Creates: claus
     fi
 
     tangle_contextual_review_gate "$task_group" "$resolved_prompt" "$context" "$subtasks" \
-        "$validation_file" "$worktree_before_file" "$validation_rc" "$tangle_coding_agent" "$tangle_start_head" "$tangle_scope_manifest"
+        "$validation_file" "$worktree_before_file" "$validation_rc" "$tangle_coding_agent" "$tangle_start_head" "$tangle_scope_manifest" "$worktree_before_state_file"
     return $?
 }
 
@@ -4075,9 +4097,10 @@ tangle_authorized_read_scopes() {
 
 tangle_changed_paths_outside_write_scopes() {
     local subtasks="$1" worktree_before_file="$2" baseline_head="${3:-}"
+    local worktree_before_state_file="${4:-}"
     local authorized_scopes changed_paths path scope matched
     authorized_scopes=$(tangle_authorized_write_scopes "$subtasks")
-    changed_paths=$(check_tangle_worktree_changes "$worktree_before_file" "$baseline_head") || return 1
+    changed_paths=$(check_tangle_worktree_changes "$worktree_before_file" "$baseline_head" "$worktree_before_state_file") || return 1
     while IFS= read -r path; do
         [[ -n "$path" ]] || continue
         matched=false
@@ -4112,11 +4135,19 @@ tangle_append_write_scope_contract_report() {
 tangle_validate_results_with_scope_contract() {
     local task_group="$1" original_prompt="$2" worktree_before_file="$3" subtasks="$4"
     local baseline_head="${5:-}" scope_manifest_digest="${6:-}"
+    local worktree_before_state_file="${7:-}"
     local validation_file="${RESULTS_DIR:-${HOME}/.claude-octopus/results}/tangle-validation-${task_group}.md"
-    local authorized read_only violations current_manifest_digest base_rc=0
+    local authorized read_only violations="" current_manifest_digest base_rc=0
     authorized=$(tangle_authorized_write_scopes "$subtasks")
     read_only=$(tangle_authorized_read_scopes "$subtasks")
-    if ! violations=$(tangle_changed_paths_outside_write_scopes "$subtasks" "$worktree_before_file" "$baseline_head"); then
+    if [[ -n "${TANGLE_WORKTREE_BEFORE_STATE_DIGEST:-}" && -n "$worktree_before_state_file" ]]; then
+        local state_digest
+        state_digest=$(tangle_file_digest "$worktree_before_state_file" 2>/dev/null || true)
+        if [[ "$state_digest" != "$TANGLE_WORKTREE_BEFORE_STATE_DIGEST" ]]; then
+            violations="The parent-owned worktree state snapshot changed before final validation."
+        fi
+    fi
+    if [[ -z "$violations" ]] && ! violations=$(tangle_changed_paths_outside_write_scopes "$subtasks" "$worktree_before_file" "$baseline_head" "$worktree_before_state_file"); then
         violations="Unable to verify final worktree changes against immutable start HEAD."
     fi
     if [[ -n "$scope_manifest_digest" ]]; then
@@ -4133,7 +4164,7 @@ tangle_validate_results_with_scope_contract() {
         tangle_append_write_scope_contract_report "$validation_file" "$authorized" "$read_only" "$violations" "$baseline_head"
         return 1
     fi
-    validate_tangle_results "$task_group" "$original_prompt" "$worktree_before_file" "$baseline_head" || base_rc=$?
+    validate_tangle_results "$task_group" "$original_prompt" "$worktree_before_file" "$baseline_head" "$worktree_before_state_file" || base_rc=$?
     tangle_append_write_scope_contract_report "$validation_file" "$authorized" "$read_only" "$violations" "$baseline_head"
     return "$base_rc"
 }
@@ -4194,6 +4225,7 @@ tangle_contextual_review_gate() {
     local tangle_coding_agent="${8:-codex}"
     local baseline_head="${9:-}"
     local scope_manifest_digest="${10:-}"
+    local worktree_before_state_file="${11:-}"
 
     if octo_bool_disabled "${OCTOPUS_TANGLE_CODE_REVIEW:-true}"; then
         log INFO "Contextual code review disabled by OCTOPUS_TANGLE_CODE_REVIEW"
@@ -4287,7 +4319,7 @@ tangle_contextual_review_gate() {
         OCTOPUS_TANGLE_VALIDATION_CORRECTION_ROUND="$correction_round" \
         OCTOPUS_TANGLE_VALIDATION_CORRECTION_STATUS="${TANGLE_CORRECTION_STATUS:-}" \
         OCTOPUS_TANGLE_VALIDATION_CORRECTION_CHANGED="${TANGLE_CORRECTION_CHANGED:-0}" \
-            tangle_validate_results_with_scope_contract "$task_group" "$resolved_prompt" "$worktree_before_file" "$subtasks" "$baseline_head" "$scope_manifest_digest" || validation_rc=$?
+            tangle_validate_results_with_scope_contract "$task_group" "$resolved_prompt" "$worktree_before_file" "$subtasks" "$baseline_head" "$scope_manifest_digest" "$worktree_before_state_file" || validation_rc=$?
 
         review_context_file=$(tangle_build_develop_review_context "$task_group" "$resolved_prompt" "$context" "$subtasks" "$validation_file" "$worktree_before_file" "correction-${correction_round}")
         review_rc=0

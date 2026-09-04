@@ -465,6 +465,10 @@ printf '%s\n' '{"findings":[]}' > "$retry_results/review-findings-old-${retry_id
 retry_calls="$workspace/review-calls"
 printf '0\n' > "$retry_calls"
 if (
+    # Bash 5 inherits the framework's EXIT cleanup trap into this subshell.
+    # The review function correctly restores caller traps, but this fixture
+    # must not let the child remove the parent suite's shared TEST_TMP_DIR.
+    trap - EXIT
     cd "$workspace" || exit 1
     export RESULTS_DIR="$retry_results"
     mktemp() {

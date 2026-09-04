@@ -2525,7 +2525,11 @@ tangle_build_review_diff_snapshot() {
         fi
 
         mv -f "$snapshot_tmp" "$snapshot_path" || return 1
-        chmod 0444 "$snapshot_path" 2>/dev/null || true
+        if ! chmod 0444 "$snapshot_path" 2>/dev/null; then
+            rm -f "$snapshot_path" 2>/dev/null || true
+            log ERROR "unable to make tangle review snapshot immutable"
+            return 1
+        fi
         trap - EXIT INT TERM
         log INFO "Tangle review snapshot: ${snapshot_path} (sha256=${hash_value})"
         printf '%s\n' "$snapshot_path"

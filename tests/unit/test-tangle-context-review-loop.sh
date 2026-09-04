@@ -20,7 +20,7 @@ assert_contains() {
     local pattern="$2"
     local label="$3"
     test_case "$label"
-    if grep -q "$pattern" "$file"; then
+    if grep -Fq -- "$pattern" "$file"; then
         test_pass
     else
         test_fail "missing pattern: $pattern"
@@ -196,9 +196,9 @@ assert_contains "$WORKFLOWS" "tangle_run_context_code_review" "tangle runs conte
 assert_contains "$WORKFLOWS" "tangle_build_review_diff_snapshot" "tangle snapshots complete review input"
 assert_contains "$WORKFLOWS" "all-changes" "tangle snapshot includes staged and unstaged changes"
 assert_contains "$WORKFLOWS" "regenerating immutable review snapshot once" "dirty no-diff review retries exactly once"
-assert_contains "$WORKFLOWS" 'review_run "\$review_profile" 2>&1 | tee "\$review_log"' "review output waits for tee before inspection"
-assert_contains "$WORKFLOWS" 'PIPESTATUS\[0\]' "review status comes from review_run"
-assert_contains "$WORKFLOWS" '"\${review_log:-}"' "review log is covered by cleanup trap"
+assert_contains "$WORKFLOWS" 'review_run "$review_profile" 2>&1 | tee "$review_log"' "review output waits for tee before inspection"
+assert_contains "$WORKFLOWS" 'PIPESTATUS[0]' "review status comes from review_run"
+assert_contains "$WORKFLOWS" '"${review_log:-}"' "review log is covered by cleanup trap"
 assert_contains "$WORKFLOWS" "contextFile" "review profile passes contextFile"
 assert_contains "$WORKFLOWS" ".claude-octopus/results" "review context is stored inside workspace"
 assert_contains "$WORKFLOWS" "plan-conformance" "review focus includes plan conformance"

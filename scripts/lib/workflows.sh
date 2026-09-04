@@ -2455,7 +2455,7 @@ tangle_build_review_diff_snapshot() {
     local task_group="$1"
     local round_label="${2:-initial}"
     local results_dir="${RESULTS_DIR:-${HOME}/.claude-octopus/results}"
-    local snapshot_name snapshot_path snapshot_tmp status_text hash_value
+    local snapshot_name snapshot_path snapshot_tmp snapshot_tmp_dir repo_root temp_root_physical status_text hash_value
 
     if [[ -z "$task_group" || "$task_group" == "." || "$task_group" == ".." ||
           "$task_group" == *[![:alnum:]_.-]* || "$task_group" == *..* ||
@@ -2468,9 +2468,26 @@ tangle_build_review_diff_snapshot() {
     mkdir -p "$results_dir" || return 1
     snapshot_name="tangle-review-input-${task_group}-${round_label}-$(date +%s)-$$.diff"
     snapshot_path="${results_dir}/${snapshot_name}"
-    snapshot_tmp="${snapshot_path}.tmp.$RANDOM"
-    if [[ -L "$results_dir" || -e "$snapshot_path" || -L "$snapshot_path" || -e "$snapshot_tmp" || -L "$snapshot_tmp" ]]; then
+    if [[ -L "$results_dir" || -e "$snapshot_path" || -L "$snapshot_path" ]]; then
         log ERROR "tangle review snapshot path is unsafe"
+        return 1
+    fi
+
+    # Keep the scratch file out of the repository so an unignored RESULTS_DIR
+    # cannot make the scratch file part of the all-changes review input.
+    snapshot_tmp_dir="${TMPDIR:-/tmp}"
+    repo_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+    if [[ -n "$repo_root" ]]; then
+        repo_root=$(cd "$repo_root" 2>/dev/null && pwd -P) || return 1
+        temp_root_physical=$(cd "$snapshot_tmp_dir" 2>/dev/null && pwd -P) || temp_root_physical=""
+        case "$temp_root_physical" in
+            "$repo_root"|"$repo_root"/*) snapshot_tmp_dir="/tmp" ;;
+        esac
+    fi
+    snapshot_tmp=$(mktemp "${snapshot_tmp_dir%/}/octopus-tangle-review-snapshot.XXXXXX") || return 1
+    if [[ -L "$snapshot_tmp" || ! -f "$snapshot_tmp" ]]; then
+        rm -f "$snapshot_tmp" 2>/dev/null || true
+        log ERROR "tangle review snapshot temporary path is unsafe"
         return 1
     fi
 
@@ -2521,6 +2538,7 @@ tangle_run_context_code_review() {
     local round_label="${3:-initial}"
     local marker findings_file review_profile review_rc review_target review_log retry_target
     local explicit_review_target="${OCTOPUS_TANGLE_REVIEW_TARGET:-}"
+    local _review_exit_trap _review_int_trap _review_term_trap _review_traps_installed=0
     TANGLE_REVIEW_FINDINGS_FILE=""
 
     if ! declare -F review_run >/dev/null 2>&1; then
@@ -2552,8 +2570,14 @@ tangle_run_context_code_review() {
 
     log INFO "Step 4: Contextual code review (${round_label})..."
     review_log=$(mktemp "${TMPDIR:-/tmp}/octopus-tangle-review-output.XXXXXX")
-    review_run "$review_profile" > >(tee "$review_log") 2>&1
-    review_rc=$?
+    _review_exit_trap=$(trap -p EXIT || true)
+    _review_int_trap=$(trap -p INT || true)
+    _review_term_trap=$(trap -p TERM || true)
+    trap 'rm -f "${marker:-}" "${review_log:-}" 2>/dev/null || true' EXIT INT TERM
+    _review_traps_installed=1
+
+    review_run "$review_profile" 2>&1 | tee "$review_log"
+    review_rc="${PIPESTATUS[0]}"
 
     if [[ "$review_rc" -ne 0 && -z "$explicit_review_target" ]] &&
        grep -qi "No changes found to review" "$review_log" 2>/dev/null &&
@@ -2561,13 +2585,17 @@ tangle_run_context_code_review() {
         log WARN "Contextual reviewer reported no changes despite a dirty repository; regenerating immutable review snapshot once"
         retry_target=$(tangle_build_review_diff_snapshot "$task_group" "${round_label}-retry1") || {
             rm -f "$review_log" 2>/dev/null || true
+            trap - EXIT INT TERM
+            [[ -n "$_review_exit_trap" ]] && eval "$_review_exit_trap"
+            [[ -n "$_review_int_trap" ]] && eval "$_review_int_trap"
+            [[ -n "$_review_term_trap" ]] && eval "$_review_term_trap"
             return 1
         }
         review_profile=$(printf '%s' "$review_profile" | jq -c --arg target "$retry_target" '.target=$target')
         touch "$marker"
         : > "$review_log"
-        review_run "$review_profile" > >(tee "$review_log") 2>&1
-        review_rc=$?
+        review_run "$review_profile" 2>&1 | tee "$review_log"
+        review_rc="${PIPESTATUS[0]}"
     fi
 
     findings_file=""
@@ -2583,6 +2611,12 @@ tangle_run_context_code_review() {
         fi
     done < <(find "${RESULTS_DIR:-${HOME}/.claude-octopus/results}" -maxdepth 1 -type f -name 'review-findings-*.json' 2>/dev/null || true)
     rm -f "$marker" "$review_log" 2>/dev/null || true
+    if [[ "$_review_traps_installed" -eq 1 ]]; then
+        trap - EXIT INT TERM
+        [[ -n "$_review_exit_trap" ]] && eval "$_review_exit_trap"
+        [[ -n "$_review_int_trap" ]] && eval "$_review_int_trap"
+        [[ -n "$_review_term_trap" ]] && eval "$_review_term_trap"
+    fi
     trap - RETURN
     if [[ -n "$_marker_cleanup_trap" ]]; then
         eval "$_marker_cleanup_trap"

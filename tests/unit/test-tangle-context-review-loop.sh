@@ -196,6 +196,9 @@ assert_contains "$WORKFLOWS" "tangle_run_context_code_review" "tangle runs conte
 assert_contains "$WORKFLOWS" "tangle_build_review_diff_snapshot" "tangle snapshots complete review input"
 assert_contains "$WORKFLOWS" "all-changes" "tangle snapshot includes staged and unstaged changes"
 assert_contains "$WORKFLOWS" "regenerating immutable review snapshot once" "dirty no-diff review retries exactly once"
+assert_contains "$WORKFLOWS" 'review_run "\$review_profile" 2>&1 | tee "\$review_log"' "review output waits for tee before inspection"
+assert_contains "$WORKFLOWS" 'PIPESTATUS\[0\]' "review status comes from review_run"
+assert_contains "$WORKFLOWS" '"\${review_log:-}"' "review log is covered by cleanup trap"
 assert_contains "$WORKFLOWS" "contextFile" "review profile passes contextFile"
 assert_contains "$WORKFLOWS" ".claude-octopus/results" "review context is stored inside workspace"
 assert_contains "$WORKFLOWS" "plan-conformance" "review focus includes plan conformance"
@@ -238,6 +241,70 @@ if snapshot=$(cd "$workspace" && RESULTS_DIR="$snapshot_results" tangle_build_re
     test_pass
 else
     test_fail "review snapshot must immutably cover staged, unstaged, and untracked changes"
+fi
+
+test_case "repository-local results do not contaminate review snapshots"
+workspace=$(make_test_dir workspace-local-results)
+git -C "$workspace" init -q
+git -C "$workspace" config user.email test@example.com
+git -C "$workspace" config user.name "Octopus Test"
+printf 'tracked content\n' > "$workspace/tracked.txt"
+git -C "$workspace" add tracked.txt
+git -C "$workspace" commit -q -m init
+printf 'changed content\n' > "$workspace/tracked.txt"
+local_results="$workspace/review-results"
+mkdir -p "$local_results"
+if snapshot=$(cd "$workspace" && RESULTS_DIR="$local_results" tangle_build_review_diff_snapshot "test" "local-results") &&
+   ! grep -q '\.tmp\.' "$snapshot"; then
+    rm -f "$snapshot"
+    printf 'tracked content\n' > "$workspace/tracked.txt"
+    if [[ -z "$(git -C "$workspace" status --porcelain)" ]]; then
+        test_pass
+    else
+        test_fail "repository-local snapshot cleanup left the worktree dirty"
+    fi
+else
+    test_fail "repository-local results must not add snapshot scratch files to review input"
+fi
+
+test_case "context review waits for tee before retry inspection"
+workspace=$(make_test_dir workspace-synchronized-review)
+git -C "$workspace" init -q
+git -C "$workspace" config user.email test@example.com
+git -C "$workspace" config user.name "Octopus Test"
+printf 'base content\n' > "$workspace/tracked.txt"
+git -C "$workspace" add tracked.txt
+git -C "$workspace" commit -q -m init
+printf 'changed content\n' > "$workspace/tracked.txt"
+sync_results="$workspace/review-results"
+mkdir -p "$sync_results"
+sync_calls="$workspace/review-calls"
+printf '0\n' > "$sync_calls"
+if (
+    cd "$workspace" || exit 1
+    export RESULTS_DIR="$sync_results"
+    tee() { sleep 1; command tee "$@"; }
+    review_run() {
+        local calls
+        calls=$(<"$sync_calls")
+        printf '%s\n' "$((calls + 1))" > "$sync_calls"
+        if [[ "$calls" -eq 0 ]]; then
+            printf '%s\n' "No changes found to review"
+            return 1
+        fi
+        printf '%s\n' '{"findings":[]}' > "$RESULTS_DIR/review-findings-synchronized.json"
+        printf '%s\n' "review recovered"
+        return 0
+    }
+    if tangle_run_context_code_review test "$workspace/context.md" initial; then
+        [[ "$(<"$sync_calls")" -eq 2 ]]
+    else
+        false
+    fi
+); then
+    test_pass
+else
+    test_fail "context review must wait for tee so the dirty no-diff retry is not skipped"
 fi
 
 test_case "generated review context stays inside the workspace"

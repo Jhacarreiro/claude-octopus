@@ -127,18 +127,30 @@ tangle_state_manifest_entries() {
 
 tangle_state_manifest_paths_changed() {
     local before_state="$1" current_state="$2"
-    local before_entries current_entries
+    local before_entries current_entries changed_entries changed_paths rc=0
     before_entries=$(mktemp "${TMPDIR:-/tmp}/octo-tangle-state-before.XXXXXX") || return 1
     current_entries=$(mktemp "${TMPDIR:-/tmp}/octo-tangle-state-current.XXXXXX") || {
         rm -f "$before_entries"
         return 1
     }
+    changed_entries=$(mktemp "${TMPDIR:-/tmp}/octo-tangle-state-changed.XXXXXX") || {
+        rm -f "$before_entries" "$current_entries"
+        return 1
+    }
     tangle_state_manifest_entries "$before_state" | sort > "$before_entries"
     tangle_state_manifest_entries "$current_state" | sort > "$current_entries"
-    comm -3 "$before_entries" "$current_entries" \
-        | awk -F '\t' 'NF >= 2 { print $2 }' \
-        | sed '/^$/d' | sort -u
-    rm -f "$before_entries" "$current_entries"
+    comm -23 "$before_entries" "$current_entries" > "$changed_entries" || {
+        rm -f "$before_entries" "$current_entries" "$changed_entries"
+        return 1
+    }
+    comm -13 "$before_entries" "$current_entries" >> "$changed_entries" || {
+        rm -f "$before_entries" "$current_entries" "$changed_entries"
+        return 1
+    }
+    changed_paths=$(awk -F '\t' '$1 == "ENTRY" && NF >= 2 { print $2 }' "$changed_entries" | sed '/^$/d' | sort -u) || rc=$?
+    rm -f "$before_entries" "$current_entries" "$changed_entries"
+    [[ "$rc" -eq 0 ]] || return "$rc"
+    printf '%s\n' "$changed_paths" | sed '/^$/d'
 }
 
 tangle_file_digest() {
@@ -204,7 +216,7 @@ check_tangle_worktree_changes() {
     local baseline_head="${2:-}"
     local before_state_file="${3:-}"
     local current_file
-    current_file=$(mktemp "${TMPDIR:-/tmp}/octo-tangle-worktree-after.XXXXXX") || return 0
+    current_file=$(mktemp "${TMPDIR:-/tmp}/octo-tangle-worktree-after.XXXXXX") || return 1
 
     # The snapshot is parent-owned evidence. If a provider can rewrite it,
     # subtracting the rewritten names would turn an out-of-scope change into
@@ -267,24 +279,25 @@ check_tangle_worktree_changes() {
         else
             new_paths=$(<"$current_file")
         fi
+        local state_delta=""
+        if [[ -n "$before_state_file" && -f "$before_state_file" ]]; then
+            local current_state
+            current_state=$(mktemp "${TMPDIR:-/tmp}/octo-tangle-state-final.XXXXXX") || {
+                rm -f "$current_file"
+                return 1
+            }
+            snapshot_tangle_worktree_state > "$current_state" 2>/dev/null || true
+            state_delta=$(tangle_state_manifest_paths_changed "$before_state_file" "$current_state") || {
+                rm -f "$current_file" "$current_state"
+                return 1
+            }
+            rm -f "$current_state"
+        fi
         {
             printf '%s\n' "$baseline_new_paths"
             printf '%s\n' "$new_paths"
-            if [[ -n "$before_state_file" && -f "$before_state_file" ]]; then
-                local current_state state_delta
-                current_state=$(mktemp "${TMPDIR:-/tmp}/octo-tangle-state-final.XXXXXX") || {
-                    rm -f "$current_file"
-                    return 1
-                }
-                snapshot_tangle_worktree_state > "$current_state" 2>/dev/null || true
-                state_delta=$(tangle_state_manifest_paths_changed "$before_state_file" "$current_state") || {
-                    rm -f "$current_file" "$current_state"
-                    return 1
-                }
-                printf '%s\n' "$state_delta"
-                rm -f "$current_state"
-            fi
-        } | sed /^$/d | grep -Ev '^\.claude-octopus(/|$)|^\.octo(/|$)' | sort -u
+            printf '%s\n' "$state_delta"
+        } | sed '/^$/d' | awk '!/^\.claude-octopus(\/|$)/ && !/^\.octo(\/|$)/' | sort -u
         rm -f "$current_file"
         return 0
     fi
@@ -463,6 +476,7 @@ validate_tangle_results() {
     local original_prompt="$2"
     local worktree_before_file="${3:-}"
     local baseline_head="${4:-}"
+    local worktree_before_state_file="${5:-}"
     local validation_file="${RESULTS_DIR}/tangle-validation-${task_group}.md"
     local quality_retry_count=0
     local correction_file="${OCTOPUS_TANGLE_VALIDATION_CORRECTION_FILE:-}"
@@ -531,7 +545,7 @@ validate_tangle_results() {
         local migration_history_details="No changed Supabase migrations."
         local migration_history_failed=false
         if [[ -n "$worktree_before_file" && -f "$worktree_before_file" ]]; then
-            if ! worktree_changes=$(check_tangle_worktree_changes "$worktree_before_file" "$baseline_head"); then
+            if ! worktree_changes=$(check_tangle_worktree_changes "$worktree_before_file" "$baseline_head" "$worktree_before_state_file"); then
                 worktree_changes=""
                 hard_gate_retry_feedback="${hard_gate_retry_feedback}"$'Hard gate failure: immutable Tangle start HEAD could not be verified against the final worktree.\n\n'
                 log ERROR "Unable to verify Tangle worktree changes against immutable start HEAD"

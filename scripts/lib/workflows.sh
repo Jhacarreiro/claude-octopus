@@ -1866,8 +1866,21 @@ ${previous_output}"
         primary=$(octopus_execution_profile_provider "tangle" "decompose" "researcher" "agy")
         fallback=$(octopus_execution_profile_provider "tangle" "decompose_fallback" "implementer" "codex")
     fi
-    OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-redecompose-validation" run_agent_sync "$primary" "$prompt" 0 "researcher" "tangle" || \
-        OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-redecompose-validation" run_agent_sync "$fallback" "$prompt" 0 "researcher" "tangle"
+    if ! declare -f run_agent_sync_fallback_chain >/dev/null 2>&1; then
+        log ERROR "Tangle redecomposition requires the configured fallback-chain engine"
+        return 1
+    fi
+    OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-redecompose-validation" \
+        run_agent_sync_fallback_chain "$primary" "$prompt" 0 "researcher" "tangle" \
+        tangle_decomposition_output_usable default "$fallback"
+}
+
+tangle_decomposition_adequacy_response_valid() {
+    local response="${1:-}" verdict
+    verdict=$(printf '%s\n' "$response" | sed -nE 's/^[[:space:]]*VERDICT:[[:space:]]*(PASS|FAIL)[[:space:]]*$/\1/p' | head -n 1)
+    [[ -n "$verdict" ]] || return 1
+    grep -Eq '^[[:space:]]*REASONS:' <<< "$response" || return 1
+    grep -Eq '^[[:space:]]*SCOPE_REVIEW:' <<< "$response"
 }
 
 tangle_decomposition_adequacy_review() {
@@ -1888,8 +1901,13 @@ ${subtasks}"
         primary=$(octopus_execution_profile_provider "tangle" "decomposition_review" "architect" "codex")
         fallback=$(octopus_execution_profile_provider "tangle" "decomposition_review_fallback" "code-reviewer" "claude-sonnet")
     fi
-    OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-adequacy" run_agent_sync "$primary" "$prompt" 0 "architect" "tangle" || \
-        OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-adequacy" run_agent_sync "$fallback" "$prompt" 0 "architect" "tangle"
+    if ! declare -f run_agent_sync_fallback_chain >/dev/null 2>&1; then
+        log ERROR "Tangle decomposition adequacy review requires the configured fallback-chain engine"
+        return 1
+    fi
+    OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-adequacy" \
+        run_agent_sync_fallback_chain "$primary" "$prompt" 0 "architect" "tangle" \
+        tangle_decomposition_adequacy_response_valid default "$fallback"
 }
 
 tangle_reconsideration_decisions() {
@@ -2015,10 +2033,15 @@ tangle_validate_parallel_write_scopes() {
         scopes=$(tangle_extract_write_scopes "$subtask")
         file_scopes=$(tangle_extract_file_scopes "$subtask")
         create_scopes=$(tangle_extract_create_scopes "$subtask")
-        local files_clause_count
+        local files_clause_count creates_clause_count
         files_clause_count=$(tangle_structured_clause_count "$subtask" "Files")
         if [[ "$files_clause_count" -gt 1 ]]; then
             echo "coding subtask ${task_index} must contain exactly one Files clause"
+            return 1
+        fi
+        creates_clause_count=$(tangle_structured_clause_count "$subtask" "Creates")
+        if [[ "$creates_clause_count" -gt 1 ]]; then
+            echo "coding subtask ${task_index} must contain exactly one Creates clause"
             return 1
         fi
         if [[ -z "$scopes" ]]; then
@@ -4665,7 +4688,8 @@ tangle_validate_results_with_scope_contract() {
     if [[ -n "$scope_manifest_digest" ]]; then
         current_manifest_digest=$(tangle_scope_manifest_digest "$subtasks" 2>/dev/null || true)
         if [[ -z "$current_manifest_digest" || "$current_manifest_digest" != "$scope_manifest_digest" ]]; then
-            violations="${violations:+$violations\n}The parent-owned scope manifest changed before final validation."
+            [[ -z "$violations" ]] || violations="${violations}"$'\n'
+            violations="${violations}The parent-owned scope manifest changed before final validation."
         fi
     fi
     TANGLE_SCOPE_CONTRACT_VIOLATIONS="$violations"

@@ -681,6 +681,9 @@ No. Its commands are namespaced under the `octo` prefix, and results are stored 
 **What happens if a provider times out?**
 The workflow continues with available providers. You'll see the status in the visual indicators.
 
+**Can bounded Tangle implementation run on macOS?**
+Not currently. Bounded Tangle dispatch is fail-closed and requires Linux with a working Bubblewrap (`bwrap`) execution boundary. On macOS, Tangle refuses provider dispatch with an explicit operator error rather than falling back to unconfined execution.
+
 **Why "octopus"?**
 🐙 *Fun fact: a real octopus has three hearts, blue blood, and 500 million neurons — two-thirds of which live in its eight arms.* Each arm can taste, touch, and act independently. Claude Octopus works the same way: each tentacle (command) operates autonomously with its own squeeze of logic, then ink flows back as the final deliverable. The crossfire review? That's the squeeze — adversarial pressure that untangles everything before it ships.
 

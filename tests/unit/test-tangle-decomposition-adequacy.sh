@@ -289,4 +289,22 @@ else
     test_fail "second adequacy FAIL did not fail closed before spawn"
 fi
 
+
+test_case "duplicate Creates clauses are rejected"
+duplicate_creates='1. [CODING] Build UI — Files: package.json — Creates: web/ — Creates: tmp/ — Task: build UI.'
+if tangle_validate_parallel_write_scopes "$duplicate_creates" >/dev/null 2>&1; then
+    test_fail "duplicate Creates clauses were accepted"
+else
+    test_pass
+fi
+
+test_case "adequacy response validator accepts structured PASS and FAIL but rejects prose"
+if tangle_decomposition_adequacy_response_valid $'VERDICT: PASS\nREASONS: ok\nSCOPE_REVIEW: NONE' && \
+   tangle_decomposition_adequacy_response_valid $'VERDICT: FAIL\nREASONS: scope issue\nSCOPE_REVIEW:\n- MOVE_TO_READS: foo — context only' && \
+   ! tangle_decomposition_adequacy_response_valid 'looks fine'; then
+    test_pass
+else
+    test_fail "adequacy response validator did not preserve PASS/FAIL semantics"
+fi
+
 test_summary

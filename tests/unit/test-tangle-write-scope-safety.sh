@@ -44,6 +44,15 @@ log() { :; }
 octopus_phase_banner() { :; }
 display_workflow_cost_estimate() { return 0; }
 reset_provider_lockouts() { :; }
+get_role_agent() {
+    case "$1" in
+        code-reviewer) printf "%s\n" "codex-review" ;;
+        implementer-heavy) printf "%s\n" "codex" ;;
+        architect) printf "%s\n" "claude-opus" ;;
+        *) printf "%s\n" "agy" ;;
+    esac
+}
+_octopus_profile_route_json() { printf "%s\n" "null"; }
 design_review_ceremony() { :; }
 fleet_dispatch_begin() { :; }
 fleet_dispatch_end() { :; }

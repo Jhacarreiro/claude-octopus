@@ -397,4 +397,32 @@ else
     test_fail "abort path did not leave a useful validation report"
 fi
 
+
+test_case "state manifest diff reports changed path instead of ENTRY token"
+before_manifest="$RESULTS_DIR/state-before-manifest.txt"
+after_manifest="$RESULTS_DIR/state-after-manifest.txt"
+printf '%s\n' '## manifest' $'ENTRY\tsrc/app/state.ts\t100644 old\tfile:old' > "$before_manifest"
+printf '%s\n' '## manifest' $'ENTRY\tsrc/app/state.ts\t100644 old\tfile:new' > "$after_manifest"
+manifest_delta=$(tangle_state_manifest_paths_changed "$before_manifest" "$after_manifest")
+if [[ "$manifest_delta" == "src/app/state.ts" ]] && [[ "$manifest_delta" != *"ENTRY"* ]]; then
+    test_pass
+else
+    test_fail "manifest delta returned wrong path token: [$manifest_delta]"
+fi
+
+test_case "worktree evidence fails closed when temp file allocation fails"
+if TMPDIR=/dev/null check_tangle_worktree_changes "$RESULTS_DIR/before-empty.txt" "" >/dev/null 2>&1; then
+    test_fail "worktree evidence failed open after mktemp failure"
+else
+    test_pass
+fi
+
+test_case "validate_tangle_results forwards parent-owned state snapshot"
+validate_source=$(declare -f validate_tangle_results)
+if grep -Fq 'check_tangle_worktree_changes "$worktree_before_file" "$baseline_head" "$worktree_before_state_file"' <<< "$validate_source"; then
+    test_pass
+else
+    test_fail "validate_tangle_results dropped the worktree state snapshot argument"
+fi
+
 test_summary

@@ -350,6 +350,20 @@ octopus_tangle_execution_boundary_probe() {
     esac
 }
 
+octopus_tangle_write_completion_marker() {
+    local marker_task_id="$1" marker_exit="${2:-0}"
+    local done_dir="${WORKSPACE_DIR:-${HOME}/.claude-octopus}/.octo/agents"
+    local done_tmp="${done_dir}/${marker_task_id}.done.tmp.$$"
+    local done_file="${done_dir}/${marker_task_id}.done"
+    if ! mkdir -p "$done_dir" 2>/dev/null \
+        || ! { printf '%s\n' "$marker_exit" > "$done_tmp" && mv -f "$done_tmp" "$done_file"; } 2>/dev/null; then
+        log WARN "Failed to write completion marker for $marker_task_id (exit=$marker_exit)"
+        rm -f "$done_tmp" 2>/dev/null || true
+        return 1
+    fi
+    return 0
+}
+
 octopus_tangle_boundary_paths_are_disjoint() {
     local physical_worktree="$1"
     local physical_results="$2"
@@ -384,7 +398,11 @@ octopus_tangle_apply_execution_boundary() {
         return 125
     }
     octopus_tangle_execution_boundary_probe || {
-        log ERROR "Tangle boundary refused: bwrap is unavailable or user namespaces are disabled"
+        case "$(uname -s 2>/dev/null || true)" in
+            Darwin) log ERROR "Tangle boundary refused: bounded Tangle execution is unsupported on macOS; use a Linux host with bubblewrap" ;;
+            Linux) log ERROR "Tangle boundary refused: bwrap is unavailable or user namespaces are disabled" ;;
+            *) log ERROR "Tangle boundary refused: bounded Tangle execution is unsupported on this host platform" ;;
+        esac
         return 125
     }
 
@@ -435,7 +453,10 @@ octopus_tangle_apply_execution_boundary() {
                 return 125
                 ;;
         esac
-        physical_results=$(cd "$results_dir" 2>/dev/null && pwd -P) || return 125
+        physical_results=$(cd "$results_dir" 2>/dev/null && pwd -P) || {
+            log ERROR "Tangle boundary refused: parent-owned result channel cannot be resolved"
+            return 125
+        }
         if ! octopus_tangle_boundary_paths_are_disjoint "$physical_worktree" "$physical_results"; then
             log ERROR "Tangle boundary refused: parent-owned results overlap the writable worktree"
             return 125
@@ -1147,7 +1168,9 @@ ${heuristic_ctx}"
         if ! octopus_tangle_apply_execution_boundary; then
             octo_spawn_contract_finish "$_contract_seat_id" failed "" "" \
                 "Tangle coding dispatch has no enforceable filesystem boundary" 125 "" >/dev/null 2>&1 || true
-            return 125
+            printf '%s\n' "## Status: FAILED (no enforceable filesystem boundary)" >> "$result_file"
+            octopus_tangle_write_completion_marker "$task_id" 125 || true
+            exit 125
         fi
 
         local auth_attempt=0
@@ -1576,14 +1599,7 @@ ${heuristic_ctx}"
         # Write completion marker — used by tangle_develop to detect thread end
         # without relying on kill -0 (which tracks wrapper PID, not provider PID)
         local _spawn_exit="${exit_code:-0}"
-        local _done_dir="${WORKSPACE_DIR:-${HOME}/.claude-octopus}/.octo/agents"
-        local _done_tmp="${_done_dir}/${task_id}.done.tmp.$$"
-        local _done_file="${_done_dir}/${task_id}.done"
-        if ! mkdir -p "$_done_dir" 2>/dev/null \
-           || ! { echo "$_spawn_exit" > "$_done_tmp" && mv -f "$_done_tmp" "$_done_file"; } 2>/dev/null; then
-            log WARN "Failed to write completion marker for $task_id (exit=$_spawn_exit)"
-            rm -f "$_done_tmp" 2>/dev/null || true
-        fi
+        octopus_tangle_write_completion_marker "$task_id" "$_spawn_exit" || true
 
         local _hook_final_status="failed"
         if [[ "${_spawn_exit:-0}" -eq 0 ]]; then

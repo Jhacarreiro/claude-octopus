@@ -124,4 +124,18 @@ else
     test_fail "scope contract did not clear or base validation was not restored; calls=$VALIDATE_CALLS"
 fi
 
+
+test_case "multiple scope violations are separated by real newlines"
+violations=$'src/existing.ts\nThe parent-owned scope manifest changed before final validation.'
+report="$RESULTS_DIR/newline-report.md"
+: > "$report"
+tangle_append_write_scope_contract_report "$report" "package.json" "src/existing.ts" "$violations" ""
+if grep -Fxq -- '- src/existing.ts' "$report" && \
+   grep -Fxq -- '- The parent-owned scope manifest changed before final validation.' "$report" && \
+   ! grep -Fq '\\n' "$report"; then
+    test_pass
+else
+    test_fail "scope violations were not rendered as distinct lines"
+fi
+
 test_summary

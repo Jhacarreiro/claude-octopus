@@ -59,4 +59,15 @@ if octopus_tangle_execution_boundary_probe; then
     fi
 fi
 
+
+test_case "boundary failure path writes completion marker before exit"
+spawn_source=$(<"$PROJECT_ROOT/scripts/lib/spawn.sh")
+if grep -Fq 'octopus_tangle_write_completion_marker "$task_id" 125' <<< "$spawn_source" && \
+   grep -Fq 'exit 125' <<< "$spawn_source" && \
+   grep -Fq 'unsupported on macOS' <<< "$spawn_source"; then
+    test_pass
+else
+    test_fail "boundary failure path lacks completion marker or platform-specific refusal"
+fi
+
 test_summary

@@ -1161,16 +1161,24 @@ review_local_synthesis_json() {
 
 # review_collect_untracked_diff: collects untracked, non-ignored files as unified diffs.
 review_collect_untracked_diff() {
+    local exclude_path="${1:-}"
     local diff_content=""
     local path=""
     local file_diff=""
+    local repo_root=""
+    local -a ls_args=(--full-name --others --exclude-standard -z -- ":(top)")
+    repo_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+    [[ -n "$repo_root" ]] || return 0
+    if [[ -n "$exclude_path" ]]; then
+        ls_args+=(":(top,exclude,literal)${exclude_path}")
+    fi
     while IFS= read -r -d '' path; do
-        file_diff=$(git diff --no-index -- /dev/null "$path" 2>/dev/null || true)
+        file_diff=$(git -C "$repo_root" diff --no-index -- /dev/null "$path" 2>/dev/null || true)
         if [[ -n "$file_diff" ]]; then
             [[ -n "$diff_content" ]] && diff_content+=$'\n'
             diff_content+="$file_diff"
         fi
-    done < <(git ls-files --others --exclude-standard -z 2>/dev/null)
+    done < <(git -C "$repo_root" ls-files "${ls_args[@]}" 2>/dev/null)
     printf '%s' "$diff_content"
 }
 
@@ -1191,17 +1199,25 @@ review_collect_working_tree_diff() {
 # with no commits yet. Every tracked or untracked non-ignored file is an addition relative
 # to the empty repository, and current worktree content wins over transient index state.
 review_collect_unborn_worktree_diff() {
+    local exclude_path="${1:-}"
     local diff_content=""
     local path=""
     local file_diff=""
+    local repo_root=""
+    local -a ls_args=(--full-name --cached --others --exclude-standard -z -- ":(top)")
+    repo_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+    [[ -n "$repo_root" ]] || return 0
+    if [[ -n "$exclude_path" ]]; then
+        ls_args+=(":(top,exclude,literal)${exclude_path}")
+    fi
     while IFS= read -r -d '' path; do
-        [[ -f "$path" || -L "$path" ]] || continue
-        file_diff=$(git diff --no-index -- /dev/null "$path" 2>/dev/null || true)
+        [[ -f "$repo_root/$path" || -L "$repo_root/$path" ]] || continue
+        file_diff=$(git -C "$repo_root" diff --no-index -- /dev/null "$path" 2>/dev/null || true)
         if [[ -n "$file_diff" ]]; then
             [[ -n "$diff_content" ]] && diff_content+=$'\n'
             diff_content+="$file_diff"
         fi
-    done < <(git ls-files --cached --others --exclude-standard -z 2>/dev/null)
+    done < <(git -C "$repo_root" ls-files "${ls_args[@]}" 2>/dev/null)
     printf '%s' "$diff_content"
 }
 
@@ -1209,17 +1225,22 @@ review_collect_unborn_worktree_diff() {
 # plus untracked files. Unlike working-tree, this includes staged-only changes too.
 # An unborn repository is compared to the empty repository instead of assuming HEAD exists.
 review_collect_all_changes_diff() {
+    local exclude_path="${1:-}"
     local diff_content=""
     local untracked_content=""
     if git rev-parse --verify HEAD >/dev/null 2>&1; then
-        diff_content=$(git diff HEAD 2>/dev/null || true)
-        untracked_content=$(review_collect_untracked_diff)
+        if [[ -n "$exclude_path" ]]; then
+            diff_content=$(git diff HEAD -- ":(top)" ":(top,exclude,literal)${exclude_path}" 2>/dev/null || true)
+        else
+            diff_content=$(git diff HEAD 2>/dev/null || true)
+        fi
+        untracked_content=$(review_collect_untracked_diff "$exclude_path")
         if [[ -n "$untracked_content" ]]; then
             [[ -n "$diff_content" ]] && diff_content+=$'\n'
             diff_content+="$untracked_content"
         fi
     else
-        diff_content=$(review_collect_unborn_worktree_diff)
+        diff_content=$(review_collect_unborn_worktree_diff "$exclude_path")
     fi
     printf '%s' "$diff_content"
 }
@@ -1229,12 +1250,13 @@ review_collect_all_changes_diff() {
 # a git pathspec, or an already-generated .diff/.patch file.
 review_collect_diff() {
     local target="$1"
+    local exclude_path="${2:-}"
     local diff_content=""
 
     case "$target" in
         staged)       diff_content=$(git diff --cached 2>/dev/null || true) ;;
         working-tree) diff_content=$(review_collect_working_tree_diff) ;;
-        all-changes)  diff_content=$(review_collect_all_changes_diff) ;;
+        all-changes)  diff_content=$(review_collect_all_changes_diff "$exclude_path") ;;
         [0-9]*)       diff_content=$(gh pr diff "$target" 2>/dev/null || true) ;;
         *)
             if [[ -f "$target" ]] && [[ -r "$target" ]] && head -n 20 "$target" 2>/dev/null | grep -Ec "^(diff --git|--- |\+\+\+ |@@ )" >/dev/null; then
@@ -1564,7 +1586,9 @@ review_run() {
         echo "codex|not-installed|Install: npm i -g @openai/codex" >> "$provider_status_file"
     fi
 
-    local timestamp="$_ts"
+    # Include the caller-provided identity in every cooperative worker task ID.
+    # Cancellation can then reap only the workers owned by this review invocation.
+    local timestamp="$_ts${artifact_id:+-${artifact_id}}"
     local results_dir="${RESULTS_DIR:-$HOME/.claude-octopus/results}"
     # Sync RESULTS_DIR global so spawn_agent writes to the same directory
     RESULTS_DIR="$results_dir"
@@ -1578,7 +1602,7 @@ review_run() {
         rm -f "$provider_status_file"
         return 1
     fi
-    local findings_file="$results_dir/review-findings-${timestamp}${artifact_id:+-${artifact_id}}.json"
+    local findings_file="$results_dir/review-findings-${timestamp}.json"
     mkdir -p "$results_dir"
 
     local proof_dir=""

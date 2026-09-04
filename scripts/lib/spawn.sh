@@ -366,11 +366,14 @@ octopus_tangle_apply_execution_boundary() {
     }
 
     local -a boundary_cmd
+    # Mount the isolated /tmp before re-binding a worktree that may itself
+    # live below /tmp. Reversing these mounts hides the worktree behind the
+    # tmpfs and makes the boundary depend on mount-order quirks.
     boundary_cmd=(
         bwrap --die-with-parent --new-session
         --ro-bind / /
-        --bind "$physical_worktree" "$physical_worktree"
         --tmpfs /tmp --proc /proc --dev /dev
+        --bind "$physical_worktree" "$physical_worktree"
     )
 
     git_metadata="$physical_worktree/.git"
@@ -385,6 +388,10 @@ octopus_tangle_apply_execution_boundary() {
     results_dir="${OCTOPUS_TANGLE_RESULTS_DIR:-${RESULTS_DIR:-}}"
     if [[ -n "$results_dir" && -d "$results_dir" ]]; then
         physical_results=$(cd "$results_dir" 2>/dev/null && pwd -P) || return 125
+        if [[ "$physical_results" == "$physical_worktree" ]]; then
+            log ERROR "Tangle boundary refused: parent-owned results must not equal the writable worktree"
+            return 125
+        fi
         case "$physical_results" in
             "$physical_worktree"/*)
                 boundary_cmd+=(--ro-bind "$physical_results" "$physical_results")

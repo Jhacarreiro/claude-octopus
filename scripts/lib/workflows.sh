@@ -1203,7 +1203,7 @@ Execution instructions:
 - Treat the original task as authoritative for requirements, explicit file targets, acceptance criteria, and forbidden changes.
 - Complete the assigned subtask without dropping original constraints that apply to it.
 - For [CODING] work, edit the repository files directly in the current worktree. Do not only describe a plan or paste code snippets.
-- For [CODING] work, treat Files: paths as exclusive write intent for existing/anchored paths and Creates: paths as exclusive authorization for new artifacts. Reads: is read-only context and never grants write permission. The resolved repository context is lookup guidance only; do not edit files clearly owned by another subtask or broaden the declared scope.
+- For [CODING] work, treat Files: paths/directories as the exclusive write-scope authority for existing/anchored paths and Creates: paths as exclusive authorization for new artifacts. Reads: is read-only context and never grants write permission. The resolved repository context is lookup guidance only; it does not grant permission to edit additional files; do not edit files clearly owned by another subtask or broaden the declared scope.
 - If the subtask creates a new exported component, command, event type, route, hook, or helper, wire it into at least one production call site unless the original task explicitly asks for an isolated artifact.
 - Tests alone are not integration evidence. User-facing features must be reachable from the relevant user flow or the subtask must report a blocker.
 Migration safety:
@@ -1336,7 +1336,7 @@ tangle_extract_scope_clause() {
 
     printf '%s\n' "$clause_text" \
         | sed -E 's/[[:space:]]*\([^)]*\)//g' \
-        | tr ' `",;()' '\n' \
+        | tr ' ,;' '\n' \
         | while IFS= read -r declared_scope; do
             [[ -n "$declared_scope" ]] || continue
             case "$declared_scope" in
@@ -1697,8 +1697,11 @@ tangle_decomposition_output_usable() {
     while IFS= read -r line; do
         [[ -n "$line" ]] || continue
         tangle_line_is_numbered_subtask "$line" || continue
-        [[ "$line" =~ \[CODING\] ]] || continue
         subtask="$(printf '%s\n' "$line" | sed -E 's/^[[:space:]]*(\*\*)?[0-9]+[\.\)][[:space:]]*//; s/^[[:space:]]+//')"
+        if [[ "$subtask" =~ \[REASONING\] ]] && ! tangle_task_clause_is_valid "$subtask"; then
+            return 1
+        fi
+        [[ "$line" =~ \[CODING\] ]] || continue
         scopes="$(tangle_extract_write_scopes "$subtask")"
         [[ -n "$scopes" ]] || return 1
     done <<<"$subtasks"

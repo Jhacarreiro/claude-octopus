@@ -49,7 +49,7 @@ mock_command "codex" "exit 0"
 
 run_agent_sync() {
     if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
-        printf '%s\n' 'VERDICT: PASS' 'REASONS: fixture decomposition is adequate'
+        printf '%s\n' 'VERDICT: PASS' 'REASONS: fixture decomposition is adequate' 'SCOPE_REVIEW: NONE'
         return 0
     fi
     cat <<'EOF'

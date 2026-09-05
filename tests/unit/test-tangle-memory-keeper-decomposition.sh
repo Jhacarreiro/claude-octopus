@@ -35,7 +35,7 @@ fleet_dispatch_begin(){ :; }
 fleet_dispatch_end(){ :; }
 run_agent_sync(){
 if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
-  printf '%s\n' 'VERDICT: PASS' 'REASONS: fixture decomposition is adequate after consolidation'
+  printf '%s\n' 'VERDICT: PASS' 'REASONS: fixture decomposition is adequate after consolidation' 'SCOPE_REVIEW: NONE'
   return 0
 fi
 cat <<'EOF'

@@ -107,7 +107,7 @@ fleet_dispatch_begin() { :; }
 fleet_dispatch_end() { :; }
 run_agent_sync() {
     if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
-        printf '%s\n' 'VERDICT: PASS' 'REASONS: fixture decomposition is adequate'
+        printf '%s\n' 'VERDICT: PASS' 'REASONS: fixture decomposition is adequate' 'SCOPE_REVIEW: NONE'
         return 0
     fi
     printf '%s' "$2" > "$DECOMPOSE_CAPTURE_FILE"
@@ -231,7 +231,7 @@ log() {
 }
 run_agent_sync() {
     if [[ "${OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED:-}" == "tangle-decomposition-adequacy" ]]; then
-        printf '%s\n' 'VERDICT: PASS' 'REASONS: stalled fixture decomposition is adequate'
+        printf '%s\n' 'VERDICT: PASS' 'REASONS: stalled fixture decomposition is adequate' 'SCOPE_REVIEW: NONE'
         return 0
     fi
     printf '%s\n' "1. [CODING] stalled implementation. Files: scripts/lib/workflows.sh — Task: implement the requested change"

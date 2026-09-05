@@ -1205,6 +1205,29 @@ review_local_synthesis_json() {
     fi
 }
 
+# review_collect_scratchpad_dir: choose the process scratchpad without placing
+# temporary collection files in the repository or its Git metadata.
+review_collect_scratchpad_dir() {
+    local repo_root="$1"
+    local scratch_dir="${OCTOPUS_TMP_DIR:-${TMPDIR:-/tmp}}"
+    local repo_root_physical=""
+    local scratch_dir_physical=""
+
+    repo_root_physical=$(cd "$repo_root" 2>/dev/null && pwd -P) || repo_root_physical=""
+    scratch_dir_physical=$(cd "$scratch_dir" 2>/dev/null && pwd -P) || scratch_dir_physical=""
+    if [[ -n "$repo_root_physical" && -n "$scratch_dir_physical" ]]; then
+        case "$scratch_dir_physical" in
+            "$repo_root_physical"|"$repo_root_physical"/*) scratch_dir="/tmp" ;;
+        esac
+    fi
+    printf '%s\n' "${scratch_dir%/}"
+}
+
+review_collect_path_list_cleanup() {
+    local path_list="$1"
+    [[ -z "$path_list" ]] || rm -f "$path_list" 2>/dev/null || true
+}
+
 # review_collect_no_index_file_diff: normalize git diff --no-index so rc=1
 # means "differences found" while real Git failures (>1) remain errors.
 review_collect_no_index_file_diff() {
@@ -1223,14 +1246,14 @@ review_collect_no_index_file_diff() {
 }
 
 # review_collect_untracked_diff: collects untracked, non-ignored files as unified diffs.
-review_collect_untracked_diff() {
+review_collect_untracked_diff() (
     local exclude_path="${1:-}"
     local diff_content=""
     local path=""
     local file_diff=""
     local repo_root=""
     local path_list=""
-    local git_dir=""
+    local scratch_dir=""
     local rc=0
     local -a ls_args=(--full-name --others --exclude-standard -z -- ":(top)")
 
@@ -1243,19 +1266,15 @@ review_collect_untracked_diff() {
     if [[ -n "$exclude_path" ]]; then
         ls_args+=(":(top,exclude,literal)${exclude_path}")
     fi
-    if git_dir=$(git -C "$repo_root" rev-parse --git-dir 2>/dev/null); then
-        :
-    else
-        rc=$?
-        return "$rc"
-    fi
-    [[ "$git_dir" == /* ]] || git_dir="$repo_root/$git_dir"
-    path_list=$(mktemp "${git_dir%/}/octopus-review-untracked.XXXXXX") || return 1
+    scratch_dir=$(review_collect_scratchpad_dir "$repo_root") || return 1
+    path_list=$(mktemp "${scratch_dir}/octopus-review-untracked.XXXXXX") || return 1
+    trap 'review_collect_path_list_cleanup "$path_list"' EXIT
+    trap 'review_collect_path_list_cleanup "$path_list"; exit 130' INT
+    trap 'review_collect_path_list_cleanup "$path_list"; exit 143' TERM
     if git -C "$repo_root" ls-files "${ls_args[@]}" > "$path_list" 2>/dev/null; then
         :
     else
         rc=$?
-        rm -f "$path_list" 2>/dev/null || true
         return "$rc"
     fi
     while IFS= read -r -d '' path; do
@@ -1263,7 +1282,6 @@ review_collect_untracked_diff() {
             :
         else
             rc=$?
-            rm -f "$path_list" 2>/dev/null || true
             return "$rc"
         fi
         if [[ -n "$file_diff" ]]; then
@@ -1271,9 +1289,8 @@ review_collect_untracked_diff() {
             diff_content+="$file_diff"
         fi
     done < "$path_list"
-    rm -f "$path_list" 2>/dev/null || true
     printf '%s' "$diff_content"
-}
+)
 
 # review_collect_working_tree_diff: collects unstaged tracked changes plus untracked files.
 review_collect_working_tree_diff() {
@@ -1303,14 +1320,14 @@ review_collect_working_tree_diff() {
 # review_collect_unborn_worktree_diff: collects the effective worktree of a repository
 # with no commits yet. Every tracked or untracked non-ignored file is an addition relative
 # to the empty repository, and current worktree content wins over transient index state.
-review_collect_unborn_worktree_diff() {
+review_collect_unborn_worktree_diff() (
     local exclude_path="${1:-}"
     local diff_content=""
     local path=""
     local file_diff=""
     local repo_root=""
     local path_list=""
-    local git_dir=""
+    local scratch_dir=""
     local rc=0
     local -a ls_args=(--full-name --cached --others --exclude-standard -z -- ":(top)")
 
@@ -1323,19 +1340,15 @@ review_collect_unborn_worktree_diff() {
     if [[ -n "$exclude_path" ]]; then
         ls_args+=(":(top,exclude,literal)${exclude_path}")
     fi
-    if git_dir=$(git -C "$repo_root" rev-parse --git-dir 2>/dev/null); then
-        :
-    else
-        rc=$?
-        return "$rc"
-    fi
-    [[ "$git_dir" == /* ]] || git_dir="$repo_root/$git_dir"
-    path_list=$(mktemp "${git_dir%/}/octopus-review-unborn.XXXXXX") || return 1
+    scratch_dir=$(review_collect_scratchpad_dir "$repo_root") || return 1
+    path_list=$(mktemp "${scratch_dir}/octopus-review-unborn.XXXXXX") || return 1
+    trap 'review_collect_path_list_cleanup "$path_list"' EXIT
+    trap 'review_collect_path_list_cleanup "$path_list"; exit 130' INT
+    trap 'review_collect_path_list_cleanup "$path_list"; exit 143' TERM
     if git -C "$repo_root" ls-files "${ls_args[@]}" > "$path_list" 2>/dev/null; then
         :
     else
         rc=$?
-        rm -f "$path_list" 2>/dev/null || true
         return "$rc"
     fi
     while IFS= read -r -d '' path; do
@@ -1344,7 +1357,6 @@ review_collect_unborn_worktree_diff() {
             :
         else
             rc=$?
-            rm -f "$path_list" 2>/dev/null || true
             return "$rc"
         fi
         if [[ -n "$file_diff" ]]; then
@@ -1352,9 +1364,8 @@ review_collect_unborn_worktree_diff() {
             diff_content+="$file_diff"
         fi
     done < "$path_list"
-    rm -f "$path_list" 2>/dev/null || true
     printf '%s' "$diff_content"
-}
+)
 
 # review_collect_all_changes_diff: collects the effective tracked worktree against HEAD
 # plus untracked files. Unlike working-tree, this includes staged-only changes too.
@@ -1364,6 +1375,8 @@ review_collect_all_changes_diff() {
     local diff_content=""
     local untracked_content=""
     local rc=0
+    local head_rc=0
+    local all_refs=""
 
     if git rev-parse --verify HEAD >/dev/null 2>&1; then
         if [[ -n "$exclude_path" ]]; then
@@ -1392,6 +1405,17 @@ review_collect_all_changes_diff() {
             diff_content+="$untracked_content"
         fi
     else
+        head_rc=$?
+        if ! git symbolic-ref -q HEAD >/dev/null 2>&1; then
+            return "$head_rc"
+        fi
+        if ! all_refs=$(git for-each-ref --format='%(refname)' 2>/dev/null); then
+            return "$head_rc"
+        fi
+        # An unborn repository has no refs at all. A symbolic HEAD with a
+        # missing target in a repository that already has refs is corruption,
+        # not a reason to fall back to a no-index diff.
+        [[ -z "$all_refs" ]] || return "$head_rc"
         if diff_content=$(review_collect_unborn_worktree_diff "$exclude_path"); then
             :
         else

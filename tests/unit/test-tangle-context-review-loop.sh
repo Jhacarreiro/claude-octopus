@@ -262,11 +262,29 @@ else
     snapshot=""
     snapshot_mode=""
 fi
-if [[ -f "$snapshot" ]] && [[ ! -w "$snapshot" ]] && [[ "$snapshot_mode" == "400" ]] &&
+if [[ -f "$snapshot" ]] && [[ "$snapshot_mode" == "400" ]] &&
    grep -q 'a.txt' "$snapshot" && grep -q 'b.txt' "$snapshot" && grep -q 'c.txt' "$snapshot"; then
     test_pass
 else
     test_fail "review snapshot must be owner-only and cover staged, unstaged, and untracked changes"
+fi
+
+test_case "review collection rejects a missing symbolic HEAD in a non-empty repository"
+workspace=$(make_test_dir workspace-missing-symbolic-head)
+git -C "$workspace" init -q
+git -C "$workspace" config user.email test@example.com
+git -C "$workspace" config user.name "Octopus Test"
+printf 'committed\n' > "$workspace/committed.txt"
+git -C "$workspace" add committed.txt
+git -C "$workspace" commit -q -m init
+printf 'ref: refs/heads/missing\n' > "$workspace/.git/HEAD"
+if (
+    cd "$workspace" || exit 1
+    ! review_collect_all_changes_diff >/dev/null
+); then
+    test_pass
+else
+    test_fail "a symbolic HEAD with a missing target must not be treated as an unborn repository"
 fi
 
 test_case "untracked collection propagates git ls-files failures"

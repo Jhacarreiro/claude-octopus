@@ -132,7 +132,7 @@ report="$RESULTS_DIR/newline-report.md"
 tangle_append_write_scope_contract_report "$report" "package.json" "src/existing.ts" "$violations" ""
 if grep -Fxq -- '- src/existing.ts' "$report" && \
    grep -Fxq -- '- The parent-owned scope manifest changed before final validation.' "$report" && \
-   ! grep -Fq '\\n' "$report"; then
+   ! grep -Fq '\n' "$report"; then
     test_pass
 else
     test_fail "scope violations were not rendered as distinct lines"

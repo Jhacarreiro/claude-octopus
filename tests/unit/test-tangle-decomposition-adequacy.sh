@@ -175,6 +175,14 @@ run_case() {
     tangle_develop 'Build the requested externally observable application with a usable entry point.' > "$RESULTS_DIR/${scenario}.out" 2>&1
 }
 
+load_reconsider_attempts() {
+    local attempt
+    attempts=()
+    while IFS= read -r attempt; do
+        attempts+=("$attempt")
+    done < "$RECONSIDER_ATTEMPTS_FILE"
+}
+
 test_case "adequacy verdict parser accepts only explicit PASS"
 if tangle_decomposition_adequacy_verdict $'VERDICT: PASS\nREASONS: ok' && ! tangle_decomposition_adequacy_verdict $'VERDICT: FAIL\nREASONS: no' && ! tangle_decomposition_adequacy_verdict 'looks good'; then
     test_pass
@@ -252,7 +260,7 @@ fi
 
 test_case "two unusable planner responses advance from code-reviewer routing to implementer-heavy routing"
 run_case "reconsider-third-fallback"
-mapfile -t attempts < "$RECONSIDER_ATTEMPTS_FILE"
+load_reconsider_attempts
 if [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]] && [[ "$(cat "$RECONSIDER_COUNT_FILE")" -eq 3 ]] && [[ -s "$SPAWN_FILE" ]] && \
    [[ "${attempts[0]:-}" == 'agy|researcher|tangle' ]] && \
    [[ "${attempts[1]:-}" == "codex-review|researcher|tangle" ]] && \
@@ -267,7 +275,7 @@ test_case "configured fallback chain exhausts through architect and aborts befor
 reset_scenario "reconsider-exhaust"
 status=0
 tangle_develop 'Build the requested externally observable application with a usable entry point.' > "$RESULTS_DIR/reconsider-exhaust.out" 2>&1 || status=$?
-mapfile -t attempts < "$RECONSIDER_ATTEMPTS_FILE"
+load_reconsider_attempts
 if [[ "$status" -ne 0 ]] && [[ "$(cat "$RECONSIDER_COUNT_FILE")" -eq 4 ]] && [[ ! -s "$SPAWN_FILE" ]] && \
    [[ "${attempts[0]:-}" == 'agy|researcher|tangle' ]] && \
    [[ "${attempts[1]:-}" == "codex-review|researcher|tangle" ]] && \
@@ -301,6 +309,7 @@ fi
 test_case "adequacy response validator accepts structured PASS and FAIL but rejects prose"
 if tangle_decomposition_adequacy_response_valid $'VERDICT: PASS\nREASONS: ok\nSCOPE_REVIEW: NONE' && \
    tangle_decomposition_adequacy_response_valid $'VERDICT: FAIL\nREASONS: scope issue\nSCOPE_REVIEW:\n- MOVE_TO_READS: foo — context only' && \
+   ! tangle_decomposition_adequacy_response_valid $'VERDICT: PASS\nVERDICT: FAIL\nREASONS: contradictory\nSCOPE_REVIEW: NONE' && \
    ! tangle_decomposition_adequacy_response_valid 'looks fine'; then
     test_pass
 else

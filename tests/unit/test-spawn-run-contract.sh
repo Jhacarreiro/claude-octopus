@@ -366,6 +366,57 @@ run_external_fixture() {
     wait "$pid" 2>/dev/null || true
 }
 
+test_case "Tangle boundary refusal completes through the shared failure path"
+saved_boundary_impl="$(declare -f octopus_tangle_apply_execution_boundary)"
+saved_lifecycle_impl="$(declare -f _octopus_agent_lifecycle_event)"
+saved_cleanup_impl="$(declare -f cleanup_heartbeat)"
+lifecycle_file="$TEST_TMP_DIR/tangle-boundary-lifecycle"
+cleanup_file="$TEST_TMP_DIR/tangle-boundary-cleanup"
+octopus_tangle_apply_execution_boundary() { return 1; }
+_octopus_agent_lifecycle_event() {
+    printf '%s:%s:%s\n' "$1" "$8" "$9" >> "$lifecycle_file"
+}
+cleanup_heartbeat() {
+    printf 'cleaned\n' > "$cleanup_file"
+}
+OCTOPUS_TANGLE_EXECUTION_BOUNDARY=true
+OCTOPUS_TANGLE_WORKTREE="$TEST_TMP_DIR/tangle-boundary-worktree"
+OCTOPUS_TANGLE_RESULTS_DIR="$RESULTS_DIR"
+mkdir -p "$OCTOPUS_TANGLE_WORKTREE"
+boundary_pid_file="$TEST_TMP_DIR/tangle-boundary.pid"
+if spawn_agent fake-api "Boundary refusal fixture" boundary-refusal implementer tangle > "$boundary_pid_file"; then
+    boundary_spawn_rc=0
+else
+    boundary_spawn_rc=$?
+fi
+boundary_pid="$(tail -n 1 "$boundary_pid_file" 2>/dev/null || true)"
+if [[ "$boundary_spawn_rc" -eq 0 && "$boundary_pid" =~ ^[0-9]+$ ]]; then
+    if wait "$boundary_pid"; then
+        boundary_worker_rc=0
+    else
+        boundary_worker_rc=$?
+    fi
+else
+    boundary_worker_rc=1
+fi
+eval "$saved_boundary_impl"
+eval "$saved_lifecycle_impl"
+eval "$saved_cleanup_impl"
+unset OCTOPUS_TANGLE_EXECUTION_BOUNDARY OCTOPUS_TANGLE_WORKTREE OCTOPUS_TANGLE_RESULTS_DIR
+boundary_done="$WORKSPACE_DIR/.octo/agents/boundary-refusal.done"
+boundary_result="$RESULTS_DIR/fake-api-boundary-refusal.md"
+if [[ "$boundary_spawn_rc" -eq 0 && "$boundary_worker_rc" -eq 125 ]] && \
+   [[ "$(cat "$boundary_done" 2>/dev/null || true)" == 125 ]] && \
+   grep -Fq "$(printf '\140\140\140\n\n## Status: FAILED (exit code: 125)')" "$boundary_result" && \
+   grep -Fq '## Status: FAILED (exit code: 125)' "$boundary_result" && \
+   grep -Fxq 'completed:125:failed' "$lifecycle_file" && \
+   [[ "$(cat "$cleanup_file" 2>/dev/null || true)" == cleaned ]] && \
+   [[ "$(run_contract_latest_transition spawn-boundary-refusal)" == failed ]]; then
+    test_pass
+else
+    test_fail "boundary refusal was not finalized: spawn=$boundary_spawn_rc worker=$boundary_worker_rc done=$(cat "$boundary_done" 2>/dev/null || printf missing) transition=$(run_contract_latest_transition spawn-boundary-refusal 2>/dev/null || printf missing)"
+fi
+
 test_case "Agent Teams prompt persistence failure terminalizes the seat"
 original_should_use_agent_teams="$(declare -f should_use_agent_teams)"
 original_write_agent_result_prompt="$(declare -f write_agent_result_prompt)"

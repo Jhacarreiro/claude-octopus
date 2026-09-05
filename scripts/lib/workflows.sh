@@ -1876,8 +1876,10 @@ ${previous_output}"
 }
 
 tangle_decomposition_adequacy_response_valid() {
-    local response="${1:-}" verdict
-    verdict=$(printf '%s\n' "$response" | sed -nE 's/^[[:space:]]*VERDICT:[[:space:]]*(PASS|FAIL)[[:space:]]*$/\1/p' | head -n 1)
+    local response="${1:-}" verdict verdict_count
+    verdict_count=$(printf '%s\n' "$response" | grep -Ec '^[[:space:]]*VERDICT:' || true)
+    [[ "$verdict_count" -eq 1 ]] || return 1
+    verdict=$(printf '%s\n' "$response" | sed -nE 's/^[[:space:]]*VERDICT:[[:space:]]*(PASS|FAIL)[[:space:]]*$/\1/p')
     [[ -n "$verdict" ]] || return 1
     grep -Eq '^[[:space:]]*REASONS:' <<< "$response" || return 1
     grep -Eq '^[[:space:]]*SCOPE_REVIEW:' <<< "$response"

@@ -1165,22 +1165,23 @@ ${heuristic_ctx}"
             cmd_array+=(-p "")
         fi
 
-        if ! octopus_tangle_apply_execution_boundary; then
-            octo_spawn_contract_finish "$_contract_seat_id" failed "" "" \
-                "Tangle coding dispatch has no enforceable filesystem boundary" 125 "" >/dev/null 2>&1 || true
-            printf '%s\n' "## Status: FAILED (no enforceable filesystem boundary)" >> "$result_file"
-            octopus_tangle_write_completion_marker "$task_id" 125 || true
-            exit 125
-        fi
-
         local auth_attempt=0
         local exit_code=0
-        if ! octo_spawn_contract_running "$_contract_seat_id" "$result_file" \
+        local boundary_refused=false
+        if ! octopus_tangle_apply_execution_boundary; then
+            boundary_refused=true
+            exit_code=125
+            printf '%s\n' "Provider dispatch refused: no enforceable Tangle filesystem boundary." > "$temp_output"
+            printf '%s\n' "Tangle coding dispatch has no enforceable filesystem boundary" > "$temp_errors"
+        fi
+
+        if [[ "$boundary_refused" != "true" ]] && \
+           ! octo_spawn_contract_running "$_contract_seat_id" "$result_file" \
             "$OCTO_CAPTURED_SHELL_PID" "$model" "${effort_level:-}"; then
             log ERROR "Unable to persist provider launch for background task $task_id"
             exit 74
         fi
-        while true; do
+        while [[ "$boundary_refused" != "true" ]]; do
             exit_code=0
             local _attempt_timeout="$_eff_timeout"
             if [[ "$_timeout_deadline" -gt 0 ]] && \
@@ -1615,6 +1616,7 @@ ${heuristic_ctx}"
 
         # v8.19.0: Cleanup heartbeat (self-terminating monitor handles this too)
         cleanup_heartbeat "$OCTO_CAPTURED_SHELL_PID" 2>/dev/null || true
+        exit "$_spawn_exit"
     ) &
 
     local pid=$!

@@ -201,10 +201,12 @@ fi
 
 test_case "reasoning subtasks require exactly one non-empty Task clause"
 valid_reasoning='1. [REASONING] Review the implementation — Task: inspect the requested behavior.'
+spaced_reasoning='1. [REASONING] Review the implementation —  Task: inspect the requested behavior.'
 missing_task='1. [REASONING] Review the implementation — Reads: scripts/lib/workflows.sh'
 empty_task='1. [REASONING] Review the implementation — Task:'
 repeated_task='1. [REASONING] Review the implementation — Task: inspect it — Task: and report.'
 if tangle_validate_subtask_task_clauses "$valid_reasoning" && \
+   tangle_validate_subtask_task_clauses "$spaced_reasoning" && \
    ! tangle_validate_subtask_task_clauses "$missing_task" && \
    ! tangle_validate_subtask_task_clauses "$empty_task" && \
    ! tangle_validate_subtask_task_clauses "$repeated_task"; then

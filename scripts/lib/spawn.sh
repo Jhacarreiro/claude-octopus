@@ -331,11 +331,13 @@ octopus_timeout_remaining() {
     printf '%s\n' "$((deadline - now))"
 }
 
-# Tangle providers are untrusted workers. Coding gets a writable repository
-# bind, while reasoning gets a read-only bind; both leave Git metadata and the
-# parent-owned result channel outside the writable mount. There is deliberately
-# no fallback to an unconfined provider when the host cannot create this
-# boundary.
+# Tangle providers are untrusted workers. This is a write-integrity boundary,
+# not a confidentiality or network sandbox. The worker retains read-only access
+# to host paths needed by provider runtimes and authentication. Coding gets a
+# writable repository bind, while reasoning gets a read-only bind; both leave
+# Git metadata and the parent-owned result channel outside the writable mount.
+# There is deliberately no fallback to an unconfined provider when the host
+# cannot create this boundary.
 octopus_tangle_execution_boundary_probe() {
     case "$(uname -s 2>/dev/null || true)" in
         Linux)
@@ -407,9 +409,12 @@ octopus_tangle_apply_execution_boundary() {
     }
 
     local -a boundary_cmd
-    # Mount the isolated /tmp before re-binding a worktree that may itself
-    # live below /tmp. Reversing these mounts hides the worktree behind the
-    # tmpfs and makes the boundary depend on mount-order quirks.
+    # Keep the host root read-only so provider executables and credentials
+    # remain available. This boundary prevents writes outside the selected
+    # worktree; it does not hide readable host files or block network access.
+    # Mount the isolated /tmp before re-binding a worktree that may itself live
+    # below /tmp. Reversing these mounts hides the worktree behind the tmpfs and
+    # makes the boundary depend on mount-order quirks.
     boundary_cmd=(
         bwrap --die-with-parent --new-session
         --ro-bind / /

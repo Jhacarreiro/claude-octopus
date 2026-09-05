@@ -1827,6 +1827,7 @@ tangle_task_clause_is_valid() {
     # do not accept a reasoning line merely because it contains some prose
     # after a malformed or repeated Task: label.
     while IFS= read -r segment; do
+        segment="${segment#"${segment%%[![:space:]]*}"}"
         [[ "$segment" == Task:* ]] || continue
         ((task_count++)) || true
         task_text="${segment#Task:}"

@@ -670,7 +670,7 @@ $(<"$correction_file")
             "Quality gate ${gate_status}: ${quality_success_rate}% success rate (threshold: ${tangle_threshold}%)" \
             "tangle-${task_group}" \
             "$(if [[ $quality_success_rate -ge 90 ]]; then echo "high"; elif [[ $quality_success_rate -ge $tangle_threshold ]]; then echo "medium"; else echo "low"; fi)" \
-            "Success: ${success_count}/${total}, failures: ${fail_count}, threshold: ${tangle_threshold}%" \
+            "Success: ${effective_success_count}/${effective_total}, failures: ${effective_fail_count}, threshold: ${tangle_threshold}%" \
             "" 2>/dev/null || true
 
         # ═══════════════════════════════════════════════════════════════════════

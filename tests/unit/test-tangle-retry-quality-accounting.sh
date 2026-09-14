@@ -28,7 +28,10 @@ FAILED_SUBTASKS=""
 
 log() { :; }
 record_task_metric() { :; }
-write_structured_decision() { :; }
+STRUCTURED_DECISION_CONTEXT=""
+write_structured_decision() {
+    STRUCTURED_DECISION_CONTEXT="$6"
+}
 retry_failed_subtasks() { :; }
 get_gate_threshold() { echo 75; }
 evaluate_quality_branch() {
@@ -118,10 +121,11 @@ if OCTOPUS_TANGLE_VALIDATION_CORRECTION_FILE="$CORRECTION_FILE" \
     report=$(cat "$RESULTS_DIR/tangle-validation-${CORRECTION_GROUP}.md")
     if [[ "$report" == *"Static Subtask Rate Before Correction Overlay: 66%"* ]] && \
        [[ "$report" == *"Effective Rate After Correction Overlay: 100%"* ]] && \
-       [[ "$report" == *"Decision Branch: proceed"* ]]; then
+       [[ "$report" == *"Decision Branch: proceed"* ]] && \
+       [[ "$STRUCTURED_DECISION_CONTEXT" == "Success: 3/3, failures: 0, threshold: 75%" ]]; then
         test_pass
     else
-        test_fail "quality report did not use the effective post-correction rate for the decision"
+        test_fail "quality decision did not use effective post-correction rate and counts"
     fi
 else
     test_fail "quality gate still rejected a successful correction overlay because it used the static 66% rate"
@@ -140,8 +144,7 @@ cat > "$STALE_SUCCESS_CORRECTION_FILE" <<'EOF_STALE_SUCCESS_CORRECTION'
 # Phase: tangle-correction
 
 ## Output
-Correction round could not complete because the sandbox is blocking file writes.
-This is a blocker report, not a successful correction.
+Correction round returned a failed final status without blocker output.
 
 ## Status: SUCCESS
 
@@ -160,7 +163,42 @@ else
        [[ "$report" == *"Decision Branch: abort"* ]]; then
         test_pass
     else
-        test_fail "stale correction success or blocker output bypassed the quality gate"
+        test_fail "stale correction success bypassed the quality gate"
+    fi
+fi
+
+
+test_case "blocker output cannot apply a successful correction overlay"
+BLOCKER_GROUP="correction-blocker"
+write_result "$RESULTS_DIR/commandcode-tangle-${BLOCKER_GROUP}-1.md" "tangle-${BLOCKER_GROUP}-1" implementer SUCCESS
+write_result "$RESULTS_DIR/commandcode-tangle-${BLOCKER_GROUP}-2.md" "tangle-${BLOCKER_GROUP}-2" implementer SUCCESS
+write_result "$RESULTS_DIR/commandcode-tangle-${BLOCKER_GROUP}-3.md" "tangle-${BLOCKER_GROUP}-3" implementer FAILED
+BLOCKER_CORRECTION_FILE="$RESULTS_DIR/correction-${BLOCKER_GROUP}.md"
+cat > "$BLOCKER_CORRECTION_FILE" <<'EOF_BLOCKER_CORRECTION'
+# Agent: commandcode
+# Role: implementer
+# Phase: tangle-correction
+
+## Output
+Correction round could not complete because the sandbox is blocking file writes.
+This is a blocker report, not a successful correction.
+
+## Status: SUCCESS
+EOF_BLOCKER_CORRECTION
+
+if OCTOPUS_TANGLE_VALIDATION_CORRECTION_FILE="$BLOCKER_CORRECTION_FILE" \
+   OCTOPUS_TANGLE_VALIDATION_CORRECTION_STATUS="success" \
+   OCTOPUS_TANGLE_VALIDATION_CORRECTION_CHANGED=1 \
+   validate_tangle_results "$BLOCKER_GROUP" "Assess blocked correction overlay" >/dev/null 2>&1; then
+    test_fail "blocker output was treated as an effective success"
+else
+    report=$(cat "$RESULTS_DIR/tangle-validation-${BLOCKER_GROUP}.md")
+    if [[ "$report" == *"Success Rate: 66%"* ]] && \
+       [[ "$report" != *"Effective Rate After Correction Overlay: 100%"* ]] && \
+       [[ "$report" == *"Decision Branch: abort"* ]]; then
+        test_pass
+    else
+        test_fail "blocker output bypassed the correction overlay quality gate"
     fi
 fi
 

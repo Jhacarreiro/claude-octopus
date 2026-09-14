@@ -128,6 +128,43 @@ else
 fi
 
 
+test_case "failed final correction status cannot apply a stale success overlay"
+STALE_SUCCESS_GROUP="correction-stale-success"
+write_result "$RESULTS_DIR/commandcode-tangle-${STALE_SUCCESS_GROUP}-1.md" "tangle-${STALE_SUCCESS_GROUP}-1" implementer SUCCESS
+write_result "$RESULTS_DIR/commandcode-tangle-${STALE_SUCCESS_GROUP}-2.md" "tangle-${STALE_SUCCESS_GROUP}-2" implementer SUCCESS
+write_result "$RESULTS_DIR/commandcode-tangle-${STALE_SUCCESS_GROUP}-3.md" "tangle-${STALE_SUCCESS_GROUP}-3" implementer FAILED
+STALE_SUCCESS_CORRECTION_FILE="$RESULTS_DIR/correction-${STALE_SUCCESS_GROUP}.md"
+cat > "$STALE_SUCCESS_CORRECTION_FILE" <<'EOF_STALE_SUCCESS_CORRECTION'
+# Agent: commandcode
+# Role: implementer
+# Phase: tangle-correction
+
+## Output
+Correction round could not complete because the sandbox is blocking file writes.
+This is a blocker report, not a successful correction.
+
+## Status: SUCCESS
+
+## Status: FAILED
+EOF_STALE_SUCCESS_CORRECTION
+
+if OCTOPUS_TANGLE_VALIDATION_CORRECTION_FILE="$STALE_SUCCESS_CORRECTION_FILE" \
+   OCTOPUS_TANGLE_VALIDATION_CORRECTION_STATUS="failed" \
+   OCTOPUS_TANGLE_VALIDATION_CORRECTION_CHANGED=1 \
+   validate_tangle_results "$STALE_SUCCESS_GROUP" "Assess failed correction overlay" >/dev/null 2>&1; then
+    test_fail "failed final correction status was treated as an effective success"
+else
+    report=$(cat "$RESULTS_DIR/tangle-validation-${STALE_SUCCESS_GROUP}.md")
+    if [[ "$report" == *"Success Rate: 66%"* ]] && \
+       [[ "$report" != *"Effective Rate After Correction Overlay: 100%"* ]] && \
+       [[ "$report" == *"Decision Branch: abort"* ]]; then
+        test_pass
+    else
+        test_fail "stale correction success or blocker output bypassed the quality gate"
+    fi
+fi
+
+
 test_case "correction overlay does not bypass explicit file coverage hard gate"
 HARD_GATE_GROUP="correction-hard-gate"
 write_result "$RESULTS_DIR/commandcode-tangle-${HARD_GATE_GROUP}-1.md" "tangle-${HARD_GATE_GROUP}-1" implementer SUCCESS

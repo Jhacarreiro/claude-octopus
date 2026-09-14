@@ -612,7 +612,10 @@ $(<"$correction_file")
         local effective_fail_count="$fail_count"
         local effective_total="$total"
         local effective_success_rate="$success_rate"
-        if [[ -n "$correction_file" && -f "$correction_file" ]] &&            grep -q "Status: SUCCESS" "$correction_file" 2>/dev/null &&            [[ "${correction_changed:-0}" == "1" || -n "$worktree_changes" ]]; then
+        if [[ -n "$correction_file" && -f "$correction_file" ]] \
+            && [[ "$(tangle_result_latest_status "$correction_file")" == "success" ]] \
+            && ! tangle_result_has_blocker_output "$correction_file" \
+            && [[ "${correction_changed:-0}" == "1" || -n "$worktree_changes" ]]; then
             correction_overlay_applied=true
             # A successful correction overlay proves the validated worktree was
             # repaired. Preserve the original subtask rate for diagnostics, but

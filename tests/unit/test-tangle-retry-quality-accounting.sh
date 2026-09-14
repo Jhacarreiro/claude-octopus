@@ -93,4 +93,72 @@ else
     test_fail "effective result set retained superseded original task results"
 fi
 
+
+test_case "successful correction overlay drives quality decision with effective rate"
+CORRECTION_GROUP="correction-overlay"
+write_result "$RESULTS_DIR/commandcode-tangle-${CORRECTION_GROUP}-1.md" "tangle-${CORRECTION_GROUP}-1" implementer SUCCESS
+write_result "$RESULTS_DIR/commandcode-tangle-${CORRECTION_GROUP}-2.md" "tangle-${CORRECTION_GROUP}-2" implementer SUCCESS
+write_result "$RESULTS_DIR/commandcode-tangle-${CORRECTION_GROUP}-3.md" "tangle-${CORRECTION_GROUP}-3" implementer FAILED
+CORRECTION_FILE="$RESULTS_DIR/correction-${CORRECTION_GROUP}.md"
+cat > "$CORRECTION_FILE" <<'EOF_CORRECTION'
+# Agent: commandcode
+# Role: implementer
+# Phase: tangle-correction
+
+## Output
+Correction round repaired the validated worktree.
+
+## Status: SUCCESS
+EOF_CORRECTION
+
+if OCTOPUS_TANGLE_VALIDATION_CORRECTION_FILE="$CORRECTION_FILE" \
+   OCTOPUS_TANGLE_VALIDATION_CORRECTION_STATUS="success" \
+   OCTOPUS_TANGLE_VALIDATION_CORRECTION_CHANGED=1 \
+   validate_tangle_results "$CORRECTION_GROUP" "Assess correction overlay quality accounting" >/dev/null 2>&1; then
+    report=$(cat "$RESULTS_DIR/tangle-validation-${CORRECTION_GROUP}.md")
+    if [[ "$report" == *"Static Subtask Rate Before Correction Overlay: 66%"* ]] && \
+       [[ "$report" == *"Effective Rate After Correction Overlay: 100%"* ]] && \
+       [[ "$report" == *"Decision Branch: proceed"* ]]; then
+        test_pass
+    else
+        test_fail "quality report did not use the effective post-correction rate for the decision"
+    fi
+else
+    test_fail "quality gate still rejected a successful correction overlay because it used the static 66% rate"
+fi
+
+
+test_case "correction overlay does not bypass explicit file coverage hard gate"
+HARD_GATE_GROUP="correction-hard-gate"
+write_result "$RESULTS_DIR/commandcode-tangle-${HARD_GATE_GROUP}-1.md" "tangle-${HARD_GATE_GROUP}-1" implementer SUCCESS
+write_result "$RESULTS_DIR/commandcode-tangle-${HARD_GATE_GROUP}-2.md" "tangle-${HARD_GATE_GROUP}-2" implementer SUCCESS
+write_result "$RESULTS_DIR/commandcode-tangle-${HARD_GATE_GROUP}-3.md" "tangle-${HARD_GATE_GROUP}-3" implementer FAILED
+HARD_GATE_CORRECTION_FILE="$RESULTS_DIR/correction-${HARD_GATE_GROUP}.md"
+cat > "$HARD_GATE_CORRECTION_FILE" <<'EOF_HARD_GATE_CORRECTION'
+# Agent: commandcode
+# Role: implementer
+# Phase: tangle-correction
+
+## Output
+Correction round repaired unrelated implementation details.
+
+## Status: SUCCESS
+EOF_HARD_GATE_CORRECTION
+
+if OCTOPUS_TANGLE_VALIDATION_CORRECTION_FILE="$HARD_GATE_CORRECTION_FILE" \
+   OCTOPUS_TANGLE_VALIDATION_CORRECTION_STATUS="success" \
+   OCTOPUS_TANGLE_VALIDATION_CORRECTION_CHANGED=1 \
+   validate_tangle_results "$HARD_GATE_GROUP" "Implement required file src/required-output.js" >/dev/null 2>&1; then
+    test_fail "correction overlay bypassed missing explicit file coverage"
+else
+    report=$(cat "$RESULTS_DIR/tangle-validation-${HARD_GATE_GROUP}.md")
+    if [[ "$report" == *"Effective Rate After Correction Overlay: 100%"* ]] && \
+       [[ "$report" == *"Missing Explicit File Coverage"* ]] && \
+       [[ "$report" == *"Decision Branch: abort"* ]]; then
+        test_pass
+    else
+        test_fail "hard gate did not remain fail-closed after correction overlay"
+    fi
+fi
+
 test_summary

@@ -107,7 +107,7 @@ adaptive_status=0
 tangle_validate_results_with_scope_contract adaptive 'Build UI' "$BEFORE" "$SUBTASKS" || adaptive_status=$?
 unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
 adaptive_report="$RESULTS_DIR/tangle-validation-adaptive.md"
-if [[ "$adaptive_status" -eq 0 ]] && [[ "$VALIDATE_CALLS" -eq 1 ]] && grep -q 'Adaptive Write Scope Expansions' "$adaptive_report" && grep -q -- '- src/existing.ts' "$adaptive_report" && [[ "${TANGLE_SCOPE_EXPANSION_EVIDENCE:-}" == *"src/existing.ts"* ]] && [[ -z "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" ]]; then
+if [[ "$adaptive_status" -eq 0 ]] && [[ "$VALIDATE_CALLS" -eq 1 ]] && grep -q 'Adaptive Write Scope Expansions' "$adaptive_report" && grep -q -- '- src/existing.ts' "$adaptive_report" && grep -q 'PASS: adaptive scope expansion paths passed safety checks.' "$adaptive_report" && ! grep -q 'parent-owned snapshot and scope-manifest integrity checks passed.' "$adaptive_report" && [[ "${TANGLE_SCOPE_EXPANSION_EVIDENCE:-}" == *"src/existing.ts"* ]] && [[ -z "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" ]]; then
     test_pass
 else
     test_fail "adaptive scope expansion remained fatal or lost evidence; status=$adaptive_status calls=$VALIDATE_CALLS"

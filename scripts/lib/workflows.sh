@@ -4764,7 +4764,7 @@ tangle_append_write_scope_contract_report() {
             echo "Reads: never grants write permission."
             printf '%s\n' "$violations" | sed '/^$/d; s/^/- /'
         elif [[ -n "$adaptive_scope_evidence" ]]; then
-            echo "PASS: parent-owned snapshot and scope-manifest integrity checks passed."
+            echo "PASS: adaptive scope expansion paths passed safety checks."
         else
             echo "PASS: every changed path produced by this Tangle run is inside an authorized Files:/Creates: scope."
         fi

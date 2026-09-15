@@ -100,6 +100,20 @@ else
     test_fail "scope violation did not fail before base validation/retries; calls=$VALIDATE_CALLS"
 fi
 
+test_case "adaptive mode records out-of-scope changes as evidence and still runs base validation"
+VALIDATE_CALLS=0
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+adaptive_status=0
+tangle_validate_results_with_scope_contract adaptive 'Build UI' "$BEFORE" "$SUBTASKS" || adaptive_status=$?
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+adaptive_report="$RESULTS_DIR/tangle-validation-adaptive.md"
+if [[ "$adaptive_status" -eq 0 ]] && [[ "$VALIDATE_CALLS" -eq 1 ]] && grep -q 'Adaptive Write Scope Expansions' "$adaptive_report" && grep -q -- '- src/existing.ts' "$adaptive_report" && [[ -z "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" ]]; then
+    test_pass
+else
+    test_fail "adaptive scope expansion remained fatal or lost evidence; status=$adaptive_status calls=$VALIDATE_CALLS"
+fi
+VALIDATE_CALLS=0
+
 test_case "scope violation is surfaced as one deterministic blocking finding"
 findings="$TMP_ROOT/findings.json"
 printf '%s\n' '{"findings":[]}' > "$findings"

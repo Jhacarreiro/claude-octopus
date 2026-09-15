@@ -4829,10 +4829,10 @@ tangle_classify_adaptive_scope_paths() {
 tangle_parent_owned_state_snapshot_is_valid() {
     local state_file="$1"
     [[ -s "$state_file" ]] || return 1
-    grep -Fxq '## unstaged' "$state_file" || return 1
-    grep -Fxq '## staged' "$state_file" || return 1
-    grep -Fxq '## untracked' "$state_file" || return 1
-    grep -Fxq '## manifest' "$state_file"
+    grep -Fxc '## unstaged' "$state_file" >/dev/null || return 1
+    grep -Fxc '## staged' "$state_file" >/dev/null || return 1
+    grep -Fxc '## untracked' "$state_file" >/dev/null || return 1
+    grep -Fxc '## manifest' "$state_file" >/dev/null
 }
 
 tangle_append_write_scope_contract_report() {

@@ -114,6 +114,27 @@ else
 fi
 VALIDATE_CALLS=0
 
+test_case "adaptive mode keeps unconfirmed symlink expansions fatal"
+adaptive_escape_target="$TMP_ROOT/adaptive-escape-target"
+mkdir -p "$adaptive_escape_target"
+ln -s "$adaptive_escape_target" "$TMP_REPO/adaptive-escape"
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+adaptive_status=0
+tangle_validate_results_with_scope_contract adaptive-unsafe 'Build UI' "$BEFORE" "$SUBTASKS" || adaptive_status=$?
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+adaptive_unsafe_report="$RESULTS_DIR/tangle-validation-adaptive-unsafe.md"
+if [[ "$adaptive_status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && \
+   [[ "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" == *"could not be confirmed safe"* ]] && \
+   [[ "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" == *"adaptive-escape"* ]] && \
+   [[ "${TANGLE_SCOPE_EXPANSION_EVIDENCE:-}" != *"adaptive-escape"* ]] && \
+   grep -q 'FAILED: Out-of-Scope Worktree Changes' "$adaptive_unsafe_report"; then
+    test_pass
+else
+    test_fail "adaptive mode allowed an unconfirmed symlink expansion; status=$adaptive_status calls=$VALIDATE_CALLS"
+fi
+rm -f "$TMP_REPO/adaptive-escape"
+VALIDATE_CALLS=0
+
 test_case "adaptive mode keeps parent-owned snapshot integrity failures fatal"
 export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
 export TANGLE_WORKTREE_BEFORE_STATE_DIGEST=deliberately-wrong

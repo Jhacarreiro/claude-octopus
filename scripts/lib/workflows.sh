@@ -4703,6 +4703,52 @@ tangle_changed_paths_outside_write_scopes() {
     done <<< "$changed_paths" | sed '/^$/d' | sort -u
 }
 
+tangle_adaptive_scope_path_is_safe() {
+    local path="$1" baseline_head="${2:-}" before_state_file="${3:-}"
+    local repo_root candidate
+
+    # Adaptive mode may record only paths that pass the same lexical and
+    # symlink checks used for declared write scopes. Anything uncertain stays
+    # a fatal integrity violation instead of becoming review-only evidence.
+    tangle_scope_is_safe_relative_path "$path" || return 1
+    repo_root=$(tangle_resolve_repo_root 2>/dev/null) || return 1
+    git -C "$repo_root" rev-parse --show-toplevel >/dev/null 2>&1 || return 1
+    tangle_scope_has_symlink_component "$path" && return 1
+
+    # A changed path may have been a symlink before the worker replaced or
+    # deleted it. Check the parent-owned snapshot and immutable start tree so
+    # that this transition cannot be laundered as a safe expansion.
+    candidate="${path%/}"
+    while [[ -n "$candidate" ]]; do
+        if [[ -n "$before_state_file" && -f "$before_state_file" ]] && \
+           awk -F '\t' -v candidate="$candidate" \
+               '$1 == "ENTRY" && $2 == candidate && $4 ~ /^symlink:/ { found=1 } END { exit(found ? 0 : 1) }' \
+               "$before_state_file"; then
+            return 1
+        fi
+        if [[ -n "$baseline_head" ]] && \
+           git -C "$repo_root" ls-tree -r "$baseline_head" -- "$candidate" 2>/dev/null | \
+               awk '$1 == "120000" { found=1 } END { exit(found ? 0 : 1) }'; then
+            return 1
+        fi
+        [[ "$candidate" == */* ]] || break
+        candidate="${candidate%/*}"
+    done
+    return 0
+}
+
+tangle_classify_adaptive_scope_paths() {
+    local paths="$1" baseline_head="${2:-}" before_state_file="${3:-}" path
+    while IFS= read -r path; do
+        [[ -n "$path" ]] || continue
+        if tangle_adaptive_scope_path_is_safe "$path" "$baseline_head" "$before_state_file"; then
+            printf 'SAFE\t%s\n' "$path"
+        else
+            printf 'UNSAFE\t%s\n' "$path"
+        fi
+    done <<< "$paths"
+}
+
 tangle_append_write_scope_contract_report() {
     local validation_file="$1" authorized="$2" read_only="$3" violations="$4" baseline_head="${5:-}" adaptive_scope_evidence="${6:-}"
     {
@@ -4731,6 +4777,7 @@ tangle_validate_results_with_scope_contract() {
     local worktree_before_state_file="${7:-}"
     local validation_file="${RESULTS_DIR:-${HOME}/.claude-octopus/results}/tangle-validation-${task_group}.md"
     local authorized read_only integrity_violations="" adaptive_scope_evidence="" current_manifest_digest base_rc=0
+    local out_of_scope_paths="" scope_classification="" unsafe_scope_paths=""
     authorized=$(tangle_authorized_write_scopes "$subtasks")
     read_only=$(tangle_authorized_read_scopes "$subtasks")
     if [[ -n "${TANGLE_WORKTREE_BEFORE_STATE_DIGEST:-}" && -n "$worktree_before_state_file" ]]; then
@@ -4741,8 +4788,17 @@ tangle_validate_results_with_scope_contract() {
         fi
     fi
     if [[ -z "$integrity_violations" ]]; then
-        if ! adaptive_scope_evidence=$(tangle_changed_paths_outside_write_scopes "$subtasks" "$worktree_before_file" "$baseline_head" "$worktree_before_state_file"); then
+        if ! out_of_scope_paths=$(tangle_changed_paths_outside_write_scopes "$subtasks" "$worktree_before_file" "$baseline_head" "$worktree_before_state_file"); then
             integrity_violations="Unable to verify final worktree changes against immutable start HEAD."
+        elif [[ "$(tangle_write_scope_mode)" == "adaptive" ]]; then
+            scope_classification=$(tangle_classify_adaptive_scope_paths "$out_of_scope_paths" "$baseline_head" "$worktree_before_state_file")
+            adaptive_scope_evidence=$(printf '%s\n' "$scope_classification" | sed -n 's/^SAFE\t//p')
+            unsafe_scope_paths=$(printf '%s\n' "$scope_classification" | sed -n 's/^UNSAFE\t//p')
+            if [[ -n "$unsafe_scope_paths" ]]; then
+                integrity_violations="Adaptive expansion included paths that could not be confirmed safe:"$'\n'"${unsafe_scope_paths}"
+            fi
+        else
+            integrity_violations="$out_of_scope_paths"
         fi
     fi
     if [[ -n "$scope_manifest_digest" ]]; then
@@ -4751,10 +4807,6 @@ tangle_validate_results_with_scope_contract() {
             [[ -z "$integrity_violations" ]] || integrity_violations="${integrity_violations}"$'\n'
             integrity_violations="${integrity_violations}The parent-owned scope manifest changed before final validation."
         fi
-    fi
-    if [[ "$(tangle_write_scope_mode)" != "adaptive" && -n "$adaptive_scope_evidence" ]]; then
-        [[ -z "$integrity_violations" ]] || integrity_violations="${integrity_violations}"$'\n'
-        integrity_violations="${integrity_violations}${adaptive_scope_evidence}"
     fi
     TANGLE_SCOPE_CONTRACT_VIOLATIONS="$integrity_violations"
     export TANGLE_SCOPE_CONTRACT_VIOLATIONS

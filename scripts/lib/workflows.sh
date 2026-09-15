@@ -1235,8 +1235,78 @@ ${execution_scope_guidance}
 Migration safety:
 ${migration_safety}
 - In the final output, include "## Worktree Changes", "## Integration Evidence", and "## Verification" sections.
-- If the assigned subtask is incomplete, contradictory, or omits required context, report the blocker instead of inventing scope.
+- If a genuine product/architecture/protected-action decision cannot be resolved from the original task and repository context, do not guess. Emit exactly this additional block in the final output: "## Human Intervention Required", then one-line fields "Question:", optional "Context:", optional pipe-separated "Options:", and optional "Recommended:". Use this only for a real operator decision, not ordinary coding errors or missing files.
+- If the assigned subtask is incomplete, contradictory, or omits required context but does not require a human choice, report the blocker instead of inventing scope.
 EOF
+}
+
+tangle_extract_human_intervention_json() {
+    local result_file="$1"
+    [[ -f "$result_file" ]] || return 1
+    grep -Eq '^## Human Intervention Required[[:space:]]*$' "$result_file" || return 1
+
+    local question context options recommended source_id
+    question=$(awk '
+        /^## Human Intervention Required[[:space:]]*$/ { in_block=1; next }
+        in_block && /^## / { exit }
+        in_block && /^Question:[[:space:]]*/ { sub(/^Question:[[:space:]]*/, ""); print; exit }
+    ' "$result_file")
+    [[ -n "${question//[[:space:]]/}" ]] || return 1
+    context=$(awk '
+        /^## Human Intervention Required[[:space:]]*$/ { in_block=1; next }
+        in_block && /^## / { exit }
+        in_block && /^Context:[[:space:]]*/ { sub(/^Context:[[:space:]]*/, ""); print; exit }
+    ' "$result_file")
+    options=$(awk '
+        /^## Human Intervention Required[[:space:]]*$/ { in_block=1; next }
+        in_block && /^## / { exit }
+        in_block && /^Options:[[:space:]]*/ { sub(/^Options:[[:space:]]*/, ""); print; exit }
+    ' "$result_file")
+    recommended=$(awk '
+        /^## Human Intervention Required[[:space:]]*$/ { in_block=1; next }
+        in_block && /^## / { exit }
+        in_block && /^Recommended:[[:space:]]*/ { sub(/^Recommended:[[:space:]]*/, ""); print; exit }
+    ' "$result_file")
+    source_id=$(basename "$result_file" .md | tr -cs 'A-Za-z0-9._-' '-')
+
+    jq -n \
+        --arg id "${source_id:-human-intervention}" \
+        --arg question "$question" \
+        --arg context "$context" \
+        --arg options "$options" \
+        --arg recommended "$recommended" \
+        --arg sourceResult "$result_file" \
+        '{schemaVersion:1,id:$id,kind:"human_decision",question:$question,context:$context,options:($options|split("|")|map(gsub("^[[:space:]]+|[[:space:]]+$";"")|select(length>0))),recommendedOption:(if ($recommended|length)>0 then $recommended else null end),sourceResult:$sourceResult,createdAt:(now|todateiso8601)}'
+}
+
+tangle_write_human_intervention_artifact() {
+    local result_file="$1" target="${OCTOPUS_HUMAN_INTERVENTION_PATH:-}"
+    [[ -n "$target" ]] || return 1
+    [[ "$target" == /* ]] || { log ERROR "OCTOPUS_HUMAN_INTERVENTION_PATH must be absolute"; return 1; }
+    [[ ! -L "$target" ]] || { log ERROR "Refusing symlink human intervention target: $target"; return 1; }
+    local parent tmp json
+    parent=$(dirname "$target")
+    mkdir -p "$parent" || return 1
+    [[ ! -L "$parent" ]] || { log ERROR "Refusing symlink human intervention parent: $parent"; return 1; }
+    json=$(tangle_extract_human_intervention_json "$result_file") || return 1
+    tmp="${target}.tmp.$$"
+    printf '%s\n' "$json" > "$tmp" || return 1
+    chmod 600 "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$target" || return 1
+    log WARN "Human intervention requested by $(basename "$result_file"); wrote structured request to $target"
+    return 0
+}
+
+tangle_detect_human_intervention() {
+    local results_dir="${RESULTS_DIR:-${HOME}/.claude-octopus/results}" result_file
+    [[ -n "${OCTOPUS_HUMAN_INTERVENTION_PATH:-}" ]] || return 1
+    while IFS= read -r result_file; do
+        [[ -f "$result_file" ]] || continue
+        if tangle_write_human_intervention_artifact "$result_file"; then
+            return 0
+        fi
+    done < <(find "$results_dir" -maxdepth 1 -type f -name '*.md' -print 2>/dev/null | sort)
+    return 1
 }
 
 tangle_normalize_declared_scope() {
@@ -4643,6 +4713,13 @@ Every [CODING] line must include at least one same-line Files: or Creates: claus
     # v7.25.0: Record agent completion metrics
     if command -v record_agents_batch_complete &> /dev/null; then
         record_agents_batch_complete "tangle" "$task_group" 2>/dev/null || true
+    fi
+
+    # Human-in-the-loop gate. Only the exact structured result block is eligible;
+    # ordinary blocker/error text never pauses the run.
+    if tangle_detect_human_intervention; then
+        log WARN "Tangle paused for human intervention before validation"
+        return 75
     fi
 
     # Step 3: Validation gate

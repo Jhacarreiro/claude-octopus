@@ -107,12 +107,35 @@ adaptive_status=0
 tangle_validate_results_with_scope_contract adaptive 'Build UI' "$BEFORE" "$SUBTASKS" || adaptive_status=$?
 unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
 adaptive_report="$RESULTS_DIR/tangle-validation-adaptive.md"
-if [[ "$adaptive_status" -eq 0 ]] && [[ "$VALIDATE_CALLS" -eq 1 ]] && grep -q 'Adaptive Write Scope Expansions' "$adaptive_report" && grep -q -- '- src/existing.ts' "$adaptive_report" && [[ -z "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" ]]; then
+if [[ "$adaptive_status" -eq 0 ]] && [[ "$VALIDATE_CALLS" -eq 1 ]] && grep -q 'Adaptive Write Scope Expansions' "$adaptive_report" && grep -q -- '- src/existing.ts' "$adaptive_report" && [[ "${TANGLE_SCOPE_EXPANSION_EVIDENCE:-}" == *"src/existing.ts"* ]] && [[ -z "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" ]]; then
     test_pass
 else
     test_fail "adaptive scope expansion remained fatal or lost evidence; status=$adaptive_status calls=$VALIDATE_CALLS"
 fi
 VALIDATE_CALLS=0
+
+test_case "adaptive mode keeps parent-owned snapshot integrity failures fatal"
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+export TANGLE_WORKTREE_BEFORE_STATE_DIGEST=deliberately-wrong
+status=0
+tangle_validate_results_with_scope_contract snapshot-integrity 'Build UI' "$BEFORE" "$SUBTASKS" "" "" "$BEFORE" || status=$?
+unset TANGLE_WORKTREE_BEFORE_STATE_DIGEST OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+if [[ "$status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && [[ "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" == *"parent-owned worktree state snapshot"* ]]; then
+    test_pass
+else
+    test_fail "adaptive mode cleared a parent-owned snapshot integrity failure; status=$status"
+fi
+
+test_case "adaptive mode keeps scope-manifest integrity failures fatal"
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+status=0
+tangle_validate_results_with_scope_contract manifest-integrity 'Build UI' "$BEFORE" "$SUBTASKS" "" deliberately-wrong "$BEFORE" || status=$?
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+if [[ "$status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && [[ "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" == *"parent-owned scope manifest"* ]]; then
+    test_pass
+else
+    test_fail "adaptive mode cleared a scope-manifest integrity failure; status=$status"
+fi
 
 test_case "scope violation is surfaced as one deterministic blocking finding"
 findings="$TMP_ROOT/findings.json"

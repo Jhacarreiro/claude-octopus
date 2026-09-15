@@ -4362,15 +4362,24 @@ Every [CODING] line must include at least one same-line Files: or Creates: claus
         fi
         echo -e "${CYAN}Planner scope decisions:${NC}"
         echo "$planner_decisions"
-        if ! adequacy_review=$(tangle_decomposition_adequacy_review "$resolved_prompt" "$subtasks" "$repo_file_map" "$design_review_synthesis" "$planner_decisions") || \
-           ! tangle_decomposition_adequacy_verdict "$adequacy_review"; then
-            adequacy_reason=$(tangle_decomposition_adequacy_reasons "$adequacy_review")
-            if [[ "$(tangle_write_scope_mode)" == "adaptive" ]]; then
-                log WARN "Decomposition remains semantically imperfect after planner reconsideration (${adequacy_reason:-malformed verdict}); continuing in adaptive write-scope mode and relying on implementation diff/review/CI gates"
-            else
-                log ERROR "Decomposition remains semantically inadequate after one planner reconsideration: ${adequacy_reason:-malformed verdict}"
-                return 1
+        local second_adequacy_status=0
+        if adequacy_review=$(tangle_decomposition_adequacy_review "$resolved_prompt" "$subtasks" "$repo_file_map" "$design_review_synthesis" "$planner_decisions"); then
+            if ! tangle_decomposition_adequacy_verdict "$adequacy_review"; then
+                adequacy_reason=$(tangle_decomposition_adequacy_reasons "$adequacy_review")
+                if [[ "$(tangle_write_scope_mode)" == "adaptive" ]] && \
+                   tangle_decomposition_adequacy_response_valid "$adequacy_review" && \
+                   grep -Eq '^[[:space:]]*VERDICT:[[:space:]]*FAIL[[:space:]]*$' <<< "$adequacy_review"; then
+                    log WARN "Decomposition remains semantically imperfect after planner reconsideration (${adequacy_reason:-review returned FAIL}); continuing in adaptive write-scope mode and relying on implementation diff/review/CI gates"
+                else
+                    log ERROR "Decomposition remains semantically inadequate after one planner reconsideration: ${adequacy_reason:-malformed verdict}"
+                    return 1
+                fi
             fi
+        else
+            second_adequacy_status=$?
+            adequacy_reason=$(tangle_decomposition_adequacy_reasons "$adequacy_review")
+            log ERROR "Second decomposition adequacy review failed with status ${second_adequacy_status}; refusing implementation spawn: ${adequacy_reason:-execution or validator failure}"
+            return 1
         fi
     fi
     tangle_scope_manifest=$(tangle_scope_manifest_digest "$subtasks") || {
@@ -4695,7 +4704,7 @@ tangle_changed_paths_outside_write_scopes() {
 }
 
 tangle_append_write_scope_contract_report() {
-    local validation_file="$1" authorized="$2" read_only="$3" violations="$4" baseline_head="${5:-}"
+    local validation_file="$1" authorized="$2" read_only="$3" violations="$4" baseline_head="${5:-}" adaptive_scope_evidence="${6:-}"
     {
         echo ""
         echo "### Write Scope Contract"
@@ -4708,6 +4717,8 @@ tangle_append_write_scope_contract_report() {
             echo "#### FAILED: Out-of-Scope Worktree Changes"
             echo "Reads: never grants write permission."
             printf '%s\n' "$violations" | sed '/^$/d; s/^/- /'
+        elif [[ -n "$adaptive_scope_evidence" ]]; then
+            echo "PASS: parent-owned snapshot and scope-manifest integrity checks passed."
         else
             echo "PASS: every changed path produced by this Tangle run is inside an authorized Files:/Creates: scope."
         fi
@@ -4719,44 +4730,47 @@ tangle_validate_results_with_scope_contract() {
     local baseline_head="${5:-}" scope_manifest_digest="${6:-}"
     local worktree_before_state_file="${7:-}"
     local validation_file="${RESULTS_DIR:-${HOME}/.claude-octopus/results}/tangle-validation-${task_group}.md"
-    local authorized read_only violations="" adaptive_scope_evidence="" current_manifest_digest base_rc=0
+    local authorized read_only integrity_violations="" adaptive_scope_evidence="" current_manifest_digest base_rc=0
     authorized=$(tangle_authorized_write_scopes "$subtasks")
     read_only=$(tangle_authorized_read_scopes "$subtasks")
     if [[ -n "${TANGLE_WORKTREE_BEFORE_STATE_DIGEST:-}" && -n "$worktree_before_state_file" ]]; then
         local state_digest
         state_digest=$(tangle_file_digest "$worktree_before_state_file" 2>/dev/null || true)
         if [[ "$state_digest" != "$TANGLE_WORKTREE_BEFORE_STATE_DIGEST" ]]; then
-            violations="The parent-owned worktree state snapshot changed before final validation."
+            integrity_violations="The parent-owned worktree state snapshot changed before final validation."
         fi
     fi
-    if [[ -z "$violations" ]] && ! violations=$(tangle_changed_paths_outside_write_scopes "$subtasks" "$worktree_before_file" "$baseline_head" "$worktree_before_state_file"); then
-        violations="Unable to verify final worktree changes against immutable start HEAD."
+    if [[ -z "$integrity_violations" ]]; then
+        if ! adaptive_scope_evidence=$(tangle_changed_paths_outside_write_scopes "$subtasks" "$worktree_before_file" "$baseline_head" "$worktree_before_state_file"); then
+            integrity_violations="Unable to verify final worktree changes against immutable start HEAD."
+        fi
     fi
     if [[ -n "$scope_manifest_digest" ]]; then
         current_manifest_digest=$(tangle_scope_manifest_digest "$subtasks" 2>/dev/null || true)
         if [[ -z "$current_manifest_digest" || "$current_manifest_digest" != "$scope_manifest_digest" ]]; then
-            [[ -z "$violations" ]] || violations="${violations}"$'\n'
-            violations="${violations}The parent-owned scope manifest changed before final validation."
+            [[ -z "$integrity_violations" ]] || integrity_violations="${integrity_violations}"$'\n'
+            integrity_violations="${integrity_violations}The parent-owned scope manifest changed before final validation."
         fi
     fi
-    TANGLE_SCOPE_CONTRACT_VIOLATIONS="$violations"
+    if [[ "$(tangle_write_scope_mode)" != "adaptive" && -n "$adaptive_scope_evidence" ]]; then
+        [[ -z "$integrity_violations" ]] || integrity_violations="${integrity_violations}"$'\n'
+        integrity_violations="${integrity_violations}${adaptive_scope_evidence}"
+    fi
+    TANGLE_SCOPE_CONTRACT_VIOLATIONS="$integrity_violations"
     export TANGLE_SCOPE_CONTRACT_VIOLATIONS
-    if [[ -n "$violations" ]]; then
+    TANGLE_SCOPE_EXPANSION_EVIDENCE="$adaptive_scope_evidence"
+    export TANGLE_SCOPE_EXPANSION_EVIDENCE
+    if [[ -n "$integrity_violations" ]]; then
         mkdir -p "$(dirname "$validation_file")"
-        if [[ "$(tangle_write_scope_mode)" == "adaptive" ]]; then
-            adaptive_scope_evidence="$violations"
-            log WARN "Adaptive write-scope expansion detected; continuing to normal validation/review: $(printf '%s' "$violations" | tr '\n' ' ')"
-            violations=""
-            TANGLE_SCOPE_CONTRACT_VIOLATIONS=""
-            export TANGLE_SCOPE_CONTRACT_VIOLATIONS
-        else
-            printf '%s\n' '# Tangle Validation Report' '' "**Task Group:** $task_group" '**Status:** FAILED' '**Reason:** deterministic write-scope pre-gate' > "$validation_file"
-            tangle_append_write_scope_contract_report "$validation_file" "$authorized" "$read_only" "$violations" "$baseline_head"
-            return 1
-        fi
+        printf '%s\n' '# Tangle Validation Report' '' "**Task Group:** $task_group" '**Status:** FAILED' '**Reason:** deterministic write-scope pre-gate' > "$validation_file"
+        tangle_append_write_scope_contract_report "$validation_file" "$authorized" "$read_only" "$integrity_violations" "$baseline_head" "$adaptive_scope_evidence"
+        return 1
+    fi
+    if [[ -n "$adaptive_scope_evidence" ]]; then
+        log WARN "Adaptive write-scope expansion detected; continuing to normal validation/review: $(printf '%s' "$adaptive_scope_evidence" | tr '\n' ' ')"
     fi
     validate_tangle_results "$task_group" "$original_prompt" "$worktree_before_file" "$baseline_head" "$worktree_before_state_file" || base_rc=$?
-    tangle_append_write_scope_contract_report "$validation_file" "$authorized" "$read_only" "$violations" "$baseline_head"
+    tangle_append_write_scope_contract_report "$validation_file" "$authorized" "$read_only" "$integrity_violations" "$baseline_head" "$adaptive_scope_evidence"
     if [[ -n "$adaptive_scope_evidence" ]]; then
         {
             echo ""

@@ -153,6 +153,15 @@ else
 fi
 VALIDATE_CALLS=0
 
+test_case "parent-owned state snapshot validator rejects partial snapshots"
+partial_state="$RESULTS_DIR/partial-state.txt"
+printf '%s\n' '## unstaged' '## staged' '## untracked' > "$partial_state"
+if ! tangle_parent_owned_state_snapshot_is_valid "$partial_state"; then
+    test_pass
+else
+    test_fail "partial parent-owned state snapshot was accepted"
+fi
+
 test_case "adaptive mode keeps parent-owned snapshot integrity failures fatal"
 export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
 export TANGLE_WORKTREE_BEFORE_STATE_DIGEST=deliberately-wrong

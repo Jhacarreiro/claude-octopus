@@ -4189,10 +4189,17 @@ _tangle_develop_in_workspace() {
     else
         : > "$worktree_before_file"
     fi
-    if type snapshot_tangle_worktree_state >/dev/null 2>&1; then
-        snapshot_tangle_worktree_state > "$worktree_before_state_file" 2>/dev/null || true
-    else
-        : > "$worktree_before_state_file"
+    if ! type snapshot_tangle_worktree_state >/dev/null 2>&1; then
+        log ERROR "Tangle could not create the parent-owned worktree state snapshot"
+        return 1
+    fi
+    if ! snapshot_tangle_worktree_state > "$worktree_before_state_file" 2>/dev/null; then
+        log ERROR "Tangle could not create the parent-owned worktree state snapshot"
+        return 1
+    fi
+    if ! tangle_parent_owned_state_snapshot_is_valid "$worktree_before_state_file"; then
+        log ERROR "Tangle created an invalid parent-owned worktree state snapshot"
+        return 1
     fi
     TANGLE_WORKTREE_BEFORE_PATHS_DIGEST=$(tangle_file_digest "$worktree_before_file") || {
         log ERROR "Tangle could not seal the parent-owned worktree path snapshot"

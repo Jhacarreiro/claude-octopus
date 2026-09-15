@@ -300,6 +300,19 @@ else
 fi
 
 
+test_case "adaptive mode continues after bounded reconsideration remains semantically imperfect"
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+reset_scenario "second-fail"
+adaptive_status=0
+tangle_develop 'Build the requested externally observable application with a usable entry point.' > "$RESULTS_DIR/second-fail-adaptive.out" 2>&1 || adaptive_status=$?
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+if [[ "$adaptive_status" -eq 0 ]] && [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]] && [[ "$(cat "$RECONSIDER_COUNT_FILE")" -eq 1 ]] && [[ -s "$SPAWN_FILE" ]] && grep -q 'continuing in adaptive write-scope mode' "$LOG_FILE"; then
+    test_pass
+else
+    test_fail "adaptive mode did not continue to implementation spawn after second semantic FAIL"
+fi
+
+
 test_case "duplicate Creates clauses are rejected"
 duplicate_creates='1. [CODING] Build UI — Files: package.json — Creates: web/ — Creates: tmp/ — Task: build UI.'
 if tangle_validate_parallel_write_scopes "$duplicate_creates" >/dev/null 2>&1; then

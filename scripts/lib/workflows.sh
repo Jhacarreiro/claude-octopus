@@ -4749,6 +4749,15 @@ tangle_classify_adaptive_scope_paths() {
     done <<< "$paths"
 }
 
+tangle_parent_owned_state_snapshot_is_valid() {
+    local state_file="$1"
+    [[ -s "$state_file" ]] || return 1
+    grep -Fxq '## unstaged' "$state_file" || return 1
+    grep -Fxq '## staged' "$state_file" || return 1
+    grep -Fxq '## untracked' "$state_file" || return 1
+    grep -Fxq '## manifest' "$state_file"
+}
+
 tangle_append_write_scope_contract_report() {
     local validation_file="$1" authorized="$2" read_only="$3" violations="$4" baseline_head="${5:-}" adaptive_scope_evidence="${6:-}"
     {
@@ -4778,9 +4787,23 @@ tangle_validate_results_with_scope_contract() {
     local validation_file="${RESULTS_DIR:-${HOME}/.claude-octopus/results}/tangle-validation-${task_group}.md"
     local authorized read_only integrity_violations="" adaptive_scope_evidence="" current_manifest_digest base_rc=0
     local out_of_scope_paths="" scope_classification="" unsafe_scope_paths=""
+    local adaptive_mode=false
+    [[ "$(tangle_write_scope_mode)" == "adaptive" ]] && adaptive_mode=true
     authorized=$(tangle_authorized_write_scopes "$subtasks")
     read_only=$(tangle_authorized_read_scopes "$subtasks")
-    if [[ -n "${TANGLE_WORKTREE_BEFORE_STATE_DIGEST:-}" && -n "$worktree_before_state_file" ]]; then
+    if [[ "$adaptive_mode" == true ]]; then
+        if ! tangle_parent_owned_state_snapshot_is_valid "$worktree_before_state_file"; then
+            integrity_violations="The parent-owned worktree state snapshot is missing or invalid before adaptive validation."
+        elif [[ -z "${TANGLE_WORKTREE_BEFORE_STATE_DIGEST:-}" ]]; then
+            integrity_violations="The parent-owned worktree state snapshot is not sealed before adaptive validation."
+        else
+            local state_digest
+            state_digest=$(tangle_file_digest "$worktree_before_state_file" 2>/dev/null || true)
+            if [[ "$state_digest" != "$TANGLE_WORKTREE_BEFORE_STATE_DIGEST" ]]; then
+                integrity_violations="The parent-owned worktree state snapshot changed before final validation."
+            fi
+        fi
+    elif [[ -n "${TANGLE_WORKTREE_BEFORE_STATE_DIGEST:-}" && -n "$worktree_before_state_file" ]]; then
         local state_digest
         state_digest=$(tangle_file_digest "$worktree_before_state_file" 2>/dev/null || true)
         if [[ "$state_digest" != "$TANGLE_WORKTREE_BEFORE_STATE_DIGEST" ]]; then
@@ -4790,7 +4813,7 @@ tangle_validate_results_with_scope_contract() {
     if [[ -z "$integrity_violations" ]]; then
         if ! out_of_scope_paths=$(tangle_changed_paths_outside_write_scopes "$subtasks" "$worktree_before_file" "$baseline_head" "$worktree_before_state_file"); then
             integrity_violations="Unable to verify final worktree changes against immutable start HEAD."
-        elif [[ "$(tangle_write_scope_mode)" == "adaptive" ]]; then
+        elif [[ "$adaptive_mode" == true ]]; then
             scope_classification=$(tangle_classify_adaptive_scope_paths "$out_of_scope_paths" "$baseline_head" "$worktree_before_state_file")
             adaptive_scope_evidence=$(printf '%s\n' "$scope_classification" | sed -n 's/^SAFE\t//p')
             unsafe_scope_paths=$(printf '%s\n' "$scope_classification" | sed -n 's/^UNSAFE\t//p')

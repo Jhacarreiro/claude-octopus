@@ -26,6 +26,8 @@ RESULTS_DIR="$TMP_RESULTS"
 export PROJECT_ROOT RESULTS_DIR
 BEFORE="$RESULTS_DIR/before.txt"
 snapshot_tangle_worktree_paths > "$BEFORE" || true
+BEFORE_STATE="$RESULTS_DIR/before-state.txt"
+snapshot_tangle_worktree_state > "$BEFORE_STATE" || true
 
 SUBTASKS='1. [CODING] Build UI — Reads: src/existing.ts — Files: package.json — Creates: web/ — Task: build the new UI without modifying the read-only source module.'
 
@@ -103,8 +105,10 @@ fi
 test_case "adaptive mode records out-of-scope changes as evidence and still runs base validation"
 VALIDATE_CALLS=0
 export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+export TANGLE_WORKTREE_BEFORE_STATE_DIGEST
+TANGLE_WORKTREE_BEFORE_STATE_DIGEST=$(tangle_file_digest "$BEFORE_STATE")
 adaptive_status=0
-tangle_validate_results_with_scope_contract adaptive 'Build UI' "$BEFORE" "$SUBTASKS" || adaptive_status=$?
+tangle_validate_results_with_scope_contract adaptive 'Build UI' "$BEFORE" "$SUBTASKS" "" "" "$BEFORE_STATE" || adaptive_status=$?
 unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
 adaptive_report="$RESULTS_DIR/tangle-validation-adaptive.md"
 if [[ "$adaptive_status" -eq 0 ]] && [[ "$VALIDATE_CALLS" -eq 1 ]] && grep -q 'Adaptive Write Scope Expansions' "$adaptive_report" && grep -q -- '- src/existing.ts' "$adaptive_report" && grep -q 'PASS: adaptive scope expansion paths passed safety checks.' "$adaptive_report" && ! grep -q 'parent-owned snapshot and scope-manifest integrity checks passed.' "$adaptive_report" && [[ "${TANGLE_SCOPE_EXPANSION_EVIDENCE:-}" == *"src/existing.ts"* ]] && [[ -z "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" ]]; then
@@ -120,7 +124,7 @@ mkdir -p "$adaptive_escape_target"
 ln -s "$adaptive_escape_target" "$TMP_REPO/adaptive-escape"
 export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
 adaptive_status=0
-tangle_validate_results_with_scope_contract adaptive-unsafe 'Build UI' "$BEFORE" "$SUBTASKS" || adaptive_status=$?
+tangle_validate_results_with_scope_contract adaptive-unsafe 'Build UI' "$BEFORE" "$SUBTASKS" "" "" "$BEFORE_STATE" || adaptive_status=$?
 unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
 adaptive_unsafe_report="$RESULTS_DIR/tangle-validation-adaptive-unsafe.md"
 if [[ "$adaptive_status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && \
@@ -133,6 +137,20 @@ else
     test_fail "adaptive mode allowed an unconfirmed symlink expansion; status=$adaptive_status calls=$VALIDATE_CALLS"
 fi
 rm -f "$TMP_REPO/adaptive-escape"
+VALIDATE_CALLS=0
+
+test_case "adaptive mode requires a valid parent-owned state snapshot"
+missing_state="$RESULTS_DIR/missing-state.txt"
+rm -f "$missing_state"
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+status=0
+tangle_validate_results_with_scope_contract missing-state 'Build UI' "$BEFORE" "$SUBTASKS" "" "" "$missing_state" || status=$?
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+if [[ "$status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && [[ "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" == *"missing or invalid"* ]]; then
+    test_pass
+else
+    test_fail "adaptive mode accepted a missing parent-owned state snapshot; status=$status"
+fi
 VALIDATE_CALLS=0
 
 test_case "adaptive mode keeps parent-owned snapshot integrity failures fatal"

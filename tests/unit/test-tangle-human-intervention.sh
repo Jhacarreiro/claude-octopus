@@ -41,8 +41,8 @@ else
 fi
 
 test_case "intervention artifact is private and records source result"
-mode=$(stat -c '%a' "$OCTOPUS_HUMAN_INTERVENTION_PATH")
-if [[ "$mode" == "600" ]] && jq -e '.sourceResult | endswith("tangle-auth.md")' "$OCTOPUS_HUMAN_INTERVENTION_PATH" >/dev/null; then
+mode=$(ls -ld "$OCTOPUS_HUMAN_INTERVENTION_PATH" | awk '{print $1}')
+if [[ "$mode" == "-rw-------" ]] && jq -e '.sourceResult | endswith("tangle-auth.md")' "$OCTOPUS_HUMAN_INTERVENTION_PATH" >/dev/null; then
   test_pass
 else
   test_fail "artifact permissions/source evidence invalid"

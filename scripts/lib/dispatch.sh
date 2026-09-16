@@ -908,8 +908,9 @@ octo_summarizer_feature_specs() {
 
 _octo_summarizer_ensure_fallback_helpers() {
     if ! declare -f octo_fallback_canonical_agent_spec >/dev/null 2>&1; then
-        local fallback_lib
-        fallback_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fallback-chain.sh"
+        local SCRIPT_DIR fallback_lib
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        fallback_lib="$SCRIPT_DIR/fallback-chain.sh"
         [[ -f "$fallback_lib" ]] && source "$fallback_lib" 2>/dev/null || true
     fi
     declare -f octo_fallback_canonical_agent_spec >/dev/null 2>&1 || return 1

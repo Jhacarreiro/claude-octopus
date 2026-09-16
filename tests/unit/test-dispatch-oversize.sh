@@ -70,6 +70,62 @@ else
     test_fail "expected attributed summarized prompt, got output='$output' event='$event_args'"
 fi
 
+
+
+test_case "summarize strategy preserves original task verbatim outside auxiliary summary"
+run_agent_sync() {
+    echo "condensed auxiliary context"
+}
+protected_task=$'CAPACITY_AUTH_SECURE_PAIRING_TASK_SENTINEL
+Objective: preserve this exact task.
+Stop condition: do not invent scope.'
+protected_prompt="$(printf 'A%.0s' {1..360})${protected_task}$(printf 'B%.0s' {1..120})"
+OCTOPUS_CONTEXT_BUDGET=80
+OCTOPUS_OVERSIZE_STRATEGY=summarize
+output="$(enforce_context_budget "$protected_prompt" "" "codex" "review" "$protected_task")"
+event_args="$(cat "$TEST_TMP_DIR/oversize-event.args")"
+if [[ "$output" == *"condensed auxiliary context"* ]] &&
+   [[ "$output" == *"## ORIGINAL TASK - DO NOT SUMMARIZE"* ]] &&
+   [[ "$output" == *"$protected_task"* ]] &&
+   [[ "$(octo_estimate_prompt_tokens "$output")" -le 80 ]] &&
+   [[ "$event_args" == *"summarized-protected-task"* ]]; then
+    test_pass
+else
+    test_fail "protected task was not preserved by summarize path: event='$event_args' output='$output'"
+fi
+
+test_case "summarizer failure truncates only auxiliary context and preserves original task"
+run_agent_sync() { return 1; }
+OCTOPUS_CONTEXT_BUDGET=80
+OCTOPUS_OVERSIZE_STRATEGY=summarize
+output="$(enforce_context_budget "$protected_prompt" "" "codex" "review" "$protected_task")"
+event_args="$(cat "$TEST_TMP_DIR/oversize-event.args")"
+if [[ "$output" == *"## ORIGINAL TASK - DO NOT SUMMARIZE"* ]] &&
+   [[ "$output" == *"$protected_task"* ]] &&
+   [[ "$(octo_estimate_prompt_tokens "$output")" -le 80 ]] &&
+   [[ "$event_args" == *"summarized-protected-task"* ]]; then
+    test_pass
+else
+    test_fail "fallback truncation lost protected task: event='$event_args' output='$output'"
+fi
+
+test_case "protected task larger than budget fails explicitly instead of silently truncating task"
+very_large_task="$(printf 'TASK-SENTINEL-%.0s' {1..80})"
+very_large_prompt="prefix ${very_large_task} suffix"
+OCTOPUS_CONTEXT_BUDGET=30
+OCTOPUS_OVERSIZE_STRATEGY=truncate
+set +e
+enforce_context_budget "$very_large_prompt" "" "codex" "review" "$very_large_task" >"$TEST_TMP_DIR/protected-too-large.out" 2>"$TEST_TMP_DIR/protected-too-large.err"
+protected_rc=$?
+set -e
+event_args="$(cat "$TEST_TMP_DIR/oversize-event.args")"
+if [[ "$protected_rc" -eq 78 ]] && [[ ! -s "$TEST_TMP_DIR/protected-too-large.out" ]] &&
+   [[ "$event_args" == *"protected-task-too-large"* ]]; then
+    test_pass
+else
+    test_fail "oversized protected task did not fail closed: rc=$protected_rc event='$event_args'"
+fi
+
 test_case "leading-zero context budget is normalized as decimal before arithmetic"
 decimal_prompt="$(printf '%04000d' 0)"
 OCTOPUS_CONTEXT_BUDGET=0900

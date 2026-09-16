@@ -120,7 +120,9 @@ IMPORTANT: If you find yourself searching or grepping more than 3 times in a row
     local tokens_in _budget_original_chars _budget_final_chars _budget_compression
     _budget_original_chars=${#enhanced_prompt}
     tokens_in=$(( _budget_original_chars / 4 ))
-    enhanced_prompt=$(enforce_context_budget "$enhanced_prompt" "$role" "$agent_type" "$phase")
+    local budget_protected_task="$perspective"
+    [[ "${OCTOPUS_CONTEXT_PROTECT_ORIGINAL_TASK:-true}" == "false" ]] && budget_protected_task=""
+    enhanced_prompt=$(enforce_context_budget "$enhanced_prompt" "$role" "$agent_type" "$phase" "$budget_protected_task")
     local _budget_rc=$?
     if [[ $_budget_rc -ne 0 ]]; then
         type write_agent_status >/dev/null 2>&1 && write_agent_status "$agent_type" "failed" "$tokens_in" 0 "Prompt exceeded context budget" 0 "" "$role" || true

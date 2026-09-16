@@ -770,7 +770,9 @@ ${heuristic_ctx}"
     local tokens_in _budget_original_chars _budget_final_chars _budget_compression
     _budget_original_chars=${#enhanced_prompt}
     tokens_in=$(( _budget_original_chars / 4 ))
-    enhanced_prompt=$(enforce_context_budget "$enhanced_prompt" "${role:-}" "$agent_type" "${phase:-}")
+    local budget_protected_task="$prompt"
+    [[ "${OCTOPUS_CONTEXT_PROTECT_ORIGINAL_TASK:-true}" == "false" ]] && budget_protected_task=""
+    enhanced_prompt=$(enforce_context_budget "$enhanced_prompt" "${role:-}" "$agent_type" "${phase:-}" "$budget_protected_task")
     local _budget_rc=$?
     if [[ $_budget_rc -ne 0 ]]; then
         octo_spawn_contract_finish "$_contract_seat_id" failed "" "" \

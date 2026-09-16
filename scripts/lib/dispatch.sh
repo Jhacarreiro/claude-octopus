@@ -954,7 +954,7 @@ ${summary_input}"
         if ! type run_agent_sync >/dev/null 2>&1; then
             break
         fi
-        summary=$(run_agent_sync "$candidate" "$summary_prompt" 120 "synthesizer" "preflight" 2>/dev/null) || summary=""
+        summary=$(OCTOPUS_CONTEXT_PROTECT_ORIGINAL_TASK=false run_agent_sync "$candidate" "$summary_prompt" 120 "synthesizer" "preflight" 2>/dev/null) || summary=""
         if [[ -n "$summary" && "$summary" != "Provider available" ]]; then
             if [[ -n "$previous_strategy" ]]; then
                 export OCTOPUS_OVERSIZE_STRATEGY="$previous_strategy"
@@ -1041,6 +1041,49 @@ octo_fit_prompt_to_token_budget() {
     [[ "$fitted_tokens" -le "$token_budget" ]] && printf '%s\n' "$fitted" || printf '\n'
 }
 
+octo_strip_first_literal_block() {
+    local text="$1" literal="${2:-}"
+    if [[ -z "$literal" || "$text" != *"$literal"* ]]; then
+        printf '%s\n' "$text"
+        return 1
+    fi
+    local before after
+    before="${text%%"$literal"*}"
+    after="${text#*"$literal"}"
+    printf '%s%s\n' "$before" "$after"
+}
+
+octo_compose_prompt_with_protected_task() {
+    local auxiliary="$1" protected_task="$2" budget="$3" strategy="$4" role="$5" target="$6"
+    local protected_segment protected_tokens remaining auxiliary_result=""
+    protected_segment=$'\n\n## ORIGINAL TASK - DO NOT SUMMARIZE\n'"$protected_task"
+    protected_tokens="$(octo_estimate_prompt_tokens "$protected_segment")"
+    if [[ "$protected_tokens" -gt "$budget" ]]; then
+        log ERROR "Context budget: protected original task for $target requires ~$protected_tokens tokens; limit is $budget tokens"
+        return 78
+    fi
+    remaining=$((budget - protected_tokens))
+
+    if [[ -n "$auxiliary" && "$remaining" -gt 0 ]]; then
+        case "$strategy" in
+            summarize)
+                if auxiliary_result=$(summarize_then_dispatch "$auxiliary" "$role" "$target" "$remaining") && [[ -n "$auxiliary_result" ]]; then
+                    if [[ "$(octo_estimate_prompt_tokens "$auxiliary_result")" -gt "$remaining" ]]; then
+                        auxiliary_result=$(octo_fit_prompt_to_token_budget "$auxiliary_result" "$remaining" $'\n\n[... summarized auxiliary context truncated to fit reserved budget ...]')
+                    fi
+                else
+                    auxiliary_result=$(octo_fit_prompt_to_token_budget "$auxiliary" "$remaining" $'\n\n[... auxiliary context truncated; original task preserved below ...]')
+                fi
+                ;;
+            truncate|*)
+                auxiliary_result=$(octo_fit_prompt_to_token_budget "$auxiliary" "$remaining" $'\n\n[... auxiliary context truncated; original task preserved below ...]')
+                ;;
+        esac
+    fi
+
+    printf '%s%s\n' "$auxiliary_result" "$protected_segment"
+}
+
 octo_context_budget_warning() {
     local message="$1"
     if type octo_notice_warn >/dev/null 2>&1; then
@@ -1055,6 +1098,7 @@ enforce_context_budget() {
     local role="${2:-}"
     local agent_type="${3:-}"
     local phase="${4:-}"
+    local protected_task="${5:-}"
     local budget
     budget=$(get_provider_context_limit "$agent_type" "$phase" "$role")
     budget=$(octo_normalize_context_budget "$budget" "provider context budget") || return 2
@@ -1091,7 +1135,20 @@ enforce_context_budget() {
                 return 78
                 ;;
             summarize)
-                local summarized
+                local summarized auxiliary="$prompt"
+                if [[ -n "$protected_task" ]]; then
+                    auxiliary="$(octo_strip_first_literal_block "$prompt" "$protected_task" || true)"
+                    local protected_rc=0
+                    summarized=$(octo_compose_prompt_with_protected_task "$auxiliary" "$protected_task" "$budget" summarize "$role" "$target") || protected_rc=$?
+                    if [[ "$protected_rc" -ne 0 ]]; then
+                        type record_oversize_event >/dev/null 2>&1 && record_oversize_event "$target" "$original_chars" "$original_chars" "protected-task-too-large" "$role" "$phase" "$budget" || true
+                        return "$protected_rc"
+                    fi
+                    type record_oversize_event >/dev/null 2>&1 && record_oversize_event "$target" "$original_chars" "${#summarized}" "summarized-protected-task" "$role" "$phase" "$budget" || true
+                    octo_context_budget_warning "Context budget: summarized auxiliary context for $target while preserving original task verbatim role=${role:-none} phase=${phase:-none} from ${original_chars} to ${#summarized} chars (budget=$budget tokens/$char_budget chars)"
+                    printf '%s\n' "$summarized"
+                    return 0
+                fi
                 if summarized=$(summarize_then_dispatch "$prompt" "$role" "$target" "$budget") && [[ -n "$summarized" ]]; then
                     if [[ "$(octo_estimate_prompt_tokens "$summarized")" -gt "$budget" ]]; then
                         summarized=$(octo_fit_prompt_to_token_budget "$summarized" "$budget" $'\n\n[... summarized output truncated to fit context budget (~'"$budget"$' tokens) ...]')
@@ -1110,7 +1167,20 @@ enforce_context_budget() {
                 ;;
             truncate|*)
                 log "DEBUG" "Context budget: truncating prompt for $target from ${#prompt} to $char_budget chars (~$budget tokens)"
-                local truncated
+                local truncated auxiliary="$prompt"
+                if [[ -n "$protected_task" ]]; then
+                    auxiliary="$(octo_strip_first_literal_block "$prompt" "$protected_task" || true)"
+                    local protected_rc=0
+                    truncated=$(octo_compose_prompt_with_protected_task "$auxiliary" "$protected_task" "$budget" truncate "$role" "$target") || protected_rc=$?
+                    if [[ "$protected_rc" -ne 0 ]]; then
+                        type record_oversize_event >/dev/null 2>&1 && record_oversize_event "$target" "$original_chars" "$original_chars" "protected-task-too-large" "$role" "$phase" "$budget" || true
+                        return "$protected_rc"
+                    fi
+                    type record_oversize_event >/dev/null 2>&1 && record_oversize_event "$target" "$original_chars" "${#truncated}" "truncated-protected-task" "$role" "$phase" "$budget" || true
+                    octo_context_budget_warning "Context budget: truncated auxiliary context for $target while preserving original task verbatim role=${role:-none} phase=${phase:-none} from ${original_chars} to ${#truncated} chars (budget=$budget tokens/$char_budget chars)"
+                    printf '%s\n' "$truncated"
+                    return 0
+                fi
                 truncated=$(octo_fit_prompt_to_token_budget "$prompt" "$budget" $'\n\n[... truncated to fit context budget (~'"$budget"$' tokens) ...]')
                 type record_oversize_event >/dev/null 2>&1 && record_oversize_event "$target" "$original_chars" "${#truncated}" "truncated" "$role" "$phase" "$budget" || true
                 octo_context_budget_warning "Context budget: truncated $target role=${role:-none} phase=${phase:-none} from ${original_chars} to ${#truncated} chars (budget=$budget tokens/$char_budget chars)"

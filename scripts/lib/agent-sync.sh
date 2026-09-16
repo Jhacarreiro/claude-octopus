@@ -1371,7 +1371,9 @@ ${provider_ctx}"
     fi
     local tokens_in
     tokens_in=$(( ${#enhanced_prompt} / 4 ))
-    enhanced_prompt=$(enforce_context_budget "$enhanced_prompt" "$role" "$agent_type" "$phase")
+    local budget_protected_task="$prompt"
+    [[ "${OCTOPUS_CONTEXT_PROTECT_ORIGINAL_TASK:-true}" == "false" ]] && budget_protected_task=""
+    enhanced_prompt=$(enforce_context_budget "$enhanced_prompt" "$role" "$agent_type" "$phase" "$budget_protected_task")
     local _budget_rc=$?
     if [[ $_budget_rc -ne 0 ]]; then
         run_contract_transition "$_sync_seat_id" failed \

@@ -1099,9 +1099,10 @@ enforce_context_budget() {
     local agent_type="${3:-}"
     local phase="${4:-}"
     local protected_task="${5:-}"
-    local budget
-    budget=$(get_provider_context_limit "$agent_type" "$phase" "$role")
-    budget=$(octo_normalize_context_budget "$budget" "provider context budget") || return 2
+    local budget hard_budget
+    hard_budget=$(get_provider_context_limit "$agent_type" "$phase" "$role")
+    hard_budget=$(octo_normalize_context_budget "$hard_budget" "provider context budget") || return 2
+    budget="$hard_budget"
 
     # v9.3.0: Scale budget by role proportion
     if [[ -n "$role" ]]; then
@@ -1126,6 +1127,27 @@ enforce_context_budget() {
         local strategy="${OCTOPUS_OVERSIZE_STRATEGY:-summarize}"
         local original_chars=${#prompt}
         local target="${agent_type:-unknown}"
+
+        # Role budgets are soft allocations. A protected original task may use
+        # the provider's full admitted context when necessary, but auxiliary
+        # persona/history/method context must yield first. Explicit fail mode
+        # remains fail-closed and never bypasses its configured threshold.
+        if [[ -n "$protected_task" && "$strategy" != "fail" ]]; then
+            local protected_segment protected_tokens
+            protected_segment=$'\n\n## ORIGINAL TASK - DO NOT SUMMARIZE\n'"$protected_task"
+            protected_tokens="$(octo_estimate_prompt_tokens "$protected_segment")"
+            if [[ "$protected_tokens" -gt "$budget" ]]; then
+                if [[ "$protected_tokens" -le "$hard_budget" ]]; then
+                    type record_oversize_event >/dev/null 2>&1 && record_oversize_event "$target" "$original_chars" "${#protected_segment}" "protected-task-soft-budget-bypass" "$role" "$phase" "$hard_budget" || true
+                    octo_context_budget_warning "Context budget: protected original task for $target exceeds soft role budget ($budget tokens) but fits provider context ($hard_budget tokens); dispatching task without auxiliary context"
+                    printf '%s\n' "$protected_segment"
+                    return 0
+                fi
+                log ERROR "Context budget: protected original task for $target requires ~$protected_tokens tokens; provider context limit is $hard_budget tokens"
+                type record_oversize_event >/dev/null 2>&1 && record_oversize_event "$target" "$original_chars" "$original_chars" "protected-task-too-large" "$role" "$phase" "$hard_budget" || true
+                return 78
+            fi
+        fi
 
         case "$strategy" in
             fail)

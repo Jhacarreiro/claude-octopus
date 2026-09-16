@@ -109,6 +109,30 @@ else
     test_fail "fallback truncation lost protected task: event='$event_args' output='$output'"
 fi
 
+test_case "protected task may exceed soft role budget when it fits provider hard context"
+_original_get_provider_context_limit="$(declare -f get_provider_context_limit)"
+_original_get_role_budget_proportion="$(declare -f get_role_budget_proportion)"
+get_provider_context_limit() { echo 120; }
+get_role_budget_proportion() { echo 40; }
+soft_task="$(printf 'CAPACITY-TASK-%.0s' {1..18})"
+soft_prompt="$(printf 'AUXILIARY-%.0s' {1..120})${soft_task}"
+OCTOPUS_CONTEXT_BUDGET=""
+OCTOPUS_OVERSIZE_STRATEGY=summarize
+output="$(enforce_context_budget "$soft_prompt" "researcher" "codex" "review" "$soft_task")"
+event_args="$(cat "$TEST_TMP_DIR/oversize-event.args")"
+eval "$_original_get_provider_context_limit"
+eval "$_original_get_role_budget_proportion"
+unset _original_get_provider_context_limit _original_get_role_budget_proportion
+if [[ "$output" == *"## ORIGINAL TASK - DO NOT SUMMARIZE"* ]] &&
+   [[ "$output" == *"$soft_task"* ]] &&
+   [[ "$output" != *"AUXILIARY-"* ]] &&
+   [[ "$(octo_estimate_prompt_tokens "$output")" -le 120 ]] &&
+   [[ "$event_args" == *"protected-task-soft-budget-bypass"* ]]; then
+    test_pass
+else
+    test_fail "soft role budget did not yield auxiliary context while preserving task: event='$event_args' output='$output'"
+fi
+
 test_case "protected task larger than budget fails explicitly instead of silently truncating task"
 very_large_task="$(printf 'TASK-SENTINEL-%.0s' {1..80})"
 very_large_prompt="prefix ${very_large_task} suffix"

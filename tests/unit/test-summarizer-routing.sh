@@ -54,13 +54,7 @@ fi
 
 test_case "canonical target aliases are not selected for summarization"
 printf '%s\n' '{"routing":{"features":{"summarizer":["agy"]}}}' > "$CFG"
-octo_fallback_canonical_agent_spec() {
-    if [[ "$1" == 'antigravity' ]]; then
-        printf '%s\n' 'agy'
-    else
-        printf '%s\n' "$1"
-    fi
-}
+unset -f octo_fallback_canonical_agent_spec octo_fallback_admit_automatic_spec
 CALLS="$TEST_TMP_DIR/alias-target-calls"
 : > "$CALLS"
 run_agent_sync() {
@@ -75,6 +69,7 @@ else
     test_fail "canonical target alias made unexpected calls: [$(cat "$CALLS")]"
 fi
 octo_fallback_canonical_agent_spec() { printf '%s\n' "$1"; }
+octo_fallback_admit_automatic_spec() { return 0; }
 
 test_case "empty summarizer feature has no hidden provider fallback"
 printf '%s\n' '{"routing":{"features":{"summarizer":[]}}}' > "$CFG"

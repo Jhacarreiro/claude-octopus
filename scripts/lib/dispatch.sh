@@ -921,9 +921,10 @@ octo_summarizer_candidates() {
 
     local raw spec seen="|"
     if [[ -n "${OCTOPUS_OVERSIZE_SUMMARIZER:-}" ]]; then
-        spec="$(octo_fallback_canonical_agent_spec "$OCTOPUS_OVERSIZE_SUMMARIZER" 2>/dev/null)" || return 2
-        printf '%s\n' "$spec"
-        seen+="$spec|"
+        if spec="$(octo_fallback_canonical_agent_spec "$OCTOPUS_OVERSIZE_SUMMARIZER" 2>/dev/null)"; then
+            printf '%s\n' "$spec"
+            seen+="$spec|"
+        fi
     fi
 
     while IFS= read -r raw; do

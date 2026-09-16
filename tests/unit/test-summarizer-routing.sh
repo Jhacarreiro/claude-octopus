@@ -52,6 +52,21 @@ else
     test_fail "override order/dedup mismatch: [$actual]"
 fi
 
+test_case "invalid explicit override does not suppress configured candidates"
+OCTOPUS_OVERSIZE_SUMMARIZER='unknown-provider'
+octo_fallback_canonical_agent_spec() {
+    [[ "$1" != 'unknown-provider' ]] && printf '%s\n' "$1"
+}
+actual="$(octo_summarizer_candidates)"
+unset OCTOPUS_OVERSIZE_SUMMARIZER
+octo_fallback_canonical_agent_spec() { printf '%s\n' "$1"; }
+expected=$'commandcode:vendor/compact-contributor\ncodex:gpt-mini\ncommandcode:vendor/free-model:free'
+if [[ "$actual" == "$expected" ]]; then
+    test_pass
+else
+    test_fail "invalid override suppressed configured candidates: [$actual]"
+fi
+
 test_case "canonical target aliases are not selected for summarization"
 printf '%s\n' '{"routing":{"features":{"summarizer":["agy"]}}}' > "$CFG"
 unset -f octo_fallback_canonical_agent_spec octo_fallback_admit_automatic_spec

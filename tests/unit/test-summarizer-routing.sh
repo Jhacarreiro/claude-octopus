@@ -52,6 +52,30 @@ else
     test_fail "override order/dedup mismatch: [$actual]"
 fi
 
+test_case "canonical target aliases are not selected for summarization"
+printf '%s\n' '{"routing":{"features":{"summarizer":["agy"]}}}' > "$CFG"
+octo_fallback_canonical_agent_spec() {
+    if [[ "$1" == 'antigravity' ]]; then
+        printf '%s\n' 'agy'
+    else
+        printf '%s\n' "$1"
+    fi
+}
+CALLS="$TEST_TMP_DIR/alias-target-calls"
+: > "$CALLS"
+run_agent_sync() {
+    printf '%s\n' "$1" >> "$CALLS"
+    printf '%s\n' 'unexpected summary'
+}
+if summary="$(summarize_then_dispatch 'very long prompt body' researcher antigravity 80)"; then
+    test_fail "canonical target alias was dispatched: summary=[$summary] calls=[$(cat "$CALLS")]"
+elif [[ ! -s "$CALLS" ]]; then
+    test_pass
+else
+    test_fail "canonical target alias made unexpected calls: [$(cat "$CALLS")]"
+fi
+octo_fallback_canonical_agent_spec() { printf '%s\n' "$1"; }
+
 test_case "empty summarizer feature has no hidden provider fallback"
 printf '%s\n' '{"routing":{"features":{"summarizer":[]}}}' > "$CFG"
 actual="$(octo_summarizer_candidates)"

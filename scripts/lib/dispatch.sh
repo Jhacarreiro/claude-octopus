@@ -973,7 +973,13 @@ Remove repetition, logs, duplicate context, and low-value boilerplate. Return on
 Oversized prompt:
 ${summary_input}"
 
-    local candidate summary previous_strategy previous_debug
+    local candidate summary canonical_target_agent previous_strategy previous_debug
+    canonical_target_agent="$target_agent"
+    if canonical_target_agent="$(octo_fallback_canonical_agent_spec "$target_agent" 2>/dev/null)"; then
+        :
+    else
+        canonical_target_agent="$target_agent"
+    fi
     previous_strategy="${OCTOPUS_OVERSIZE_STRATEGY-}"
     previous_debug="${OCTOPUS_DEBUG-}"
     export OCTOPUS_OVERSIZE_STRATEGY=truncate
@@ -981,7 +987,7 @@ ${summary_input}"
 
     while IFS= read -r candidate; do
         [[ -n "$candidate" ]] || continue
-        [[ "$candidate" == "$target_agent" ]] && continue
+        [[ "$candidate" == "$canonical_target_agent" ]] && continue
         if ! type run_agent_sync >/dev/null 2>&1; then
             break
         fi

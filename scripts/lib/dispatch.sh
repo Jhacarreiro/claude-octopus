@@ -906,13 +906,17 @@ octo_summarizer_feature_specs() {
     ' "$config_file" 2>/dev/null || true
 }
 
-octo_summarizer_candidates() {
+_octo_summarizer_ensure_fallback_helpers() {
     if ! declare -f octo_fallback_canonical_agent_spec >/dev/null 2>&1; then
         local fallback_lib
         fallback_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fallback-chain.sh"
         [[ -f "$fallback_lib" ]] && source "$fallback_lib" 2>/dev/null || true
     fi
     declare -f octo_fallback_canonical_agent_spec >/dev/null 2>&1 || return 1
+}
+
+octo_summarizer_candidates() {
+    _octo_summarizer_ensure_fallback_helpers || return 1
 
     local raw spec seen="|"
     if [[ -n "${OCTOPUS_OVERSIZE_SUMMARIZER:-}" ]]; then
@@ -974,6 +978,7 @@ Oversized prompt:
 ${summary_input}"
 
     local candidate summary canonical_target_agent previous_strategy previous_debug
+    _octo_summarizer_ensure_fallback_helpers || true
     canonical_target_agent="$target_agent"
     if canonical_target_agent="$(octo_fallback_canonical_agent_spec "$target_agent" 2>/dev/null)"; then
         :

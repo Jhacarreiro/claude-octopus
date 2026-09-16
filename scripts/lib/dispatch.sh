@@ -894,6 +894,45 @@ octo_estimate_prompt_tokens() {
     fi
 }
 
+octo_summarizer_feature_specs() {
+    local config_file="${OCTOPUS_PROVIDERS_CONFIG:-${HOME}/.claude-octopus/config/providers.json}"
+    [[ -f "$config_file" ]] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+
+    jq -r '
+        (.routing.features.summarizer // [])
+        | if type == "array" then .[] else empty end
+        | select(type == "string" and length > 0)
+    ' "$config_file" 2>/dev/null || true
+}
+
+octo_summarizer_candidates() {
+    if ! declare -f octo_fallback_canonical_agent_spec >/dev/null 2>&1; then
+        local fallback_lib
+        fallback_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fallback-chain.sh"
+        [[ -f "$fallback_lib" ]] && source "$fallback_lib" 2>/dev/null || true
+    fi
+    declare -f octo_fallback_canonical_agent_spec >/dev/null 2>&1 || return 1
+
+    local raw spec seen="|"
+    if [[ -n "${OCTOPUS_OVERSIZE_SUMMARIZER:-}" ]]; then
+        spec="$(octo_fallback_canonical_agent_spec "$OCTOPUS_OVERSIZE_SUMMARIZER" 2>/dev/null)" || return 2
+        printf '%s\n' "$spec"
+        seen+="$spec|"
+    fi
+
+    while IFS= read -r raw; do
+        [[ -n "$raw" ]] || continue
+        spec="$(octo_fallback_canonical_agent_spec "$raw" 2>/dev/null)" || continue
+        [[ "$seen" == *"|$spec|"* ]] && continue
+        if declare -f octo_fallback_admit_automatic_spec >/dev/null 2>&1; then
+            octo_fallback_admit_automatic_spec "$spec" "" >/dev/null 2>&1 || continue
+        fi
+        seen+="$spec|"
+        printf '%s\n' "$spec"
+    done < <(octo_summarizer_feature_specs)
+}
+
 summarize_then_dispatch() {
     local prompt="$1"
     local role="${2:-}"
@@ -934,23 +973,15 @@ Remove repetition, logs, duplicate context, and low-value boilerplate. Return on
 Oversized prompt:
 ${summary_input}"
 
-    local candidates=()
-    if [[ -n "${OCTOPUS_OVERSIZE_SUMMARIZER:-}" ]]; then
-        candidates+=("$OCTOPUS_OVERSIZE_SUMMARIZER")
-    fi
-    candidates+=("agy" "codex-mini" "claude-sonnet" "codex")
-
     local candidate summary previous_strategy previous_debug
     previous_strategy="${OCTOPUS_OVERSIZE_STRATEGY-}"
     previous_debug="${OCTOPUS_DEBUG-}"
     export OCTOPUS_OVERSIZE_STRATEGY=truncate
     export OCTOPUS_DEBUG="${OCTOPUS_DEBUG:-false}"
 
-    for candidate in "${candidates[@]}"; do
+    while IFS= read -r candidate; do
+        [[ -n "$candidate" ]] || continue
         [[ "$candidate" == "$target_agent" ]] && continue
-        if type validate_agent_type >/dev/null 2>&1 && ! validate_agent_type "$candidate" >/dev/null 2>&1; then
-            continue
-        fi
         if ! type run_agent_sync >/dev/null 2>&1; then
             break
         fi
@@ -969,7 +1000,7 @@ ${summary_input}"
             printf '%s\n' "$summary"
             return 0
         fi
-    done
+    done < <(octo_summarizer_candidates)
 
     if [[ -n "$previous_strategy" ]]; then
         export OCTOPUS_OVERSIZE_STRATEGY="$previous_strategy"

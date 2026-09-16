@@ -12,6 +12,7 @@ CFG="$TEST_TMP_DIR/providers.json"
 export OCTOPUS_PROVIDERS_CONFIG="$CFG"
 
 # Keep these tests focused on feature routing rather than the provider registry.
+validate_model_name_for_provider() { return 0; }
 octo_fallback_canonical_agent_spec() { printf '%s\n' "$1"; }
 octo_fallback_admit_automatic_spec() { return 0; }
 

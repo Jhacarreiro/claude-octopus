@@ -79,6 +79,7 @@ unset OCTOPUS_PROVIDERS_CONFIG
 
 
 test_case "summarize strategy preserves original task verbatim outside auxiliary summary"
+export OCTOPUS_OVERSIZE_SUMMARIZER=commandcode
 run_agent_sync() {
     echo "condensed auxiliary context"
 }
@@ -114,6 +115,7 @@ if [[ "$output" == *"## ORIGINAL TASK - DO NOT SUMMARIZE"* ]] &&
 else
     test_fail "fallback truncation lost protected task: event='$event_args' output='$output'"
 fi
+unset OCTOPUS_OVERSIZE_SUMMARIZER
 
 test_case "protected task may exceed soft role budget when it fits provider hard context"
 _original_get_provider_context_limit="$(declare -f get_provider_context_limit)"

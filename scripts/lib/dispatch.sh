@@ -907,12 +907,17 @@ octo_summarizer_feature_specs() {
 }
 
 _octo_summarizer_ensure_fallback_helpers() {
+    local SCRIPT_DIR fallback_lib model_resolver_lib
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if ! declare -f validate_model_name_for_provider >/dev/null 2>&1; then
+        model_resolver_lib="$SCRIPT_DIR/model-resolver.sh"
+        [[ -f "$model_resolver_lib" ]] && source "$model_resolver_lib" 2>/dev/null || true
+    fi
     if ! declare -f octo_fallback_canonical_agent_spec >/dev/null 2>&1; then
-        local SCRIPT_DIR fallback_lib
-        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         fallback_lib="$SCRIPT_DIR/fallback-chain.sh"
         [[ -f "$fallback_lib" ]] && source "$fallback_lib" 2>/dev/null || true
     fi
+    declare -f validate_model_name_for_provider >/dev/null 2>&1 || return 1
     declare -f octo_fallback_canonical_agent_spec >/dev/null 2>&1 || return 1
 }
 

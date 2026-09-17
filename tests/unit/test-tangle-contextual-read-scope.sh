@@ -52,7 +52,7 @@ no() {
     fi
 }
 has_guidance() { local text; text=$(build_tangle_subtask_prompt "Implement the plan" "$1"); [[ "$text" == *"Read context policy: contextual."* ]]; }
-has_reasoning_scope() { local text; text=$(tangle_authorized_read_scopes "$1"); [[ "$text" == *"src/reasoning.md"* ]]; }
+has_reasoning_scope() { local text; text=$(tangle_authorized_read_scopes "$1"); [[ $'\n'"$text"$'\n' == *$'\nsrc/reasoning.md\n'* ]]; }
 unset OCTOPUS_TANGLE_READ_SCOPE_MODE OCTOPUS_TANGLE_CONTEXTUAL_READ_ROOTS
 ok "strict is default" test "$(tangle_read_scope_mode)" = strict
 ok "strict reads tracked code" tangle_read_scope_is_allowed src/main.ts

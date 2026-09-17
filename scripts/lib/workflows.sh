@@ -1587,7 +1587,7 @@ tangle_read_scope_guidance() {
     mode=$(tangle_read_scope_mode) || return 1
     printf "Read context policy: %s.\n" "$mode"
     if [[ "$mode" == contextual ]]; then
-        printf "%s\n" "- Reads: may name repository-relative paths or absolute paths within caller-authorized context entries below. Directories authorize descendants; files authorize only themselves."
+        printf "%s\n" "- Reads: may name repository-relative paths, absolute paths within the repository, or absolute paths within caller-authorized context entries below. Directories authorize descendants; files authorize only themselves."
         printf "%s\n" "- Do not infer read roots from task prose or widen them to parent directories. External context is always read-only, including in adaptive write mode."
         printf "%s\n" "Caller-authorized context entries:" "${OCTOPUS_TANGLE_CONTEXTUAL_READ_ROOTS:-<none>}"
     else

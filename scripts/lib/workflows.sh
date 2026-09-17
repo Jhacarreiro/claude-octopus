@@ -1684,13 +1684,14 @@ tangle_scope_has_ambiguous_basename() {
 }
 
 tangle_adaptive_scope_path_is_safe() {
-    local path="$1" repo_root
+    local path="$1" path_lower repo_root
 
     # Adaptive evidence is still constrained to ordinary repository paths.
     # In particular, never turn a protected/runtime path or a symlink escape
     # into an apparently successful scope expansion.
     tangle_scope_is_safe_relative_path "$path" || return 1
-    case "$path" in
+    path_lower=$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')
+    case "$path_lower" in
         .claude-octopus|.claude-octopus/*|.octo|.octo/*) return 1 ;;
     esac
     repo_root=$(tangle_resolve_repo_root 2>/dev/null) || return 1
@@ -4794,7 +4795,8 @@ tangle_validate_results_with_scope_contract() {
             fi
         done <<< "$scope_violations"
     else
-        integrity_violations="Unable to verify final worktree changes against immutable start HEAD."
+        [[ -z "$integrity_violations" ]] || integrity_violations="${integrity_violations}"$'\n'
+        integrity_violations="${integrity_violations}Unable to verify final worktree changes against immutable start HEAD."
     fi
     if [[ -n "$scope_manifest_digest" ]]; then
         current_manifest_digest=$(tangle_scope_manifest_digest "$subtasks" 2>/dev/null || true)

@@ -119,6 +119,8 @@ mkdir -p "$TMP_REPO/.octo" "$TMP_REPO/outside"
 ln -s "$TMP_REPO/outside" "$TMP_REPO/escape"
 if tangle_adaptive_scope_path_is_safe "src/existing.ts" && \
    ! tangle_adaptive_scope_path_is_safe ".octo/forged.txt" && \
+   ! tangle_adaptive_scope_path_is_safe ".OCTO/forged.txt" && \
+   ! tangle_adaptive_scope_path_is_safe ".CLAUDE-OCTOPUS/runtime.txt" && \
    ! tangle_adaptive_scope_path_is_safe "escape/forged.txt"; then
     test_pass
 else
@@ -146,6 +148,28 @@ else
 fi
 eval "$saved_changed_paths_function"
 rm -f "$TMP_REPO/escape"
+
+test_case "adaptive validation preserves multiple integrity failures"
+saved_changed_paths_function="$(declare -f tangle_changed_paths_outside_write_scopes)"
+tangle_changed_paths_outside_write_scopes() {
+    return 1
+}
+VALIDATE_CALLS=0
+export TANGLE_WORKTREE_BEFORE_STATE_DIGEST=stale-state-digest
+integrity_state_snapshot="$TMP_RESULTS/before-state-integrity.txt"
+snapshot_tangle_worktree_state > "$integrity_state_snapshot"
+integrity_status=0
+tangle_validate_results_with_scope_contract adaptive-integrity 'Build UI' "$BEFORE" "$SUBTASKS" "" "" "$integrity_state_snapshot" || integrity_status=$?
+unset TANGLE_WORKTREE_BEFORE_STATE_DIGEST
+integrity_report="$RESULTS_DIR/tangle-validation-adaptive-integrity.md"
+if [[ "$integrity_status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && \
+   grep -q 'The parent-owned worktree state snapshot changed' "$integrity_report" && \
+   grep -q 'Unable to verify final worktree changes against immutable start HEAD' "$integrity_report"; then
+    test_pass
+else
+    test_fail "adaptive validation overwrote an earlier integrity failure; status=$integrity_status calls=$VALIDATE_CALLS"
+fi
+eval "$saved_changed_paths_function"
 
 test_case "adaptive mode keeps a changed parent-owned state snapshot fatal"
 state_snapshot="$TMP_RESULTS/before-state.txt"

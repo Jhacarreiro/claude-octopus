@@ -1553,6 +1553,19 @@ tangle_write_scope_mode() {
     esac
 }
 
+tangle_require_execution_boundary() {
+    [[ "$(tangle_write_scope_mode)" == "adaptive" ]] || return 0
+
+    if ! declare -F octopus_tangle_execution_boundary_probe >/dev/null 2>&1; then
+        log ERROR "Adaptive Tangle dispatch refused: execution-boundary probe is unavailable"
+        return 125
+    fi
+    if ! octopus_tangle_execution_boundary_probe; then
+        log ERROR "Adaptive Tangle dispatch refused: no enforceable filesystem boundary is available"
+        return 125
+    fi
+}
+
 tangle_build_repo_context_block() {
     local assigned_subtask="$1"
     local repo_root
@@ -4368,8 +4381,10 @@ Every [CODING] line must include at least one same-line Files: or Creates: claus
         else
             second_adequacy_review_rc=$?
         fi
-        if [[ "$second_adequacy_review_rc" -ne 0 ]]; then
-            log ERROR "Second decomposition adequacy review did not complete; refusing implementation spawn"
+        if [[ "$second_adequacy_review_rc" -ne 0 ]] || \
+           [[ -z "${adequacy_review//[[:space:]]/}" ]] || \
+           ! tangle_decomposition_adequacy_response_valid "$adequacy_review"; then
+            log ERROR "Second decomposition adequacy review did not complete or was malformed; refusing implementation spawn"
             return 1
         fi
         if ! tangle_decomposition_adequacy_verdict "$adequacy_review"; then
@@ -4386,6 +4401,10 @@ Every [CODING] line must include at least one same-line Files: or Creates: claus
         log ERROR "Unable to seal the final Tangle scope manifest before provider dispatch"
         return 1
     }
+
+    if ! tangle_require_execution_boundary; then
+        return 125
+    fi
 
     # Coding providers must run behind a parent-owned filesystem boundary.
     export OCTOPUS_TANGLE_EXECUTION_BOUNDARY=true

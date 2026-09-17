@@ -120,6 +120,13 @@ EOF
                 second-fail)
                     printf '%s\n' 'VERDICT: FAIL' 'REASONS: scopes still cannot materialize the requested deliverable' 'SCOPE_REVIEW:' '- MOVE_TO_READS: scripts/lib/workflows.sh — context only'
                     ;;
+                second-review-unusable)
+                    if [[ "$n" -eq 1 ]]; then
+                        printf '%s\n' 'VERDICT: FAIL' 'REASONS: scopes still cannot materialize the requested deliverable' 'SCOPE_REVIEW:' '- MOVE_TO_READS: scripts/lib/workflows.sh — context only'
+                    else
+                        printf '%s\n' 'The adequacy reviewer did not return a usable response.'
+                    fi
+                    ;;
                 adequacy-repair|reconsider-fallback|reconsider-third-fallback|reconsider-exhaust)
                     if [[ "$n" -eq 1 ]]; then
                         printf '%s\n' 'VERDICT: FAIL' 'REASONS: existing workflow file is context-only and the app artifact is missing' 'SCOPE_REVIEW:' '- MOVE_TO_READS: scripts/lib/workflows.sh — context only; create the app in a new tree'
@@ -310,6 +317,19 @@ if [[ "$adaptive_status" -eq 0 ]] && [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]]
     test_pass
 else
     test_fail "adaptive mode did not continue to implementation spawn after second semantic FAIL"
+fi
+
+
+test_case "adaptive mode fails closed when the second adequacy review is unusable"
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+reset_scenario "second-review-unusable"
+unusable_status=0
+tangle_develop 'Build the requested externally observable application with a usable entry point.' > "$RESULTS_DIR/second-review-unusable.out" 2>&1 || unusable_status=$?
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+if [[ "$unusable_status" -ne 0 ]] && [[ "$(cat "$RECONSIDER_COUNT_FILE")" -eq 1 ]] && [[ ! -s "$SPAWN_FILE" ]] && grep -q 'Second decomposition adequacy review did not complete' "$LOG_FILE"; then
+    test_pass
+else
+    test_fail "adaptive mode continued after the second adequacy review failed to complete"
 fi
 
 

@@ -388,6 +388,12 @@ octopus_tangle_boundary_paths_are_disjoint() {
     return 0
 }
 
+octopus_tangle_execution_boundary_required() {
+    [[ "${phase:-}" == "tangle" ]] || return 1
+    [[ "${OCTOPUS_TANGLE_EXECUTION_BOUNDARY:-false}" == "true" || \
+       "${OCTOPUS_TANGLE_WRITE_SCOPE_MODE:-strict}" == "adaptive" ]]
+}
+
 octopus_tangle_apply_execution_boundary() {
     # Adaptive scope expansion is never allowed to rely on the caller's
     # opt-in flag. Enforce the boundary at the provider dispatch point too,
@@ -395,8 +401,7 @@ octopus_tangle_apply_execution_boundary() {
     if [[ "${phase:-}" == "tangle" && "${OCTOPUS_TANGLE_WRITE_SCOPE_MODE:-strict}" == "adaptive" ]]; then
         OCTOPUS_TANGLE_EXECUTION_BOUNDARY=true
     fi
-    [[ "${OCTOPUS_TANGLE_EXECUTION_BOUNDARY:-false}" == "true" ]] || return 0
-    [[ "${phase:-}" == "tangle" ]] || return 0
+    octopus_tangle_execution_boundary_required || return 0
 
     local worktree="${OCTOPUS_TANGLE_WORKTREE:-${PROJECT_ROOT:-$PWD}}"
     local physical_worktree results_dir physical_results git_metadata
@@ -1032,8 +1037,7 @@ ${heuristic_ctx}"
             log "INFO" "Bounded dispatch (${_eff_timeout}s) uses the supervised provider subprocess; native Agent Teams cannot enforce a wall-clock timeout"
         fi
     fi
-    if [[ "${OCTOPUS_TANGLE_EXECUTION_BOUNDARY:-false}" == "true" && \
-          "${phase:-}" == "tangle" ]]; then
+    if octopus_tangle_execution_boundary_required; then
         # Native Agent Teams cannot inherit the sealed filesystem mounts used
         # by the supervised subprocess path. This applies to reasoning agents
         # too: they must not get an unconfined write-capable working directory.

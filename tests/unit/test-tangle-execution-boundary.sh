@@ -49,6 +49,15 @@ else
     test_fail "adaptive dispatch accepted an unset boundary or skipped the boundary probe"
 fi
 eval "$saved_probe"
+
+test_case "adaptive mode requires supervised dispatch before Agent Teams selection"
+if OCTOPUS_TANGLE_EXECUTION_BOUNDARY=false \
+   OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive \
+   octopus_tangle_execution_boundary_required; then
+    test_pass
+else
+    test_fail "adaptive mode did not require the supervised execution boundary at dispatch selection"
+fi
 unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
 OCTOPUS_TANGLE_EXECUTION_BOUNDARY=true
 

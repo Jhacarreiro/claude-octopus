@@ -337,16 +337,17 @@ fi
 
 test_case "adaptive mode fails closed before spawn without an execution boundary"
 export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+unset OCTOPUS_TANGLE_EXECUTION_BOUNDARY
 boundary_probe_status=1
 reset_scenario "second-fail"
 boundary_status=0
 tangle_develop 'Build the requested externally observable application with a usable entry point.' > "$RESULTS_DIR/second-fail-no-boundary.out" 2>&1 || boundary_status=$?
 boundary_probe_status=0
 unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
-if [[ "$boundary_status" -eq 125 ]] && [[ ! -s "$SPAWN_FILE" ]] && grep -q 'no enforceable filesystem boundary is available' "$LOG_FILE"; then
+if [[ "$boundary_status" -eq 125 ]] && [[ ! -s "$SPAWN_FILE" ]] && grep -q 'no enforceable filesystem boundary is available' "$LOG_FILE" && [[ -z "${OCTOPUS_TANGLE_EXECUTION_BOUNDARY:-}" ]]; then
     test_pass
 else
-    test_fail "adaptive mode spawned or continued without an enforceable execution boundary"
+    test_fail "adaptive mode spawned or left the execution-boundary flag enabled without an enforceable boundary"
 fi
 
 

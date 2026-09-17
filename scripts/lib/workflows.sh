@@ -1557,10 +1557,8 @@ tangle_require_execution_boundary() {
     [[ "$(tangle_write_scope_mode)" == "adaptive" ]] || return 0
 
     # Adaptive mode is only safe when the provider is forced through the
-    # filesystem boundary. Set this before dispatch so a caller cannot leave
-    # the boundary opt-in flag unset after the capability probe succeeds.
-    export OCTOPUS_TANGLE_EXECUTION_BOUNDARY=true
-
+    # filesystem boundary. Probe first, then publish the boundary requirement
+    # so a failed capability check cannot leave stale state in the caller.
     if ! declare -F octopus_tangle_execution_boundary_probe >/dev/null 2>&1; then
         log ERROR "Adaptive Tangle dispatch refused: execution-boundary probe is unavailable"
         return 125
@@ -1569,6 +1567,7 @@ tangle_require_execution_boundary() {
         log ERROR "Adaptive Tangle dispatch refused: no enforceable filesystem boundary is available"
         return 125
     fi
+    export OCTOPUS_TANGLE_EXECUTION_BOUNDARY=true
 }
 
 tangle_build_repo_context_block() {

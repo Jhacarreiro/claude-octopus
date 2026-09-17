@@ -337,7 +337,7 @@ fi
 
 test_case "adaptive mode fails closed before spawn without an execution boundary"
 export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
-unset OCTOPUS_TANGLE_EXECUTION_BOUNDARY
+export OCTOPUS_TANGLE_EXECUTION_BOUNDARY=true
 boundary_probe_status=1
 reset_scenario "second-fail"
 boundary_status=0

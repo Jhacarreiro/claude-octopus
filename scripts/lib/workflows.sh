@@ -1559,6 +1559,7 @@ tangle_require_execution_boundary() {
     # Adaptive mode is only safe when the provider is forced through the
     # filesystem boundary. Probe first, then publish the boundary requirement
     # so a failed capability check cannot leave stale state in the caller.
+    unset OCTOPUS_TANGLE_EXECUTION_BOUNDARY
     if ! declare -F octopus_tangle_execution_boundary_probe >/dev/null 2>&1; then
         log ERROR "Adaptive Tangle dispatch refused: execution-boundary probe is unavailable"
         return 125

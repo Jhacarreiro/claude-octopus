@@ -4739,8 +4739,7 @@ tangle_authorized_read_scopes() {
     while IFS= read -r line; do
         [[ -n "$line" ]] || continue
         tangle_line_is_numbered_subtask "$line" || continue
-        [[ "$line" =~ \[CODING\] ]] || continue
-        subtask=$(printf '%s\n' "$line" | sed -E 's/^[[:space:]]*(\*\*)?[0-9]+[\.\)][[:space:]]*//; s/^[[:space:]]+//; s/\[CODING\][[:space:]]*//')
+        subtask=$(printf '%s\n' "$line" | sed -E 's/^[[:space:]]*(\*\*)?[0-9]+[\.\)][[:space:]]*//; s/^[[:space:]]+//; s/\[(CODING|REASONING)\][[:space:]]*//')
         tangle_extract_read_scopes "$subtask"
     done <<< "$subtasks" | sed '/^$/d' | sort -u
 }

@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
+
+# Regression checks for strict and contextual Tangle read-scope validation.
+
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT/scripts/lib/workflows.sh"
-tmp="$(mktemp -d)"
-trap "rm -rf \"$tmp\"" EXIT
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/../helpers/test-framework.sh"
+
+test_suite "tangle contextual read scope"
+
+# shellcheck source=/dev/null
+source "$PROJECT_ROOT/scripts/lib/workflows.sh"
+
+tmp="$TEST_TMP_DIR/contextual-read-scope"
 repo="$tmp/repo"; wiki="$tmp/project-docs"; outside="$tmp/other-project"
 mkdir -p "$repo/src" "$wiki/plans" "$outside" "$tmp/project-docs-evil"
 git -C "$repo" init -q
@@ -22,10 +33,26 @@ ln -s "$wiki/plans/approved.md" "$repo/src/context.md"
 ln -s "$repo/.env" "$repo/src/disguised.md"
 git -C "$repo" add src/main.ts
 export PROJECT_ROOT="$repo"
-pass=0; fail=0
-ok() { local name="$1"; shift; if "$@" >/dev/null 2>&1; then echo "PASS: $name"; pass=$((pass+1)); else echo "FAIL: $name"; fail=$((fail+1)); fi; }
-no() { local name="$1"; shift; if "$@" >/dev/null 2>&1; then echo "FAIL: $name"; fail=$((fail+1)); else echo "PASS: $name"; pass=$((pass+1)); fi; }
+ok() {
+    local name="$1"; shift
+    test_case "$name"
+    if "$@" >/dev/null 2>&1; then
+        test_pass
+    else
+        test_fail "expected command to succeed"
+    fi
+}
+no() {
+    local name="$1"; shift
+    test_case "$name"
+    if "$@" >/dev/null 2>&1; then
+        test_fail "expected command to fail"
+    else
+        test_pass
+    fi
+}
 has_guidance() { local text; text=$(build_tangle_subtask_prompt "Implement the plan" "$1"); [[ "$text" == *"Read context policy: contextual."* ]]; }
+has_reasoning_scope() { local text; text=$(tangle_authorized_read_scopes "$1"); [[ "$text" == *"src/reasoning.md"* ]]; }
 unset OCTOPUS_TANGLE_READ_SCOPE_MODE OCTOPUS_TANGLE_CONTEXTUAL_READ_ROOTS
 ok "strict is default" test "$(tangle_read_scope_mode)" = strict
 ok "strict reads tracked code" tangle_read_scope_is_allowed src/main.ts
@@ -55,9 +82,11 @@ no "absolute traversal forbidden" tangle_read_scope_is_allowed "$wiki/plans/../p
 no "git metadata forbidden" tangle_read_scope_is_allowed .git/config
 no "missing external context forbidden" tangle_read_scope_is_allowed "$wiki/plans/missing.md"
 task="1. [CODING] Update — Reads: $wiki/plans/approved.md, src/ — Files: src/main.ts — Task: Implement the approved plan."
+reasoning_task="1. [REASONING] Inspect — Reads: src/reasoning.md — Task: Analyze."
 ok "decomposition accepts external approved plan" tangle_validate_parallel_write_scopes "$task"
 no "read entry cannot authorize external write" tangle_validate_parallel_write_scopes "1. [CODING] Bad — Reads: $wiki/plans/approved.md — Files: $wiki/plans/approved.md — Task: Edit context."
 no "reasoning reads are validated too" tangle_validate_parallel_write_scopes "1. [REASONING] Inspect — Reads: $outside/other.md — Task: Analyze."
+ok "scope report includes reasoning reads" has_reasoning_scope "$reasoning_task"
 no "duplicate Reads clauses rejected" tangle_validate_parallel_write_scopes "$task — Reads: $outside/other.md"
 ok "worker prompt carries active policy" has_guidance "$task"
 export OCTOPUS_TANGLE_CONTEXTUAL_READ_ROOTS="$wiki/plans/approved.md"
@@ -73,5 +102,5 @@ no "strict still rejects absolute contextual plan" tangle_validate_parallel_writ
 export OCTOPUS_TANGLE_READ_SCOPE_MODE=typo
 no "invalid mode fails closed" tangle_read_scope_mode
 no "invalid mode fails without Reads" tangle_validate_parallel_write_scopes "1. [CODING] Update — Files: src/main.ts — Task: Implement."
-printf "Summary: %s passed, %s failed\n" "$pass" "$fail"
-[[ "$fail" -eq 0 ]]
+
+test_summary

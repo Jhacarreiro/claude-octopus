@@ -1243,7 +1243,7 @@ EOF
 tangle_extract_human_intervention_json() {
     local result_file="$1"
     [[ -f "$result_file" ]] || return 1
-    grep -Eq '^## Human Intervention Required[[:space:]]*$' "$result_file" || return 1
+    grep -Ec '^## Human Intervention Required[[:space:]]*$' "$result_file" >/dev/null || return 1
 
     local question context options recommended source_id
     question=$(awk '
@@ -1284,28 +1284,35 @@ tangle_write_human_intervention_artifact() {
     [[ -n "$target" ]] || return 1
     [[ "$target" == /* ]] || { log ERROR "OCTOPUS_HUMAN_INTERVENTION_PATH must be absolute"; return 1; }
     [[ ! -L "$target" ]] || { log ERROR "Refusing symlink human intervention target: $target"; return 1; }
-    local parent tmp json
+    local parent tmp json target_name
     parent=$(dirname "$target")
     mkdir -p "$parent" || return 1
     [[ ! -L "$parent" ]] || { log ERROR "Refusing symlink human intervention parent: $parent"; return 1; }
     json=$(tangle_extract_human_intervention_json "$result_file") || return 1
-    tmp="${target}.tmp.$$"
-    printf '%s\n' "$json" > "$tmp" || return 1
+    target_name=$(basename "$target")
+    tmp=$(mktemp "${parent}/.${target_name}.tmp.XXXXXX") || return 1
+    if ! printf '%s\n' "$json" > "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
     chmod 600 "$tmp" 2>/dev/null || true
-    mv -f "$tmp" "$target" || return 1
+    if ! mv -f "$tmp" "$target"; then
+        rm -f "$tmp"
+        return 1
+    fi
     log WARN "Human intervention requested by $(basename "$result_file"); wrote structured request to $target"
     return 0
 }
 
 tangle_detect_human_intervention() {
-    local results_dir="${RESULTS_DIR:-${HOME}/.claude-octopus/results}" result_file
-    [[ -n "${OCTOPUS_HUMAN_INTERVENTION_PATH:-}" ]] || return 1
+    local task_group="$1" results_dir="${RESULTS_DIR:-${HOME}/.claude-octopus/results}" result_file
+    [[ -n "$task_group" && -n "${OCTOPUS_HUMAN_INTERVENTION_PATH:-}" ]] || return 1
     while IFS= read -r result_file; do
         [[ -f "$result_file" ]] || continue
         if tangle_write_human_intervention_artifact "$result_file"; then
             return 0
         fi
-    done < <(find "$results_dir" -maxdepth 1 -type f -name '*.md' -print 2>/dev/null | sort)
+    done < <(find "$results_dir" -maxdepth 1 -type f -name "*-tangle-${task_group}-*.md" -print 2>/dev/null | sort)
     return 1
 }
 
@@ -4724,7 +4731,7 @@ Every [CODING] line must include at least one same-line Files: or Creates: claus
 
     # Human-in-the-loop gate. Only the exact structured result block is eligible;
     # ordinary blocker/error text never pauses the run.
-    if tangle_detect_human_intervention; then
+    if tangle_detect_human_intervention "$task_group"; then
         log WARN "Tangle paused for human intervention before validation"
         return 75
     fi

@@ -398,9 +398,6 @@ octopus_tangle_apply_execution_boundary() {
     # Adaptive scope expansion is never allowed to rely on the caller's
     # opt-in flag. Enforce the boundary at the provider dispatch point too,
     # because this function is also callable outside tangle_develop().
-    if [[ "${phase:-}" == "tangle" && "${OCTOPUS_TANGLE_WRITE_SCOPE_MODE:-strict}" == "adaptive" ]]; then
-        OCTOPUS_TANGLE_EXECUTION_BOUNDARY=true
-    fi
     octopus_tangle_execution_boundary_required || return 0
 
     local worktree="${OCTOPUS_TANGLE_WORKTREE:-${PROJECT_ROOT:-$PWD}}"
@@ -421,6 +418,12 @@ octopus_tangle_apply_execution_boundary() {
         esac
         return 125
     }
+    # Publish the boundary state only after the capability probe succeeds.
+    # A rejected adaptive dispatch must not leave a stale success flag in the
+    # caller's environment.
+    if [[ "${OCTOPUS_TANGLE_WRITE_SCOPE_MODE:-strict}" == "adaptive" ]]; then
+        export OCTOPUS_TANGLE_EXECUTION_BOUNDARY=true
+    fi
 
     local -a boundary_cmd
     # Keep the host root read-only so provider executables and credentials

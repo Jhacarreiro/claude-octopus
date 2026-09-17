@@ -43,7 +43,7 @@ octopus_tangle_execution_boundary_probe() {
 }
 unset OCTOPUS_TANGLE_EXECUTION_BOUNDARY
 export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
-if ! octopus_tangle_apply_execution_boundary && [[ "$boundary_probe_calls" -eq 1 ]]; then
+if ! octopus_tangle_apply_execution_boundary && [[ "$boundary_probe_calls" -eq 1 ]] && [[ -z "${OCTOPUS_TANGLE_EXECUTION_BOUNDARY:-}" ]]; then
     test_pass
 else
     test_fail "adaptive dispatch accepted an unset boundary or skipped the boundary probe"

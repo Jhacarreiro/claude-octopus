@@ -4788,7 +4788,7 @@ tangle_validate_results_with_scope_contract() {
             else
                 [[ -z "$violations" ]] || violations="${violations}"$'\n'
                 if [[ "$(tangle_write_scope_mode)" == "adaptive" ]]; then
-                    violations="${violations}Unsafe adaptive scope path '${path}'."
+                    violations="${violations}Unsafe adaptive scope path: ${path}."
                 else
                     violations="${violations}${path}"
                 fi

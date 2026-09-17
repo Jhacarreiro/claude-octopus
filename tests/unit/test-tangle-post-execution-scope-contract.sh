@@ -140,8 +140,8 @@ unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
 mixed_report="$RESULTS_DIR/tangle-validation-adaptive-mixed.md"
 if [[ "$mixed_status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && \
    grep -q -- '- src/existing.ts' "$mixed_report" && \
-   grep -q "Unsafe adaptive scope path 'escape/forged.txt'." "$mixed_report" && \
-   grep -q "Unsafe adaptive scope path '.octo/forged.txt'." "$mixed_report"; then
+   grep -q 'Unsafe adaptive scope path: escape/forged.txt.' "$mixed_report" && \
+   grep -q 'Unsafe adaptive scope path: .octo/forged.txt.' "$mixed_report"; then
     test_pass
 else
     test_fail "adaptive validation did not separate safe evidence from unsafe fatal paths"

@@ -48,7 +48,7 @@ fi
 
 case_dir="$TEST_TMP_DIR/free-text"
 mkdir -p "$case_dir/results" "$case_dir/out"
-cat > "$case_dir/results/tangle-normal.md" <<'MD'
+cat > "$case_dir/results/claude-tangle-${TASK_GROUP}-2.md" <<'MD'
 ## Worktree Changes
 - None.
 
@@ -67,7 +67,7 @@ fi
 
 case_dir="$TEST_TMP_DIR/malformed"
 mkdir -p "$case_dir/results" "$case_dir/out"
-cat > "$case_dir/results/tangle-malformed.md" <<'MD'
+cat > "$case_dir/results/gemini-tangle-${TASK_GROUP}-3.md" <<'MD'
 ## Human Intervention Required
 Context: Missing mandatory Question field.
 Options: A | B
@@ -95,6 +95,29 @@ if ! tangle_detect_human_intervention "current-task" && [[ ! -e "$OCTOPUS_HUMAN_
   test_pass
 else
   test_fail "an earlier task group incorrectly triggered intervention"
+fi
+
+test_case "predictable temporary symlink is not followed"
+case_dir="$TEST_TMP_DIR/temp-symlink"
+mkdir -p "$case_dir/results" "$case_dir/out"
+cat > "$case_dir/results/codex-tangle-${TASK_GROUP}-4.md" <<'MD'
+## Human Intervention Required
+Question: Continue with the selected deployment target?
+Options: Continue | Stop
+Recommended: Stop
+MD
+export RESULTS_DIR="$case_dir/results"
+export OCTOPUS_HUMAN_INTERVENTION_PATH="$case_dir/out/intervention.json"
+victim="$case_dir/victim.txt"
+printf 'do-not-overwrite\n' > "$victim"
+ln -s "$victim" "${OCTOPUS_HUMAN_INTERVENTION_PATH}.tmp.$$"
+if tangle_detect_human_intervention "$TASK_GROUP" \
+    && [[ "$(cat "$victim")" == "do-not-overwrite" ]] \
+    && [[ -f "$OCTOPUS_HUMAN_INTERVENTION_PATH" ]] \
+    && [[ ! -L "$OCTOPUS_HUMAN_INTERVENTION_PATH" ]]; then
+  test_pass
+else
+  test_fail "temporary artifact handling followed or propagated a planted symlink"
 fi
 
 test_summary

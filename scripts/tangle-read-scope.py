@@ -11,13 +11,21 @@ SENSITIVE_DIRS = {".git", ".ssh", ".gnupg", ".aws", ".azure", ".kube", "harness-
 SENSITIVE_FILES = {
     "auth.json", "auth-profiles.json", "credentials.json", "credentials.yml",
     "credentials.yaml", "secrets.json", "secrets.yaml", "secrets.yml",
-    "tokens.json", "cookies.json", "cookies.txt", "openclaw.json",
+    "tokens.json", "cookies.json", "cookies.txt",
     ".netrc", ".npmrc", ".pypirc", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
 }
 
 def sensitive(path: Path) -> bool:
     parts = tuple(part.lower() for part in path.parts)
     if any(part in SENSITIVE_DIRS or part == ".env" or part.startswith(".env.") for part in parts):
+        return True
+    # Hidden applications commonly keep credentials in a self-named JSON file,
+    # such as .tool/tool.json. This stays generic rather than coupling the policy
+    # to any particular integration.
+    if any(
+        part.startswith(".") and parts[-1] == f"{part[1:]}.json"
+        for part in parts[:-1]
+    ):
         return True
     if path.name.lower() in SENSITIVE_FILES:
         return True

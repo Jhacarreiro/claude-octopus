@@ -16,12 +16,13 @@ source "$PROJECT_ROOT/scripts/lib/workflows.sh"
 
 tmp="$TEST_TMP_DIR/contextual-read-scope"
 repo="$tmp/repo"; wiki="$tmp/project-docs"; outside="$tmp/other-project"
-mkdir -p "$repo/src" "$wiki/plans" "$outside" "$tmp/project-docs-evil"
+mkdir -p "$repo/src" "$wiki/plans" "$wiki/.runtime" "$outside" "$tmp/project-docs-evil"
 git -C "$repo" init -q
 printf "code\n" > "$repo/src/main.ts"
 printf "plan\n" > "$wiki/plans/approved.md"
 printf "other\n" > "$wiki/plans/other.md"
 printf "other\n" > "$outside/other.md"
+printf "secret\n" > "$wiki/.runtime/runtime.json"
 printf "secret\n" > "$repo/.env"
 printf "secret\n" > "$wiki/.env"
 printf "auth\n" > "$wiki/auth.json"
@@ -75,6 +76,7 @@ no "relative dot-env forbidden" tangle_read_scope_is_allowed .env
 no "external auth store forbidden" tangle_read_scope_is_allowed "$wiki/auth.json"
 no "external disguised secret forbidden" tangle_read_scope_is_allowed "$wiki/disguised.md"
 no "external symlink escape forbidden" tangle_read_scope_is_allowed "$wiki/escape/other.md"
+no "external self-named hidden config forbidden" tangle_read_scope_is_allowed "$wiki/.runtime/runtime.json"
 no "relative symlink escape forbidden" tangle_read_scope_is_allowed src/escape/other.md
 no "relative disguised secret forbidden" tangle_read_scope_is_allowed src/disguised.md
 no "relative traversal forbidden" tangle_read_scope_is_allowed ../project-docs/plans/approved.md
@@ -83,10 +85,12 @@ no "git metadata forbidden" tangle_read_scope_is_allowed .git/config
 no "missing external context forbidden" tangle_read_scope_is_allowed "$wiki/plans/missing.md"
 task="1. [CODING] Update — Reads: $wiki/plans/approved.md, src/ — Files: src/main.ts — Task: Implement the approved plan."
 reasoning_task="1. [REASONING] Inspect — Reads: src/reasoning.md — Task: Analyze."
+reasoning_prefix_task="1. [REASONING] Inspect — Reads: src/reasoning.md.bak — Task: Analyze."
 ok "decomposition accepts external approved plan" tangle_validate_parallel_write_scopes "$task"
 no "read entry cannot authorize external write" tangle_validate_parallel_write_scopes "1. [CODING] Bad — Reads: $wiki/plans/approved.md — Files: $wiki/plans/approved.md — Task: Edit context."
 no "reasoning reads are validated too" tangle_validate_parallel_write_scopes "1. [REASONING] Inspect — Reads: $outside/other.md — Task: Analyze."
 ok "scope report includes reasoning reads" has_reasoning_scope "$reasoning_task"
+no "scope report does not confuse reasoning read prefixes" has_reasoning_scope "$reasoning_prefix_task"
 no "duplicate Reads clauses rejected" tangle_validate_parallel_write_scopes "$task — Reads: $outside/other.md"
 ok "worker prompt carries active policy" has_guidance "$task"
 export OCTOPUS_TANGLE_CONTEXTUAL_READ_ROOTS="$wiki/plans/approved.md"

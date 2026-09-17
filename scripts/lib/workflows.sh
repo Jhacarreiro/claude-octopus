@@ -1556,6 +1556,11 @@ tangle_write_scope_mode() {
 tangle_require_execution_boundary() {
     [[ "$(tangle_write_scope_mode)" == "adaptive" ]] || return 0
 
+    # Adaptive mode is only safe when the provider is forced through the
+    # filesystem boundary. Set this before dispatch so a caller cannot leave
+    # the boundary opt-in flag unset after the capability probe succeeds.
+    export OCTOPUS_TANGLE_EXECUTION_BOUNDARY=true
+
     if ! declare -F octopus_tangle_execution_boundary_probe >/dev/null 2>&1; then
         log ERROR "Adaptive Tangle dispatch refused: execution-boundary probe is unavailable"
         return 125
@@ -1676,6 +1681,22 @@ tangle_scope_has_ambiguous_basename() {
         [[ "$count" -gt 1 ]] && return 0
     done < <(git -C "$repo_root" ls-files 2>/dev/null)
     return 1
+}
+
+tangle_adaptive_scope_path_is_safe() {
+    local path="$1" repo_root
+
+    # Adaptive evidence is still constrained to ordinary repository paths.
+    # In particular, never turn a protected/runtime path or a symlink escape
+    # into an apparently successful scope expansion.
+    tangle_scope_is_safe_relative_path "$path" || return 1
+    case "$path" in
+        .claude-octopus|.claude-octopus/*|.octo|.octo/*) return 1 ;;
+    esac
+    repo_root=$(tangle_resolve_repo_root 2>/dev/null) || return 1
+    [[ -d "$repo_root" ]] || return 1
+    tangle_scope_has_symlink_component "$path" && return 1
+    return 0
 }
 
 tangle_scope_is_known_or_explicit_new_file() {
@@ -4757,19 +4778,23 @@ tangle_validate_results_with_scope_contract() {
             integrity_violations="The parent-owned worktree state snapshot changed before final validation."
         fi
     fi
-    if [[ -z "$integrity_violations" ]]; then
-        local scope_violations=""
-        if scope_violations=$(tangle_changed_paths_outside_write_scopes "$subtasks" "$worktree_before_file" "$baseline_head" "$worktree_before_state_file"); then
-            if [[ -n "$scope_violations" ]]; then
+    local scope_violations=""
+    if scope_violations=$(tangle_changed_paths_outside_write_scopes "$subtasks" "$worktree_before_file" "$baseline_head" "$worktree_before_state_file"); then
+        while IFS= read -r path; do
+            [[ -n "$path" ]] || continue
+            if [[ "$(tangle_write_scope_mode)" == "adaptive" ]] && tangle_adaptive_scope_path_is_safe "$path"; then
+                adaptive_scope_evidence="${adaptive_scope_evidence}${path}"$'\n'
+            else
+                [[ -z "$violations" ]] || violations="${violations}"$'\n'
                 if [[ "$(tangle_write_scope_mode)" == "adaptive" ]]; then
-                    adaptive_scope_evidence="$scope_violations"
+                    violations="${violations}Unsafe adaptive scope path '${path}'."
                 else
-                    violations="$scope_violations"
+                    violations="${violations}${path}"
                 fi
             fi
-        else
-            integrity_violations="Unable to verify final worktree changes against immutable start HEAD."
-        fi
+        done <<< "$scope_violations"
+    else
+        integrity_violations="Unable to verify final worktree changes against immutable start HEAD."
     fi
     if [[ -n "$scope_manifest_digest" ]]; then
         current_manifest_digest=$(tangle_scope_manifest_digest "$subtasks" 2>/dev/null || true)

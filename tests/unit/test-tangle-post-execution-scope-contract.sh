@@ -114,6 +114,39 @@ else
 fi
 VALIDATE_CALLS=0
 
+test_case "adaptive mode keeps protected and symlink paths fatal"
+mkdir -p "$TMP_REPO/.octo" "$TMP_REPO/outside"
+ln -s "$TMP_REPO/outside" "$TMP_REPO/escape"
+if tangle_adaptive_scope_path_is_safe "src/existing.ts" && \
+   ! tangle_adaptive_scope_path_is_safe ".octo/forged.txt" && \
+   ! tangle_adaptive_scope_path_is_safe "escape/forged.txt"; then
+    test_pass
+else
+    test_fail "adaptive scope safety accepted a protected or symlink path"
+fi
+
+test_case "adaptive validation separates safe evidence from unsafe fatal paths"
+saved_changed_paths_function="$(declare -f tangle_changed_paths_outside_write_scopes)"
+tangle_changed_paths_outside_write_scopes() {
+    printf '%s\n' 'src/existing.ts' 'escape/forged.txt' '.octo/forged.txt'
+}
+VALIDATE_CALLS=0
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+mixed_status=0
+tangle_validate_results_with_scope_contract adaptive-mixed 'Build UI' "$BEFORE" "$SUBTASKS" || mixed_status=$?
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+mixed_report="$RESULTS_DIR/tangle-validation-adaptive-mixed.md"
+if [[ "$mixed_status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && \
+   grep -q -- '- src/existing.ts' "$mixed_report" && \
+   grep -q "Unsafe adaptive scope path 'escape/forged.txt'." "$mixed_report" && \
+   grep -q "Unsafe adaptive scope path '.octo/forged.txt'." "$mixed_report"; then
+    test_pass
+else
+    test_fail "adaptive validation did not separate safe evidence from unsafe fatal paths"
+fi
+eval "$saved_changed_paths_function"
+rm -f "$TMP_REPO/escape"
+
 test_case "adaptive mode keeps a changed parent-owned state snapshot fatal"
 state_snapshot="$TMP_RESULTS/before-state.txt"
 snapshot_tangle_worktree_state > "$state_snapshot"

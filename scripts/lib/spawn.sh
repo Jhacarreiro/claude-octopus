@@ -389,6 +389,12 @@ octopus_tangle_boundary_paths_are_disjoint() {
 }
 
 octopus_tangle_apply_execution_boundary() {
+    # Adaptive scope expansion is never allowed to rely on the caller's
+    # opt-in flag. Enforce the boundary at the provider dispatch point too,
+    # because this function is also callable outside tangle_develop().
+    if [[ "${phase:-}" == "tangle" && "${OCTOPUS_TANGLE_WRITE_SCOPE_MODE:-strict}" == "adaptive" ]]; then
+        OCTOPUS_TANGLE_EXECUTION_BOUNDARY=true
+    fi
     [[ "${OCTOPUS_TANGLE_EXECUTION_BOUNDARY:-false}" == "true" ]] || return 0
     [[ "${phase:-}" == "tangle" ]] || return 0
 

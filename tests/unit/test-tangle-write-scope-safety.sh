@@ -449,6 +449,21 @@ else
     test_fail "subtask prompt still treats repository context as implicit write authorization"
 fi
 
+
+test_case "adaptive mode treats Files as initial ownership and requires expansion evidence"
+OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+adaptive_scope_prompt=$(build_tangle_subtask_prompt \
+    "Update the request report safely." \
+    "Update report — Files: src/lib/templates/NA02_REQUEST_REPORT.ts — Task: also wire any required safe repository call site")
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+if [[ "$adaptive_scope_prompt" == *"initial ownership and coordination scope, not an exclusive write jail"* ]] && \
+   [[ "$adaptive_scope_prompt" == *"## Scope Expansions"* ]] && \
+   [[ "$adaptive_scope_prompt" == *"You may expand to safe repository paths necessary for the original task"* ]]; then
+    test_pass
+else
+    test_fail "adaptive prompt did not expose controlled write-scope expansion semantics"
+fi
+
 test_case "repairable overlap does not spawn direct fallback"
 if [[ -z "$DIRECT_TASK_ID" && -z "$DIRECT_PROMPT" ]]; then
     test_pass

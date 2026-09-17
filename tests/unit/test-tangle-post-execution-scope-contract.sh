@@ -100,6 +100,45 @@ else
     test_fail "scope violation did not fail before base validation/retries; calls=$VALIDATE_CALLS"
 fi
 
+test_case "adaptive mode records out-of-scope changes as evidence and still runs base validation"
+VALIDATE_CALLS=0
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+adaptive_status=0
+tangle_validate_results_with_scope_contract adaptive 'Build UI' "$BEFORE" "$SUBTASKS" || adaptive_status=$?
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+adaptive_report="$RESULTS_DIR/tangle-validation-adaptive.md"
+if [[ "$adaptive_status" -eq 0 ]] && [[ "$VALIDATE_CALLS" -eq 1 ]] && grep -q 'Adaptive Write Scope Expansions' "$adaptive_report" && grep -q -- '- src/existing.ts' "$adaptive_report" && [[ -z "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" ]]; then
+    test_pass
+else
+    test_fail "adaptive scope expansion remained fatal or lost evidence; status=$adaptive_status calls=$VALIDATE_CALLS"
+fi
+VALIDATE_CALLS=0
+
+test_case "adaptive mode keeps a changed parent-owned state snapshot fatal"
+state_snapshot="$TMP_RESULTS/before-state.txt"
+snapshot_tangle_worktree_state > "$state_snapshot"
+export TANGLE_WORKTREE_BEFORE_STATE_DIGEST=stale-state-digest
+state_status=0
+tangle_validate_results_with_scope_contract adaptive-state 'Build UI' "$BEFORE" "$SUBTASKS" "" "$(tangle_scope_manifest_digest "$SUBTASKS")" "$state_snapshot" || state_status=$?
+unset TANGLE_WORKTREE_BEFORE_STATE_DIGEST
+state_report="$RESULTS_DIR/tangle-validation-adaptive-state.md"
+if [[ "$state_status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && grep -q 'The parent-owned worktree state snapshot changed' "$state_report" && ! grep -q 'PASS: every changed path' "$state_report"; then
+    test_pass
+else
+    test_fail "adaptive mode cleared a parent-owned state integrity failure; status=$state_status calls=$VALIDATE_CALLS"
+fi
+
+test_case "adaptive mode keeps a changed scope manifest fatal"
+manifest_status=0
+tangle_validate_results_with_scope_contract adaptive-manifest 'Build UI' "$BEFORE" "$SUBTASKS" "" stale-scope-manifest "$state_snapshot" || manifest_status=$?
+manifest_report="$RESULTS_DIR/tangle-validation-adaptive-manifest.md"
+if [[ "$manifest_status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && grep -q 'The parent-owned scope manifest changed' "$manifest_report" && ! grep -q 'PASS: every changed path' "$manifest_report"; then
+    test_pass
+else
+    test_fail "adaptive mode cleared a scope manifest integrity failure; status=$manifest_status calls=$VALIDATE_CALLS"
+fi
+unset TANGLE_WORKTREE_BEFORE_STATE_DIGEST
+
 test_case "scope violation is surfaced as one deterministic blocking finding"
 findings="$TMP_ROOT/findings.json"
 printf '%s\n' '{"findings":[]}' > "$findings"

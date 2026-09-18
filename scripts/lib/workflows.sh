@@ -1750,6 +1750,9 @@ tangle_adaptive_scope_path_is_safe() {
     repo_root=$(tangle_resolve_repo_root 2>/dev/null) || return 1
     [[ -d "$repo_root" ]] || return 1
     tangle_scope_has_symlink_component "$path" && return 1
+    # Expansion cannot authorize paths the shared credential policy forbids
+    # reading. Force repository-only validation even with external read grants.
+    OCTOPUS_TANGLE_READ_SCOPE_MODE=strict tangle_read_scope_is_allowed "$path" || return 1
     return 0
 }
 

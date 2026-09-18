@@ -114,6 +114,24 @@ else
 fi
 VALIDATE_CALLS=0
 
+test_case "adaptive mode rejects undeclared credential changes before quality review"
+printf '%s\n' 'fixture-only' > "$TMP_REPO/.env"
+printf '%s\n' '{}' > "$TMP_REPO/auth.json"
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+credential_status=0
+tangle_validate_results_with_scope_contract adaptive-credentials 'Build UI' "$BEFORE" "$SUBTASKS" || credential_status=$?
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+credential_report="$RESULTS_DIR/tangle-validation-adaptive-credentials.md"
+if [[ "$credential_status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && \
+   grep -q 'Unsafe adaptive scope path: .env.' "$credential_report" && \
+   grep -q 'Unsafe adaptive scope path: auth.json.' "$credential_report"; then
+    test_pass
+else
+    test_fail "adaptive credential changes reached ordinary quality validation"
+fi
+rm -f "$TMP_REPO/.env" "$TMP_REPO/auth.json"
+VALIDATE_CALLS=0
+
 test_case "adaptive mode keeps protected and symlink paths fatal"
 mkdir -p "$TMP_REPO/.octo" "$TMP_REPO/outside"
 ln -s "$TMP_REPO/outside" "$TMP_REPO/escape"

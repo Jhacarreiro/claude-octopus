@@ -992,9 +992,12 @@ octo_fit_and_validate_summary() {
     local budget="$3"
     local fitted="$summary"
 
+    budget="$(octo_normalize_context_budget "$budget" "summary context budget")" || return 2
+
     if [[ "$(octo_estimate_prompt_tokens "$fitted")" -gt "$budget" ]]; then
         fitted="$(octo_fit_prompt_to_token_budget "$fitted" "$budget" $'\n\n[... summarized output truncated to fit context budget (~'"$budget"$' tokens) ...]')"
     fi
+    [[ "$(octo_estimate_prompt_tokens "$fitted")" -le "$budget" ]] || return 1
     octo_summary_preserves_structure "$original" "$fitted" || return 1
     printf '%s\n' "$fitted"
 }

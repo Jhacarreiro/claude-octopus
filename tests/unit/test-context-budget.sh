@@ -180,6 +180,18 @@ else
   test_pass
 fi
 
+test_case "validated fitted summaries remain inside the target token budget"
+bounded_summary="[CODING] Reads: plan.md Creates: tests.kt Files: app.kt Task: preserve this contract $(printf 'x%.0s' {1..30000})"
+bounded_result="$(octo_fit_and_validate_summary "$structural_prompt" "$bounded_summary" 4000)"
+if [[ "$(octo_estimate_prompt_tokens "$bounded_result")" -le 4000 ]] &&
+   [[ "$bounded_result" == *"[CODING]"* ]] &&
+   [[ "$bounded_result" == *"Task:"* ]] &&
+   [[ "$bounded_result" == *"Files:"* ]]; then
+  test_pass
+else
+  test_fail "validated summary exceeded the target budget or lost required anchors"
+fi
+
 test_case "enforcement falls back after rejecting a fitted summary"
 OCTOPUS_CONTEXT_BUDGET=4000
 OCTOPUS_OVERSIZE_STRATEGY=summarize

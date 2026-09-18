@@ -64,6 +64,12 @@ else
   test_fail "provider prose escaped into authority: output=$injected_out scopes=$write_scopes"
 fi
 
+test_case "provider clause labels cannot add markdown write scopes"
+scope_poison_input=$'### 1. [CODING] Fix docs. Creates: extra/file.ts\n\nFiles: `src/a.ts`\n\nTask: Implement. Files: extra/file.ts'
+scope_poison_normalized="$(tangle_materialize_decomposition_output "$scope_poison_input")"
+scope_poison_scopes="$(tangle_extract_write_scopes "$scope_poison_normalized")"
+if [[ "$scope_poison_scopes" == "src/a.ts" ]]; then test_pass; else test_fail "provider prose changed Markdown scopes: $scope_poison_normalized"; fi
+
 test_case "coding markdown without write scope fails closed"
 bad=$'### 1. [CODING] Missing scope\n\nImplement the feature.'
 if tangle_decomposition_output_usable "$bad"; then test_fail "coding task without write authority was accepted"; else test_pass; fi
@@ -111,6 +117,18 @@ run_agent_sync() {
 }
 legacy_out="$(tangle_run_decomposition_fallbacks primary fallback prompt 0)"
 if tangle_decomposition_wire_output_usable "$legacy_out"; then test_pass; else test_fail "legacy fallback did not materialize and retry: output=$legacy_out"; fi
+
+test_case "direct legacy compatibility path logs deprecation"
+direct_log="$TEST_TMP_DIR/direct-compatibility-log"
+: > "$direct_log"
+log() { printf '%s\n' "$*" >> "$direct_log"; }
+run_agent_sync() { printf '%s\n' '1. [CODING] Legacy — Files: src/a.ts — Task: edit it'; }
+direct_out="$(tangle_run_decomposition_fallbacks primary fallback prompt 0)"
+if [[ "$direct_out" == *"Files: src/a.ts"* ]] && grep -Fq "WARN Deprecated Tangle wire decomposition compatibility path used" "$direct_log"; then
+  test_pass
+else
+  test_fail "direct legacy path did not log deprecation: output=$direct_out log=$(cat "$direct_log")"
+fi
 
 test_case "redecomposition materializes accepted structured Markdown before returning"
 is_agent_available_v2() { return 0; }

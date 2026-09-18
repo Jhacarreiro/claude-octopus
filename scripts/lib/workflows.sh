@@ -1911,7 +1911,9 @@ tangle_render_json_decomposition_output() {
     tangle_decomposition_json_output_usable "$raw" || return 1
     payload="$(tangle_decomposition_json_payload "$raw")" || return 1
     printf '%s\n' "$payload" | jq -r '
-      def safe: gsub("\\s+";" ") | gsub(" — ";" | ") | gsub(" - ";" | ");
+      def safe: gsub("\\s+";" ") | gsub(" — ";" | ") | gsub(" - ";" | ") |
+        gsub("Reads:"; "Reads | ") | gsub("Files:"; "Files | ") |
+        gsub("Creates:"; "Creates | ") | gsub("Task:"; "Task | ");
       .subtasks[] |
       ("\(.id). [\(.kind|ascii_upcase)] \(.title|safe)") +
       (if (.reads|length)>0 then " — Reads: " + (.reads|join(", ")) else "" end) +
@@ -1985,12 +1987,26 @@ tangle_run_decomposition_fallbacks() {
         local candidate materialized
         if candidate=$(run_agent_sync "$primary_agent" "$prompt" "$timeout_secs" researcher tangle); then
             if materialized=$(tangle_materialize_decomposition_output "$candidate"); then
+                local source_format
+                source_format="$(tangle_decomposition_source_format "$candidate" 2>/dev/null || printf invalid)"
+                case "$source_format" in
+                    json-v1) log INFO "Accepted Tangle decomposition JSON v1" ;;
+                    legacy-markdown) log WARN "Deprecated Tangle Markdown decomposition compatibility path used" ;;
+                    legacy-wire) log WARN "Deprecated Tangle wire decomposition compatibility path used" ;;
+                esac
                 printf '%s\n' "$materialized"
                 return 0
             fi
         fi
         if candidate=$(run_agent_sync "$preferred_fallback" "$prompt" "$timeout_secs" researcher tangle); then
             if materialized=$(tangle_materialize_decomposition_output "$candidate"); then
+                local source_format
+                source_format="$(tangle_decomposition_source_format "$candidate" 2>/dev/null || printf invalid)"
+                case "$source_format" in
+                    json-v1) log INFO "Accepted Tangle decomposition JSON v1" ;;
+                    legacy-markdown) log WARN "Deprecated Tangle Markdown decomposition compatibility path used" ;;
+                    legacy-wire) log WARN "Deprecated Tangle wire decomposition compatibility path used" ;;
+                esac
                 printf '%s\n' "$materialized"
                 return 0
             fi

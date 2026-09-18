@@ -2,7 +2,7 @@
 
 Tangle decomposition uses a versioned JSON contract as the primary provider protocol. The schema is published at `schemas/tangle-decomposition-v1.schema.json`.
 
-A valid response is a JSON object with `schema_version: 1` and 1-6 ordered subtasks. Each subtask contains `id`, `kind`, `title`, `reads`, `files`, `creates`, and `task`. Coding subtasks require at least one write scope; reasoning subtasks cannot declare write scopes.
+A valid response is a JSON object with `schema_version: 1` and 1-6 ordered subtasks, including at least one coding subtask. Each subtask contains `id`, `kind`, `title`, `reads`, `files`, `creates`, and `task`. Coding subtasks require at least one write scope; reasoning subtasks cannot declare write scopes.
 
 Validated JSON is rendered into the existing one-line wire format so the executor and downstream scope/adequacy validators remain unchanged during migration.
 

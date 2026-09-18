@@ -22,7 +22,8 @@ def clean_text(s: str) -> str:
     # The wire format uses both em dashes and hyphens surrounded by spaces as
     # field separators. Keep provider-controlled prose in a separator-safe
     # representation so Task/title text cannot be truncated on re-parsing.
-    return re.sub(r"\s[-—]\s", " | ", s)
+    s = re.sub(r"\s[-—]\s", " | ", s)
+    return CLAUSE_LABEL.sub(lambda match: f"{match.group(1)} |", s)
 
 def scope_items(text: str) -> list[str]:
     vals = BACKTICK.findall(text)

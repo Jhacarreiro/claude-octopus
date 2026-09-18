@@ -895,11 +895,12 @@ octo_estimate_prompt_tokens() {
 }
 
 octo_saturating_context_add() {
-    local base="$1"
-    local increment="$2"
+    local base
+    base="$(octo_normalize_context_budget "${1:-}" "context budget base")" || return 2
+    local increment
+    increment="$(octo_normalize_nonnegative_context_value "${2:-}" "context budget increment")" || return 2
     local max_budget=2147483647
 
-    [[ "$base" =~ ^[0-9]+$ && "$increment" =~ ^[0-9]+$ ]] || return 2
     if [[ "$base" -ge "$max_budget" || "$increment" -gt $((max_budget - base)) ]]; then
         printf '%s\n' "$max_budget"
     else
@@ -908,12 +909,13 @@ octo_saturating_context_add() {
 }
 
 octo_saturating_context_percent() {
-    local target_budget="$1"
-    local ratio="$2"
+    local target_budget
+    target_budget="$(octo_normalize_context_budget "${1:-}" "context budget target")" || return 2
+    local ratio
+    ratio="$(octo_normalize_context_budget "${2:-}" "context budget ratio")" || return 2
     local max_budget=2147483647
     local whole remainder scaled remainder_scaled rounded
 
-    [[ "$target_budget" =~ ^[0-9]+$ && "$target_budget" -gt 0 ]] || return 2
     [[ "$ratio" =~ ^[0-9]+$ && "$ratio" -ge 100 ]] || return 2
 
     whole=$((target_budget / 100))

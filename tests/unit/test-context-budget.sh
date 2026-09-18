@@ -129,6 +129,14 @@ else
 fi
 unset OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO
 
+test_case "derived budget helpers reject arithmetic-overflow inputs"
+if ! octo_saturating_context_add 2147483648 1 >/dev/null 2>&1 &&
+   ! octo_saturating_context_percent 2147483647 2147483648 >/dev/null 2>&1; then
+  test_pass
+else
+  test_fail "derived budget helpers accepted values above the bounded arithmetic range"
+fi
+
 test_case "unused summary trigger configuration does not block truncation"
 OCTOPUS_CONTEXT_BUDGET=12000
 OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO=invalid
@@ -164,16 +172,12 @@ fi
 test_case "fitted summary cannot drop structural clauses after validation"
 run_agent_sync() {
   printf '%s' "$(printf 'x%.0s' {1..30000})"
-  printf '%s\n' " Task: summary-tail Files: summary-tail"
+  printf '%s\n' " [CODING] Reads: summary-tail Creates: summary-tail Files: summary-tail Task: summary-tail"
 }
-set +e
-fitted_summary=$(enforce_context_budget "$structural_prompt $(printf 'q%.0s' {1..30000})" "" codex tangle 2>/dev/null)
-fitted_rc=$?
-set -e
-if [[ "$fitted_rc" -eq 0 && "$fitted_summary" != *"summary-tail"* ]]; then
-  test_pass
+if summarize_then_dispatch "$structural_prompt" researcher commandcode 4000 >/dev/null 2>&1; then
+  test_fail "summarize_then_dispatch accepted a fitted summary after losing structural clauses"
 else
-  test_fail "fitted summary retained anchors only before final fitting"
+  test_pass
 fi
 unset OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO OCTOPUS_OVERSIZE_STRATEGY
 

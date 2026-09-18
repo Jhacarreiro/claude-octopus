@@ -31,6 +31,7 @@ OCTOPUS_COMMANDCODE_ALLOWED_MODELS	skip	allowlist for a provider with no CLI on 
 OCTOPUS_COMMANDCODE_BIN	covered-by	test-commandcode-harness.sh
 OCTOPUS_COMMANDCODE_MODEL	covered-by	test-commandcode-harness.sh
 OCTOPUS_COMPACT_BANNERS	skip	changes banner prose only; asserting it would pin cosmetic output
+OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO	covered-by	test-context-budget.sh
 OCTOPUS_COST_MODE	covered-by	test-cost-mode-toggle.sh
 OCTOPUS_CREDENTIAL_ENV_NAMES	covered-by	test-mcp-server.sh
 OCTOPUS_EFFORT_OVERRIDE	covered-by	test-execution-mechanism.sh
@@ -51,6 +52,8 @@ OCTOPUS_OPUS5_AUTO_XHIGH	covered-by	test-opus-48-routing.sh
 OCTOPUS_OPUS_MODE	covered-by	test-execution-mechanism.sh
 OCTOPUS_OPUS_MODEL	covered-by	test-fable5-escalation.sh
 OCTOPUS_OVERSIZE_STRATEGY	covered-by	test-dispatch-oversize.sh
+OCTOPUS_PREFLIGHT_CONTEXT_BUDGET_ADDITIVE	covered-by	test-context-budget.sh
+OCTOPUS_PREFLIGHT_CONTEXT_BUDGET_RATIO	covered-by	test-context-budget.sh
 OCTOPUS_PREFLIGHT_PROBE	covered-by	test-provider-health-probe.sh
 OCTOPUS_PREMIUM_PEER_CHECK	covered-by	test-automatic-peer.sh
 OCTOPUS_QUALITY_THRESHOLD	skip	gates a quality score produced by a live provider dispatch

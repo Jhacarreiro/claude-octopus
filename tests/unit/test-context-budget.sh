@@ -111,6 +111,52 @@ else
   test_fail "unexpected preflight target budget: $(octo_preflight_context_budget 6278)"
 fi
 
+test_case "preflight ratio override changes the derived input budget"
+if [[ "$(OCTOPUS_PREFLIGHT_CONTEXT_BUDGET_RATIO=150 octo_preflight_context_budget 12000)" == 18000 ]]; then
+  test_pass
+else
+  test_fail "preflight ratio override did not change the derived budget"
+fi
+
+test_case "preflight additive override changes the floor and accepts zero"
+if [[ "$(OCTOPUS_PREFLIGHT_CONTEXT_BUDGET_ADDITIVE=4096 octo_preflight_context_budget 6278)" == 10374 ]] &&
+   [[ "$(OCTOPUS_PREFLIGHT_CONTEXT_BUDGET_ADDITIVE=0 octo_preflight_context_budget 6278)" == 7848 ]]; then
+  test_pass
+else
+  test_fail "preflight additive override did not control the budget floor"
+fi
+
+test_case "summary trigger override changes the admission threshold"
+if [[ "$(OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO=120 octo_summary_trigger_budget 1000)" == 1200 ]]; then
+  test_pass
+else
+  test_fail "summary trigger override did not change the threshold"
+fi
+
+test_case "preflight override cannot exceed the provider input ceiling"
+ceiling_prompt=$(printf '%041856d' 0)
+if OCTOPUS_PREFLIGHT_CONTEXT_BUDGET=2147483647 OCTOPUS_OVERSIZE_STRATEGY=fail \
+     enforce_context_budget "$ceiling_prompt" synthesizer codex preflight >/dev/null 2>&1; then
+  ceiling_rc=0
+  OCTOPUS_PREFLIGHT_CONTEXT_BUDGET=2147483647 OCTOPUS_OVERSIZE_STRATEGY=fail \
+    enforce_context_budget "${ceiling_prompt}x" synthesizer codex preflight >/dev/null 2>&1 || ceiling_rc=$?
+  if [[ "$ceiling_rc" == 78 ]]; then
+    test_pass
+  else
+    test_fail "preflight admitted input above the 10464-token provider ceiling"
+  fi
+else
+  test_fail "preflight rejected input at the provider ceiling"
+fi
+
+test_case "summary trigger grace cannot admit input above the provider ceiling"
+ceiling_summary=$(enforce_context_budget "${ceiling_prompt}x" "" codex tangle)
+if [[ "$ceiling_summary" == summary && -e "$summary_probe" ]]; then
+  test_pass
+else
+  test_fail "summary trigger admitted a prompt above the provider ceiling"
+fi
+
 test_case "preflight budget saturates maximum-target configuration"
 OCTOPUS_PREFLIGHT_CONTEXT_BUDGET_RATIO=2147483647
 if [[ "$(octo_preflight_context_budget 2147483647)" == 2147483647 ]]; then

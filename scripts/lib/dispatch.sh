@@ -894,6 +894,45 @@ octo_estimate_prompt_tokens() {
     fi
 }
 
+octo_saturating_context_add() {
+    local base="$1"
+    local increment="$2"
+    local max_budget=2147483647
+
+    [[ "$base" =~ ^[0-9]+$ && "$increment" =~ ^[0-9]+$ ]] || return 2
+    if [[ "$base" -ge "$max_budget" || "$increment" -gt $((max_budget - base)) ]]; then
+        printf '%s\n' "$max_budget"
+    else
+        printf '%s\n' "$((base + increment))"
+    fi
+}
+
+octo_saturating_context_percent() {
+    local target_budget="$1"
+    local ratio="$2"
+    local max_budget=2147483647
+    local whole remainder scaled remainder_scaled rounded
+
+    [[ "$target_budget" =~ ^[0-9]+$ && "$target_budget" -gt 0 ]] || return 2
+    [[ "$ratio" =~ ^[0-9]+$ && "$ratio" -ge 100 ]] || return 2
+
+    whole=$((target_budget / 100))
+    remainder=$((target_budget % 100))
+    if [[ "$whole" -gt 0 && "$ratio" -gt $((max_budget / whole)) ]]; then
+        printf '%s\n' "$max_budget"
+        return 0
+    fi
+
+    scaled=$((whole * ratio))
+    remainder_scaled=$((remainder * ratio))
+    rounded=$(((remainder_scaled + 99) / 100))
+    if [[ "$scaled" -gt $((max_budget - rounded)) ]]; then
+        printf '%s\n' "$max_budget"
+    else
+        printf '%s\n' "$((scaled + rounded))"
+    fi
+}
+
 octo_preflight_context_budget() {
     local target_budget
     target_budget="$(octo_normalize_context_budget "${1:-}" "target context budget")" || return 2
@@ -903,14 +942,13 @@ octo_preflight_context_budget() {
     [[ "$ratio" -ge 100 ]] || return 2
     additive="$(octo_normalize_nonnegative_context_value "$additive" "preflight context budget additive")" || return 2
 
-    # Keep the derived value inside the same bounded range used by context
-    # admission. This prevents both Bash arithmetic overflow and a later
-    # budget*4 character calculation from wrapping.
+    # Keep each derived value inside the same bounded range used by context
+    # admission. Saturation preserves valid maximum-target configurations
+    # without allowing arithmetic overflow or a later budget*4 wraparound.
     local max_budget=2147483647
-    [[ "$ratio" -le $((max_budget / target_budget)) ]] || return 2
-    [[ "$additive" -le $((max_budget - target_budget)) ]] || return 2
-    local by_ratio=$(( (target_budget * ratio + 99) / 100 ))
-    local by_add=$(( target_budget + additive ))
+    local by_ratio by_add
+    by_ratio="$(octo_saturating_context_percent "$target_budget" "$ratio")" || return 2
+    by_add="$(octo_saturating_context_add "$target_budget" "$additive")" || return 2
     [[ "$by_ratio" -gt 0 && "$by_ratio" -ge "$target_budget" && "$by_ratio" -le "$max_budget" ]] || return 2
     [[ "$by_add" -gt 0 && "$by_add" -ge "$target_budget" && "$by_add" -le "$max_budget" ]] || return 2
     if [[ "$by_ratio" -gt "$by_add" ]]; then
@@ -927,8 +965,8 @@ octo_summary_trigger_budget() {
     ratio="$(octo_normalize_context_budget "$ratio" "summary trigger ratio")" || return 2
     [[ "$ratio" -ge 100 ]] || return 2
     local max_budget=2147483647
-    [[ "$ratio" -le $((max_budget / target_budget)) ]] || return 2
-    local trigger_budget=$(( (target_budget * ratio + 99) / 100 ))
+    local trigger_budget
+    trigger_budget="$(octo_saturating_context_percent "$target_budget" "$ratio")" || return 2
     [[ "$trigger_budget" -gt 0 && "$trigger_budget" -ge "$target_budget" && "$trigger_budget" -le "$max_budget" ]] || return 2
     printf '%s\n' "$trigger_budget"
 }

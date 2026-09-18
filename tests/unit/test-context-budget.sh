@@ -111,21 +111,21 @@ else
   test_fail "unexpected preflight target budget: $(octo_preflight_context_budget 6278)"
 fi
 
-test_case "preflight budget rejects arithmetic-overflowing configuration"
+test_case "preflight budget saturates maximum-target configuration"
 OCTOPUS_PREFLIGHT_CONTEXT_BUDGET_RATIO=2147483647
-if octo_preflight_context_budget 2147483647 >/dev/null 2>&1; then
-  test_fail "overflowing preflight ratio was accepted"
-else
+if [[ "$(octo_preflight_context_budget 2147483647)" == 2147483647 ]]; then
   test_pass
+else
+  test_fail "preflight ratio did not saturate at the maximum budget"
 fi
 unset OCTOPUS_PREFLIGHT_CONTEXT_BUDGET_RATIO
 
-test_case "summary trigger rejects arithmetic-overflowing configuration"
+test_case "summary trigger saturates maximum-target configuration"
 OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO=2147483647
-if octo_summary_trigger_budget 2147483647 >/dev/null 2>&1; then
-  test_fail "overflowing summary trigger ratio was accepted"
-else
+if [[ "$(octo_summary_trigger_budget 2147483647)" == 2147483647 ]]; then
   test_pass
+else
+  test_fail "summary trigger ratio did not saturate at the maximum budget"
 fi
 unset OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO
 

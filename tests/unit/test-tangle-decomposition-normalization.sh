@@ -73,6 +73,20 @@ run_agent_sync() {
 legacy_out="$(tangle_run_decomposition_fallbacks primary fallback prompt 0)"
 if tangle_decomposition_wire_output_usable "$legacy_out"; then test_pass; else test_fail "legacy fallback did not materialize and retry: output=$legacy_out"; fi
 
+test_case "redecomposition materializes accepted structured Markdown before returning"
+is_agent_available_v2() { return 0; }
+run_agent_sync_fallback_chain() {
+  printf '%s\n' "$raw"
+  return 0
+}
+redecomposed_out="$(tangle_redecompose original-task previous-output validation-reason)"
+if tangle_decomposition_wire_output_usable "$redecomposed_out" && \
+   [[ "$redecomposed_out" == *"Files: app/build.gradle.kts, app/src/main/App.kt"* ]]; then
+  test_pass
+else
+  test_fail "redecomposition returned unmaterialized output: $redecomposed_out"
+fi
+
 test_case "already-valid wire format remains unchanged"
 wire='1. [CODING] Edit — Files: src/app.ts — Task: implement it'
 if [[ "$(tangle_materialize_decomposition_output "$wire")" == "$wire" ]]; then test_pass; else test_fail "wire format was rewritten"; fi

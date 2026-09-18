@@ -2043,9 +2043,23 @@ ${previous_output}"
         log ERROR "Tangle redecomposition requires the configured fallback-chain engine"
         return 1
     fi
-    OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-redecompose-validation" \
+    local candidate materialized
+    if candidate=$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-redecompose-validation" \
         run_agent_sync_fallback_chain "$primary" "$prompt" 0 "researcher" "tangle" \
-        tangle_decomposition_output_usable default "$fallback"
+        tangle_decomposition_output_usable default "$fallback"); then
+        if materialized=$(tangle_materialize_decomposition_output "$candidate" 2>/dev/null); then
+            if ! tangle_decomposition_wire_output_usable "$candidate"; then
+                log INFO "Normalized structured Markdown redecomposition locally before returning"
+            fi
+            printf '%s\n' "$materialized"
+        else
+            # Preserve the fallback-chain validator contract for callers/tests
+            # that intentionally provide a different semantic validator.
+            printf '%s\n' "$candidate"
+        fi
+        return 0
+    fi
+    return $?
 }
 
 tangle_decomposition_adequacy_response_valid() {

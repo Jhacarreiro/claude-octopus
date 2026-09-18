@@ -1941,8 +1941,9 @@ tangle_run_decomposition_fallbacks() {
             printf '%s\n' "$candidate"
         fi
         return 0
+    else
+        return $?
     fi
-    return $?
 }
 
 tangle_reformat_decomposition() {

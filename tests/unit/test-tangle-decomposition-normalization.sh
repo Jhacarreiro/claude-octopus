@@ -61,6 +61,17 @@ run_agent_sync_fallback_chain() {
 out="$(tangle_run_decomposition_fallbacks primary fallback prompt 0)"
 if [[ ! -e "$marker" ]] && tangle_decomposition_wire_output_usable "$out"; then test_pass; else test_fail "local repair did not prevent provider fallback"; fi
 
+test_case "fallback chain returns its failure status"
+run_agent_sync_fallback_chain() {
+  return 37
+}
+if tangle_run_decomposition_fallbacks primary fallback prompt 0; then
+  test_fail "fallback helper masked fallback-chain failure"
+else
+  fallback_rc=$?
+  if [[ "$fallback_rc" == 37 ]]; then test_pass; else test_fail "unexpected fallback status: $fallback_rc"; fi
+fi
+
 test_case "legacy fallback materializes output and retries after normalization failure"
 unset -f is_agent_available_v2 2>/dev/null || true
 run_agent_sync() {

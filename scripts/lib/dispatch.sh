@@ -990,14 +990,17 @@ octo_fit_and_validate_summary() {
     local original="$1"
     local summary="$2"
     local budget="$3"
-    local fitted="$summary"
+    local fitted="$summary" fitted_tokens
 
     budget="$(octo_normalize_context_budget "$budget" "summary context budget")" || return 2
 
+    # Fit first, then validate the exact candidate that will be dispatched.
     if [[ "$(octo_estimate_prompt_tokens "$fitted")" -gt "$budget" ]]; then
         fitted="$(octo_fit_prompt_to_token_budget "$fitted" "$budget" $'\n\n[... summarized output truncated to fit context budget (~'"$budget"$' tokens) ...]')"
     fi
-    [[ "$(octo_estimate_prompt_tokens "$fitted")" -le "$budget" ]] || return 1
+
+    fitted_tokens="$(octo_estimate_prompt_tokens "$fitted")"
+    [[ "$fitted_tokens" -le "$budget" ]] || return 1
     octo_summary_preserves_structure "$original" "$fitted" || return 1
     printf '%s\n' "$fitted"
 }
@@ -1048,7 +1051,7 @@ ${summary_input}"
     fi
     candidates+=("agy" "codex-mini" "claude-sonnet" "codex")
 
-    local candidate summary fitted_summary preflight_budget
+    local candidate summary preflight_budget
     preflight_budget="$(octo_preflight_context_budget "$budget")" || return 2
     # Keep temporary dispatch overrides in a subshell. A failed provider,
     # rejected summary, or early return must not leak preflight state into the

@@ -7,6 +7,7 @@ LABEL = re.compile(r"^\s*(?:\*\*)?(Reads|Files|Creates|Task|Inputs|Output|Expect
 ACTION = re.compile(r"^\s*((?:Verify|Implement|Update|Document)\b.*?)\s*:\s*$", re.I)
 BULLET = re.compile(r"^\s*[-*]\s+(.*)$")
 BACKTICK = re.compile(r"`([^`]+)`")
+CLAUSE_LABEL = re.compile(r"\b(Reads|Files|Creates|Task)\s*:", re.I)
 
 SCOPE_LABELS = {"reads", "files", "creates"}
 TASK_SECTIONS = {"task", "output", "expected output", "verification"}
@@ -14,6 +15,10 @@ IGNORE_SECTIONS = {"inputs", "dependencies", "acceptance evidence", "blocks", "b
 
 def clean_text(s: str) -> str:
     s = re.sub(r"\s+", " ", s.strip())
+    # Provider-controlled title/task prose must never be able to manufacture
+    # structured wire clauses. Encode reserved labels before the downstream
+    # clause parser sees them; generated scope clauses are emitted separately.
+    s = CLAUSE_LABEL.sub(lambda m: f"{m.group(1)}=", s)
     # The wire format uses both em dashes and hyphens surrounded by spaces as
     # field separators. Keep provider-controlled prose in a separator-safe
     # representation so Task/title text cannot be truncated on re-parsing.

@@ -894,6 +894,43 @@ octo_estimate_prompt_tokens() {
     fi
 }
 
+octo_preflight_context_budget() {
+    local target_budget="$1"
+    local ratio="${OCTOPUS_PREFLIGHT_CONTEXT_BUDGET_RATIO:-125}"
+    local additive="${OCTOPUS_PREFLIGHT_CONTEXT_BUDGET_ADDITIVE:-2048}"
+    [[ "$target_budget" =~ ^[0-9]+$ && "$target_budget" -gt 0 ]] || return 2
+    [[ "$ratio" =~ ^[0-9]+$ && "$ratio" -ge 100 ]] || return 2
+    [[ "$additive" =~ ^[0-9]+$ ]] || return 2
+    local by_ratio=$(( (target_budget * ratio + 99) / 100 ))
+    local by_add=$(( target_budget + additive ))
+    if [[ "$by_ratio" -gt "$by_add" ]]; then
+        printf '%s\n' "$by_ratio"
+    else
+        printf '%s\n' "$by_add"
+    fi
+}
+
+octo_summary_trigger_budget() {
+    local target_budget="$1"
+    local ratio="${OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO:-110}"
+    [[ "$target_budget" =~ ^[0-9]+$ && "$target_budget" -gt 0 ]] || return 2
+    [[ "$ratio" =~ ^[0-9]+$ && "$ratio" -ge 100 ]] || return 2
+    printf '%s\n' "$(( (target_budget * ratio + 99) / 100 ))"
+}
+
+octo_summary_preserves_structure() {
+    local original="$1" summary="$2" anchor
+    for anchor in 'Task:' 'Files:' 'Creates:' 'Reads:'; do
+        if [[ "$original" == *"$anchor"* && "$summary" != *"$anchor"* ]]; then
+            return 1
+        fi
+    done
+    if [[ "$original" == *'[CODING]'* && "$summary" != *'[CODING]'* ]]; then
+        return 1
+    fi
+    return 0
+}
+
 summarize_then_dispatch() {
     local prompt="$1"
     local role="${2:-}"
@@ -940,11 +977,14 @@ ${summary_input}"
     fi
     candidates+=("agy" "codex-mini" "claude-sonnet" "codex")
 
-    local candidate summary previous_strategy previous_debug
+    local candidate summary previous_strategy previous_debug previous_preflight_budget preflight_budget
     previous_strategy="${OCTOPUS_OVERSIZE_STRATEGY-}"
     previous_debug="${OCTOPUS_DEBUG-}"
+    previous_preflight_budget="${OCTOPUS_PREFLIGHT_CONTEXT_BUDGET-}"
+    preflight_budget="$(octo_preflight_context_budget "$budget")" || return 2
     export OCTOPUS_OVERSIZE_STRATEGY=truncate
     export OCTOPUS_DEBUG="${OCTOPUS_DEBUG:-false}"
+    export OCTOPUS_PREFLIGHT_CONTEXT_BUDGET="$preflight_budget"
 
     for candidate in "${candidates[@]}"; do
         [[ "$candidate" == "$target_agent" ]] && continue
@@ -955,7 +995,12 @@ ${summary_input}"
             break
         fi
         summary=$(run_agent_sync "$candidate" "$summary_prompt" 120 "synthesizer" "preflight" 2>/dev/null) || summary=""
-        if [[ -n "$summary" && "$summary" != "Provider available" ]]; then
+        if [[ -n "$summary" && "$summary" != "Provider available" ]] && octo_summary_preserves_structure "$prompt" "$summary"; then
+            if [[ -n "$previous_preflight_budget" ]]; then
+                export OCTOPUS_PREFLIGHT_CONTEXT_BUDGET="$previous_preflight_budget"
+            else
+                unset OCTOPUS_PREFLIGHT_CONTEXT_BUDGET
+            fi
             if [[ -n "$previous_strategy" ]]; then
                 export OCTOPUS_OVERSIZE_STRATEGY="$previous_strategy"
             else
@@ -971,6 +1016,11 @@ ${summary_input}"
         fi
     done
 
+    if [[ -n "$previous_preflight_budget" ]]; then
+        export OCTOPUS_PREFLIGHT_CONTEXT_BUDGET="$previous_preflight_budget"
+    else
+        unset OCTOPUS_PREFLIGHT_CONTEXT_BUDGET
+    fi
     if [[ -n "$previous_strategy" ]]; then
         export OCTOPUS_OVERSIZE_STRATEGY="$previous_strategy"
     else
@@ -1055,9 +1105,10 @@ enforce_context_budget() {
     local role="${2:-}"
     local agent_type="${3:-}"
     local phase="${4:-}"
-    local budget
+    local budget provider_budget
     budget=$(get_provider_context_limit "$agent_type" "$phase" "$role")
     budget=$(octo_normalize_context_budget "$budget" "provider context budget") || return 2
+    provider_budget="$budget"
 
     # v9.3.0: Scale budget by role proportion
     if [[ -n "$role" ]]; then
@@ -1072,14 +1123,26 @@ enforce_context_budget() {
         fi
     fi
 
+    # Preflight summarization must be able to read at least the effective
+    # target budget. Bound the override by the summarizer provider input window.
+    if [[ "$phase" == "preflight" && -n "${OCTOPUS_PREFLIGHT_CONTEXT_BUDGET:-}" ]]; then
+        local requested_preflight_budget
+        requested_preflight_budget="$(octo_normalize_context_budget "$OCTOPUS_PREFLIGHT_CONTEXT_BUDGET" "preflight context budget")" || return 2
+        [[ "$requested_preflight_budget" -gt "$provider_budget" ]] && requested_preflight_budget="$provider_budget"
+        [[ "$requested_preflight_budget" -gt "$budget" ]] && budget="$requested_preflight_budget"
+    fi
+
     # Preserve the familiar four-character reporting boundary while admission
     # uses the stricter of character- and UTF-8-byte-based estimates.
     local char_budget=$((budget * 4))
-    local estimated_tokens
+    local estimated_tokens summary_trigger_budget strategy admission_limit
     estimated_tokens="$(octo_estimate_prompt_tokens "$prompt")"
+    summary_trigger_budget="$(octo_summary_trigger_budget "$budget")" || return 2
+    strategy="${OCTOPUS_OVERSIZE_STRATEGY:-summarize}"
+    admission_limit="$budget"
+    [[ "$strategy" == "summarize" ]] && admission_limit="$summary_trigger_budget"
 
-    if [[ "$estimated_tokens" -gt "$budget" ]]; then
-        local strategy="${OCTOPUS_OVERSIZE_STRATEGY:-summarize}"
+    if [[ "$estimated_tokens" -gt "$admission_limit" ]]; then
         local original_chars=${#prompt}
         local target="${agent_type:-unknown}"
 
@@ -1118,6 +1181,9 @@ enforce_context_budget() {
                 ;;
         esac
     else
+        if [[ "$estimated_tokens" -gt "$budget" ]]; then
+            log "DEBUG" "Context budget: admitting small oversize for ${agent_type:-unknown} role=${role:-none} phase=${phase:-none}: ${estimated_tokens} tokens vs budget ${budget} (summary trigger ${summary_trigger_budget})"
+        fi
         echo "$prompt"
     fi
 }

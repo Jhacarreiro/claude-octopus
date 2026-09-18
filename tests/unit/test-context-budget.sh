@@ -74,4 +74,63 @@ else
   test_fail "byte-dense prompt bypassed token admission (rc=$emoji_rc)"
 fi
 
+
+test_case "preflight synthesizer inherits at least the target effective budget"
+OCTOPUS_CONTEXT_BUDGET=12000
+OCTOPUS_CONTEXT_OUTPUT_RESERVE_TOKENS=1024
+OCTOPUS_CONTEXT_OVERHEAD_TOKENS=512
+OCTOPUS_PREFLIGHT_CONTEXT_BUDGET=8326
+OCTOPUS_OVERSIZE_STRATEGY=fail
+preflight_prompt=$(printf "p%.0s" {1..28000})
+if enforce_context_budget "$preflight_prompt" "synthesizer" codex preflight >/dev/null 2>&1; then
+  test_pass
+else
+  test_fail "preflight still inherited the 25% synthesizer budget"
+fi
+unset OCTOPUS_PREFLIGHT_CONTEXT_BUDGET
+
+test_case "small target oversize is admitted without destructive summarization"
+OCTOPUS_CONTEXT_BUDGET=12000
+OCTOPUS_CONTEXT_OUTPUT_RESERVE_TOKENS=1024
+OCTOPUS_CONTEXT_OVERHEAD_TOKENS=512
+OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO=110
+OCTOPUS_OVERSIZE_STRATEGY=summarize
+summary_probe="$TEST_TMP_DIR/summary-called"
+run_agent_sync() { : > "$summary_probe"; printf "summary\n"; }
+small_oversize=$(printf "x%.0s" {1..26000})
+if enforce_context_budget "$small_oversize" "researcher" codex tangle >/dev/null 2>&1 && [[ ! -e "$summary_probe" ]]; then
+  test_pass
+else
+  test_fail "prompt only slightly above the role budget invoked summarization"
+fi
+
+test_case "preflight budget derives from target budget rather than synthesizer quota"
+if [[ "$(octo_preflight_context_budget 6278)" == 8326 ]]; then
+  test_pass
+else
+  test_fail "unexpected preflight target budget: $(octo_preflight_context_budget 6278)"
+fi
+
+test_case "preflight summary rejects loss of Tangle structural clauses"
+validate_agent_type() { return 0; }
+run_agent_sync() { printf '%s\n' "Condensed prose without the machine contract"; }
+structural_prompt="1. [CODING] Implement — Reads: plan.md — Files: app.kt — Creates: tests.kt — Task: preserve this contract"
+if summarize_then_dispatch "$structural_prompt" researcher commandcode 6278 >/dev/null 2>&1; then
+  test_fail "summary that dropped Tangle clauses was accepted"
+else
+  test_pass
+fi
+
+test_case "preflight summary receives expanded budget and preserves contract"
+run_agent_sync() {
+  printf 'BUDGET=%s\n1. [CODING] Implement — Reads: plan.md — Files: app.kt — Creates: tests.kt — Task: preserve this contract\n' "${OCTOPUS_PREFLIGHT_CONTEXT_BUDGET:-missing}"
+}
+summary=$(summarize_then_dispatch "$structural_prompt" researcher commandcode 6278)
+if [[ "$summary" == *"BUDGET=8326"* && "$summary" == *"Task:"* && "$summary" == *"Files:"* ]]; then
+  test_pass
+else
+  test_fail "preflight did not expose target-sized budget or preserve contract"
+fi
+unset OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO OCTOPUS_OVERSIZE_STRATEGY
+
 test_summary

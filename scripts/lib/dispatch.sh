@@ -1048,64 +1048,35 @@ ${summary_input}"
     fi
     candidates+=("agy" "codex-mini" "claude-sonnet" "codex")
 
-    local candidate summary fitted_summary previous_strategy previous_debug previous_preflight_budget preflight_budget
-    previous_strategy="${OCTOPUS_OVERSIZE_STRATEGY-}"
-    previous_debug="${OCTOPUS_DEBUG-}"
-    previous_preflight_budget="${OCTOPUS_PREFLIGHT_CONTEXT_BUDGET-}"
+    local candidate summary fitted_summary preflight_budget
     preflight_budget="$(octo_preflight_context_budget "$budget")" || return 2
-    export OCTOPUS_OVERSIZE_STRATEGY=truncate
-    export OCTOPUS_DEBUG="${OCTOPUS_DEBUG:-false}"
-    export OCTOPUS_PREFLIGHT_CONTEXT_BUDGET="$preflight_budget"
+    # Keep temporary dispatch overrides in a subshell. A failed provider,
+    # rejected summary, or early return must not leak preflight state into the
+    # caller's subsequent provider dispatch.
+    (
+        export OCTOPUS_OVERSIZE_STRATEGY=truncate
+        export OCTOPUS_DEBUG="${OCTOPUS_DEBUG:-false}"
+        export OCTOPUS_PREFLIGHT_CONTEXT_BUDGET="$preflight_budget"
 
-    for candidate in "${candidates[@]}"; do
-        [[ "$candidate" == "$target_agent" ]] && continue
-        if type validate_agent_type >/dev/null 2>&1 && ! validate_agent_type "$candidate" >/dev/null 2>&1; then
-            continue
-        fi
-        if ! type run_agent_sync >/dev/null 2>&1; then
-            break
-        fi
-        summary=$(run_agent_sync "$candidate" "$summary_prompt" 120 "synthesizer" "preflight" 2>/dev/null) || summary=""
-        if [[ -n "$summary" && "$summary" != "Provider available" ]]; then
-            if ! fitted_summary="$(octo_fit_and_validate_summary "$prompt" "$summary" "$budget")"; then
+        for candidate in "${candidates[@]}"; do
+            [[ "$candidate" == "$target_agent" ]] && continue
+            if type validate_agent_type >/dev/null 2>&1 && ! validate_agent_type "$candidate" >/dev/null 2>&1; then
                 continue
             fi
-            if [[ -n "$previous_preflight_budget" ]]; then
-                export OCTOPUS_PREFLIGHT_CONTEXT_BUDGET="$previous_preflight_budget"
-            else
-                unset OCTOPUS_PREFLIGHT_CONTEXT_BUDGET
+            if ! type run_agent_sync >/dev/null 2>&1; then
+                break
             fi
-            if [[ -n "$previous_strategy" ]]; then
-                export OCTOPUS_OVERSIZE_STRATEGY="$previous_strategy"
-            else
-                unset OCTOPUS_OVERSIZE_STRATEGY
+            summary=$(run_agent_sync "$candidate" "$summary_prompt" 120 "synthesizer" "preflight" 2>/dev/null) || summary=""
+            if [[ -n "$summary" && "$summary" != "Provider available" ]]; then
+                if ! fitted_summary="$(octo_fit_and_validate_summary "$prompt" "$summary" "$budget")"; then
+                    continue
+                fi
+                printf '%s\n' "$fitted_summary"
+                exit 0
             fi
-            if [[ -n "$previous_debug" ]]; then
-                export OCTOPUS_DEBUG="$previous_debug"
-            else
-                unset OCTOPUS_DEBUG
-            fi
-            printf '%s\n' "$fitted_summary"
-            return 0
-        fi
-    done
-
-    if [[ -n "$previous_preflight_budget" ]]; then
-        export OCTOPUS_PREFLIGHT_CONTEXT_BUDGET="$previous_preflight_budget"
-    else
-        unset OCTOPUS_PREFLIGHT_CONTEXT_BUDGET
-    fi
-    if [[ -n "$previous_strategy" ]]; then
-        export OCTOPUS_OVERSIZE_STRATEGY="$previous_strategy"
-    else
-        unset OCTOPUS_OVERSIZE_STRATEGY
-    fi
-    if [[ -n "$previous_debug" ]]; then
-        export OCTOPUS_DEBUG="$previous_debug"
-    else
-        unset OCTOPUS_DEBUG
-    fi
-    return 1
+        done
+        exit 1
+    )
 }
 
 octo_fit_prompt_to_char_budget() {

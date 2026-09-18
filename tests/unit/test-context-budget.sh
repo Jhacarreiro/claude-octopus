@@ -169,6 +169,21 @@ else
   test_fail "preflight did not expose target-sized budget or preserve contract"
 fi
 
+test_case "summarizer overrides stay scoped to the candidate dispatch"
+OCTOPUS_PREFLIGHT_CONTEXT_BUDGET=4321
+OCTOPUS_OVERSIZE_STRATEGY=caller-strategy
+OCTOPUS_DEBUG=caller-debug
+run_agent_sync() { printf '%s\n' "Condensed prose without the machine contract"; }
+if summarize_then_dispatch "$structural_prompt" researcher commandcode 6278 >/dev/null 2>&1; then
+  test_fail "invalid summary unexpectedly passed"
+elif [[ "${OCTOPUS_PREFLIGHT_CONTEXT_BUDGET:-}" == "4321" &&
+        "${OCTOPUS_OVERSIZE_STRATEGY:-}" == "caller-strategy" &&
+        "${OCTOPUS_DEBUG:-}" == "caller-debug" ]]; then
+  test_pass
+else
+  test_fail "summarizer overrides leaked after rejected summary"
+fi
+
 test_case "fitted summary cannot drop structural clauses after validation"
 run_agent_sync() {
   printf '%s' "$(printf 'x%.0s' {1..30000})"

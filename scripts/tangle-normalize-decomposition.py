@@ -3,13 +3,14 @@ from __future__ import annotations
 import re, sys
 
 HEAD = re.compile(r"^\s*(?:#{1,6}\s*)?(\d+)[.)]\s*\[(CODING|REASONING)\]\s*(.*?)\s*$", re.I)
-LABEL = re.compile(r"^\s*(?:\*\*)?(Reads|Files|Creates|Task|Inputs|Output|Acceptance evidence|Blocks(?: on)?):(?:\*\*)?\s*(.*)$", re.I)
+LABEL = re.compile(r"^\s*(?:\*\*)?(Reads|Files|Creates|Task|Inputs|Output|Expected output|Verification|Dependencies|Acceptance evidence|Blocks(?: on)?)(?::)?(?:\*\*)?\s*(?::\s*)?(.*)$", re.I)
 ACTION = re.compile(r"^\s*((?:Verify|Implement|Update|Document)\b.*?)\s*:\s*$", re.I)
 BULLET = re.compile(r"^\s*[-*]\s+(.*)$")
 BACKTICK = re.compile(r"`([^`]+)`")
 
 SCOPE_LABELS = {"reads", "files", "creates"}
-IGNORE_SECTIONS = {"inputs", "output", "acceptance evidence", "blocks", "blocks on"}
+TASK_SECTIONS = {"task", "output", "expected output", "verification"}
+IGNORE_SECTIONS = {"inputs", "dependencies", "acceptance evidence", "blocks", "blocks on"}
 
 def clean_text(s: str) -> str:
     s = re.sub(r"\s+", " ", s.strip())
@@ -20,12 +21,20 @@ def clean_text(s: str) -> str:
 
 def scope_items(text: str) -> list[str]:
     vals = BACKTICK.findall(text)
-    if not vals:
+    if vals:
+        # Backticked tokens grant scope only when the surrounding bullet is
+        # separators/punctuation. Prose such as "excluding `.env`" is context,
+        # not filesystem authority.
+        remainder = BACKTICK.sub("", text)
+        remainder = re.sub(r"[\s,;:/+&()\[\]-]+", "", remainder)
+        if remainder:
+            return []
+    else:
         vals = [x.strip() for x in re.split(r"[,;]", text)]
     out = []
     for val in vals:
         val = val.strip().strip("`\"'")
-        if not val:
+        if not val or val.lower() in {"none", "n/a", "na", "nothing", "no-new-files"}:
             continue
         if " " in val and not (val.startswith("/") or val.startswith("./")):
             continue
@@ -53,7 +62,7 @@ def parse_block(num: str, kind: str, title: str, lines: list[str]) -> str | None
         if m:
             section = m.group(1).lower()
             inline = m.group(2).strip()
-            if section == "task":
+            if section in TASK_SECTIONS:
                 if inline:
                     task_parts.append(clean_text(inline))
             elif section in SCOPE_LABELS and inline:

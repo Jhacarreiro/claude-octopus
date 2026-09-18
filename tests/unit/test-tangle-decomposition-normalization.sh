@@ -27,6 +27,24 @@ root_scope=$'### 1. [CODING] Root-level maintenance\n\n**Files:**\n- Makefile\n-
 root_normalized="$(tangle_materialize_decomposition_output "$root_scope")"
 if [[ "$root_normalized" == *"Files: Makefile, scripts"* ]]; then test_pass; else test_fail "bare root-level scopes were dropped: $root_normalized"; fi
 
+test_case "scope headings without colons are accepted conservatively"
+headingless=$'### 1. [CODING] Headingless\n\n**Files**\n- `src/a.ts`\n\n**Creates**\n- `src/b.ts`\n\n**Expected output**\n- Implement the change.\n\n**Verification**\n- Run tests.\n\n**Dependencies:** none.'
+headingless_out="$(tangle_materialize_decomposition_output "$headingless")"
+if [[ "$headingless_out" == *"Files: src/a.ts"* && "$headingless_out" == *"Creates: src/b.ts"* && "$headingless_out" == *"Task: Implement the change. Run tests."* ]]; then
+  test_pass
+else
+  test_fail "headingless sections not normalized: $headingless_out"
+fi
+
+test_case "scope prose does not grant backticked secret or sentinel paths"
+prose=$'### 1. [CODING] Conservative scopes\n\n**Reads**\n- Tracked files, excluding credentials, `.env`, and auth stores\n- `src/a.ts`\n\n**Files**\n- `src/a.ts`\n\n**Creates**\n- None\n\nTask: edit it'
+prose_out="$(tangle_materialize_decomposition_output "$prose")"
+if [[ "$prose_out" == *"Reads: src/a.ts"* && "$prose_out" != *".env"* && "$prose_out" != *"Creates: None"* ]]; then
+  test_pass
+else
+  test_fail "prose leaked into scope authority: $prose_out"
+fi
+
 test_case "normalizer derives task prose without acceptance boilerplate"
 if [[ "$normalized" == *"Task: Implement and verify:"* && "$normalized" == *"Replace anonymous startup"* && "$normalized" != *"Acceptance evidence"* ]]; then test_pass; else test_fail "task prose normalization is wrong"; fi
 

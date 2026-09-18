@@ -388,9 +388,17 @@ octopus_tangle_boundary_paths_are_disjoint() {
     return 0
 }
 
+octopus_tangle_execution_boundary_required() {
+    [[ "${phase:-}" == "tangle" ]] || return 1
+    [[ "${OCTOPUS_TANGLE_EXECUTION_BOUNDARY:-false}" == "true" || \
+       "${OCTOPUS_TANGLE_WRITE_SCOPE_MODE:-strict}" == "adaptive" ]]
+}
+
 octopus_tangle_apply_execution_boundary() {
-    [[ "${OCTOPUS_TANGLE_EXECUTION_BOUNDARY:-false}" == "true" ]] || return 0
-    [[ "${phase:-}" == "tangle" ]] || return 0
+    # Adaptive scope expansion is never allowed to rely on the caller's
+    # opt-in flag. Enforce the boundary at the provider dispatch point too,
+    # because this function is also callable outside tangle_develop().
+    octopus_tangle_execution_boundary_required || return 0
 
     local worktree="${OCTOPUS_TANGLE_WORKTREE:-${PROJECT_ROOT:-$PWD}}"
     local physical_worktree results_dir physical_results git_metadata
@@ -410,6 +418,12 @@ octopus_tangle_apply_execution_boundary() {
         esac
         return 125
     }
+    # Publish the boundary state only after the capability probe succeeds.
+    # A rejected adaptive dispatch must not leave a stale success flag in the
+    # caller's environment.
+    if [[ "${OCTOPUS_TANGLE_WRITE_SCOPE_MODE:-strict}" == "adaptive" ]]; then
+        export OCTOPUS_TANGLE_EXECUTION_BOUNDARY=true
+    fi
 
     local -a boundary_cmd
     # Keep the host root read-only so provider executables and credentials
@@ -1026,8 +1040,7 @@ ${heuristic_ctx}"
             log "INFO" "Bounded dispatch (${_eff_timeout}s) uses the supervised provider subprocess; native Agent Teams cannot enforce a wall-clock timeout"
         fi
     fi
-    if [[ "${OCTOPUS_TANGLE_EXECUTION_BOUNDARY:-false}" == "true" && \
-          "${phase:-}" == "tangle" ]]; then
+    if octopus_tangle_execution_boundary_required; then
         # Native Agent Teams cannot inherit the sealed filesystem mounts used
         # by the supervised subprocess path. This applies to reasoning agents
         # too: they must not get an unconfined write-capable working directory.

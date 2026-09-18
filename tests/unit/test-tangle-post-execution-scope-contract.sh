@@ -100,6 +100,102 @@ else
     test_fail "scope violation did not fail before base validation/retries; calls=$VALIDATE_CALLS"
 fi
 
+test_case "adaptive mode records out-of-scope changes as evidence and still runs base validation"
+VALIDATE_CALLS=0
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+adaptive_status=0
+tangle_validate_results_with_scope_contract adaptive 'Build UI' "$BEFORE" "$SUBTASKS" || adaptive_status=$?
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+adaptive_report="$RESULTS_DIR/tangle-validation-adaptive.md"
+if [[ "$adaptive_status" -eq 0 ]] && [[ "$VALIDATE_CALLS" -eq 1 ]] && grep -q 'Adaptive Write Scope Expansions' "$adaptive_report" && grep -q -- '- src/existing.ts' "$adaptive_report" && [[ -z "${TANGLE_SCOPE_CONTRACT_VIOLATIONS:-}" ]]; then
+    test_pass
+else
+    test_fail "adaptive scope expansion remained fatal or lost evidence; status=$adaptive_status calls=$VALIDATE_CALLS"
+fi
+VALIDATE_CALLS=0
+
+test_case "adaptive mode keeps protected and symlink paths fatal"
+mkdir -p "$TMP_REPO/.octo" "$TMP_REPO/outside"
+ln -s "$TMP_REPO/outside" "$TMP_REPO/escape"
+if tangle_adaptive_scope_path_is_safe "src/existing.ts" && \
+   ! tangle_adaptive_scope_path_is_safe ".octo/forged.txt" && \
+   ! tangle_adaptive_scope_path_is_safe ".OCTO/forged.txt" && \
+   ! tangle_adaptive_scope_path_is_safe ".CLAUDE-OCTOPUS/runtime.txt" && \
+   ! tangle_adaptive_scope_path_is_safe "escape/forged.txt"; then
+    test_pass
+else
+    test_fail "adaptive scope safety accepted a protected or symlink path"
+fi
+
+test_case "adaptive validation separates safe evidence from unsafe fatal paths"
+saved_changed_paths_function="$(declare -f tangle_changed_paths_outside_write_scopes)"
+tangle_changed_paths_outside_write_scopes() {
+    printf '%s\n' 'src/existing.ts' 'escape/forged.txt' '.octo/forged.txt'
+}
+VALIDATE_CALLS=0
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+mixed_status=0
+tangle_validate_results_with_scope_contract adaptive-mixed 'Build UI' "$BEFORE" "$SUBTASKS" || mixed_status=$?
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+mixed_report="$RESULTS_DIR/tangle-validation-adaptive-mixed.md"
+if [[ "$mixed_status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && \
+   grep -q -- '- src/existing.ts' "$mixed_report" && \
+   grep -q 'Unsafe adaptive scope path: escape/forged.txt.' "$mixed_report" && \
+   grep -q 'Unsafe adaptive scope path: .octo/forged.txt.' "$mixed_report"; then
+    test_pass
+else
+    test_fail "adaptive validation did not separate safe evidence from unsafe fatal paths"
+fi
+eval "$saved_changed_paths_function"
+rm -f "$TMP_REPO/escape"
+
+test_case "adaptive validation preserves multiple integrity failures"
+saved_changed_paths_function="$(declare -f tangle_changed_paths_outside_write_scopes)"
+tangle_changed_paths_outside_write_scopes() {
+    return 1
+}
+VALIDATE_CALLS=0
+export TANGLE_WORKTREE_BEFORE_STATE_DIGEST=stale-state-digest
+integrity_state_snapshot="$TMP_RESULTS/before-state-integrity.txt"
+snapshot_tangle_worktree_state > "$integrity_state_snapshot"
+integrity_status=0
+tangle_validate_results_with_scope_contract adaptive-integrity 'Build UI' "$BEFORE" "$SUBTASKS" "" "" "$integrity_state_snapshot" || integrity_status=$?
+unset TANGLE_WORKTREE_BEFORE_STATE_DIGEST
+integrity_report="$RESULTS_DIR/tangle-validation-adaptive-integrity.md"
+if [[ "$integrity_status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && \
+   grep -q 'The parent-owned worktree state snapshot changed' "$integrity_report" && \
+   grep -q 'Unable to verify final worktree changes against immutable start HEAD' "$integrity_report"; then
+    test_pass
+else
+    test_fail "adaptive validation overwrote an earlier integrity failure; status=$integrity_status calls=$VALIDATE_CALLS"
+fi
+eval "$saved_changed_paths_function"
+
+test_case "adaptive mode keeps a changed parent-owned state snapshot fatal"
+state_snapshot="$TMP_RESULTS/before-state.txt"
+snapshot_tangle_worktree_state > "$state_snapshot"
+export TANGLE_WORKTREE_BEFORE_STATE_DIGEST=stale-state-digest
+state_status=0
+tangle_validate_results_with_scope_contract adaptive-state 'Build UI' "$BEFORE" "$SUBTASKS" "" "$(tangle_scope_manifest_digest "$SUBTASKS")" "$state_snapshot" || state_status=$?
+unset TANGLE_WORKTREE_BEFORE_STATE_DIGEST
+state_report="$RESULTS_DIR/tangle-validation-adaptive-state.md"
+if [[ "$state_status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && grep -q 'The parent-owned worktree state snapshot changed' "$state_report" && ! grep -q 'PASS: every changed path' "$state_report"; then
+    test_pass
+else
+    test_fail "adaptive mode cleared a parent-owned state integrity failure; status=$state_status calls=$VALIDATE_CALLS"
+fi
+
+test_case "adaptive mode keeps a changed scope manifest fatal"
+manifest_status=0
+tangle_validate_results_with_scope_contract adaptive-manifest 'Build UI' "$BEFORE" "$SUBTASKS" "" stale-scope-manifest "$state_snapshot" || manifest_status=$?
+manifest_report="$RESULTS_DIR/tangle-validation-adaptive-manifest.md"
+if [[ "$manifest_status" -ne 0 ]] && [[ "$VALIDATE_CALLS" -eq 0 ]] && grep -q 'The parent-owned scope manifest changed' "$manifest_report" && ! grep -q 'PASS: every changed path' "$manifest_report"; then
+    test_pass
+else
+    test_fail "adaptive mode cleared a scope manifest integrity failure; status=$manifest_status calls=$VALIDATE_CALLS"
+fi
+unset TANGLE_WORKTREE_BEFORE_STATE_DIGEST
+
 test_case "scope violation is surfaced as one deterministic blocking finding"
 findings="$TMP_ROOT/findings.json"
 printf '%s\n' '{"findings":[]}' > "$findings"

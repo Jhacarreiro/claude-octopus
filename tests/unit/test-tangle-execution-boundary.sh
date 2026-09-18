@@ -34,6 +34,33 @@ else
     fi
 fi
 
+test_case "adaptive coding dispatch cannot opt out of the boundary"
+saved_probe="$(declare -f octopus_tangle_execution_boundary_probe)"
+boundary_probe_calls=0
+octopus_tangle_execution_boundary_probe() {
+    boundary_probe_calls=$((boundary_probe_calls + 1))
+    return 1
+}
+unset OCTOPUS_TANGLE_EXECUTION_BOUNDARY
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+if ! octopus_tangle_apply_execution_boundary && [[ "$boundary_probe_calls" -eq 1 ]] && [[ -z "${OCTOPUS_TANGLE_EXECUTION_BOUNDARY:-}" ]]; then
+    test_pass
+else
+    test_fail "adaptive dispatch accepted an unset boundary or skipped the boundary probe"
+fi
+eval "$saved_probe"
+
+test_case "adaptive mode requires supervised dispatch before Agent Teams selection"
+if OCTOPUS_TANGLE_EXECUTION_BOUNDARY=false \
+   OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive \
+   octopus_tangle_execution_boundary_required; then
+    test_pass
+else
+    test_fail "adaptive mode did not require the supervised execution boundary at dispatch selection"
+fi
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+OCTOPUS_TANGLE_EXECUTION_BOUNDARY=true
+
 test_case "parent-owned result channel cannot overlap the worktree"
 if ! octopus_tangle_boundary_paths_are_disjoint \
     "$BOUNDARY_WORKTREE" "$BOUNDARY_WORKTREE/results" && \

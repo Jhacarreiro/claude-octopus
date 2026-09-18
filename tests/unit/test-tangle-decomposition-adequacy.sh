@@ -18,6 +18,7 @@ SUPPORTS_PARALLEL_FILE_SAFETY=false
 RESULTS_DIR="$TEST_TMP_DIR/results"
 WORKSPACE_DIR="$RESULTS_DIR/workspace"
 mkdir -p "$WORKSPACE_DIR/.octo/agents"
+boundary_probe_status=0
 
 SCENARIO_FILE="$RESULTS_DIR/scenario"
 ADEQUACY_COUNT_FILE="$RESULTS_DIR/adequacy-count"
@@ -37,6 +38,7 @@ display_workflow_cost_estimate() { return 0; }
 reset_provider_lockouts() { :; }
 fleet_dispatch_begin() { :; }
 fleet_dispatch_end() { :; }
+octopus_tangle_execution_boundary_probe() { [[ "$boundary_probe_status" -eq 0 ]]; }
 design_review_ceremony() {
     local out_var="${3:-}"
     if [[ -n "$out_var" ]]; then
@@ -119,6 +121,13 @@ EOF
             case "$scenario" in
                 second-fail)
                     printf '%s\n' 'VERDICT: FAIL' 'REASONS: scopes still cannot materialize the requested deliverable' 'SCOPE_REVIEW:' '- MOVE_TO_READS: scripts/lib/workflows.sh — context only'
+                    ;;
+                second-review-unusable)
+                    if [[ "$n" -eq 1 ]]; then
+                        printf '%s\n' 'VERDICT: FAIL' 'REASONS: scopes still cannot materialize the requested deliverable' 'SCOPE_REVIEW:' '- MOVE_TO_READS: scripts/lib/workflows.sh — context only'
+                    else
+                        printf '%s\n' 'The adequacy reviewer did not return a usable response.'
+                    fi
                     ;;
                 adequacy-repair|reconsider-fallback|reconsider-third-fallback|reconsider-exhaust)
                     if [[ "$n" -eq 1 ]]; then
@@ -297,6 +306,48 @@ if [[ "$status" -ne 0 ]] && [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]] && [[ "$
     test_pass
 else
     test_fail "second adequacy FAIL did not fail closed before spawn"
+fi
+
+
+test_case "adaptive mode continues after bounded reconsideration remains semantically imperfect"
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+reset_scenario "second-fail"
+adaptive_status=0
+tangle_develop 'Build the requested externally observable application with a usable entry point.' > "$RESULTS_DIR/second-fail-adaptive.out" 2>&1 || adaptive_status=$?
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+if [[ "$adaptive_status" -eq 0 ]] && [[ "$(cat "$ADEQUACY_COUNT_FILE")" -eq 2 ]] && [[ "$(cat "$RECONSIDER_COUNT_FILE")" -eq 1 ]] && [[ -s "$SPAWN_FILE" ]] && grep -q 'continuing in adaptive write-scope mode' "$LOG_FILE"; then
+    test_pass
+else
+    test_fail "adaptive mode did not continue to implementation spawn after second semantic FAIL"
+fi
+
+
+test_case "adaptive mode fails closed when the second adequacy review is unusable"
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+reset_scenario "second-review-unusable"
+unusable_status=0
+tangle_develop 'Build the requested externally observable application with a usable entry point.' > "$RESULTS_DIR/second-review-unusable.out" 2>&1 || unusable_status=$?
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+if [[ "$unusable_status" -ne 0 ]] && [[ "$(cat "$RECONSIDER_COUNT_FILE")" -eq 1 ]] && [[ ! -s "$SPAWN_FILE" ]] && grep -q 'Second decomposition adequacy review did not complete' "$LOG_FILE"; then
+    test_pass
+else
+    test_fail "adaptive mode continued after the second adequacy review failed to complete"
+fi
+
+
+test_case "adaptive mode fails closed before spawn without an execution boundary"
+export OCTOPUS_TANGLE_WRITE_SCOPE_MODE=adaptive
+export OCTOPUS_TANGLE_EXECUTION_BOUNDARY=true
+boundary_probe_status=1
+reset_scenario "second-fail"
+boundary_status=0
+tangle_develop 'Build the requested externally observable application with a usable entry point.' > "$RESULTS_DIR/second-fail-no-boundary.out" 2>&1 || boundary_status=$?
+boundary_probe_status=0
+unset OCTOPUS_TANGLE_WRITE_SCOPE_MODE
+if [[ "$boundary_status" -eq 125 ]] && [[ ! -s "$SPAWN_FILE" ]] && grep -q 'no enforceable filesystem boundary is available' "$LOG_FILE" && [[ -z "${OCTOPUS_TANGLE_EXECUTION_BOUNDARY:-}" ]]; then
+    test_pass
+else
+    test_fail "adaptive mode spawned or left the execution-boundary flag enabled without an enforceable boundary"
 fi
 
 

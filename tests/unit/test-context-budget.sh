@@ -179,6 +179,14 @@ else
 fi
 unset OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO
 
+test_case "derived budget helpers saturate before ceiling validation"
+if [[ "$(octo_saturating_context_add 2147483646 2)" == 2147483647 ]] &&
+   [[ "$(octo_saturating_context_percent 2147483647 100)" == 2147483647 ]]; then
+  test_pass
+else
+  test_fail "derived budget helpers did not cap exact-boundary results"
+fi
+
 test_case "derived budget helpers reject arithmetic-overflow inputs"
 if ! octo_saturating_context_add 2147483648 1 >/dev/null 2>&1 &&
    ! octo_saturating_context_percent 2147483647 2147483648 >/dev/null 2>&1; then

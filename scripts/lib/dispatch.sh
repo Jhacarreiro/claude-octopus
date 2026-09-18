@@ -986,6 +986,19 @@ octo_summary_preserves_structure() {
     return 0
 }
 
+octo_fit_and_validate_summary() {
+    local original="$1"
+    local summary="$2"
+    local budget="$3"
+    local fitted="$summary"
+
+    if [[ "$(octo_estimate_prompt_tokens "$fitted")" -gt "$budget" ]]; then
+        fitted="$(octo_fit_prompt_to_token_budget "$fitted" "$budget" $'\n\n[... summarized output truncated to fit context budget (~'"$budget"$' tokens) ...]')"
+    fi
+    octo_summary_preserves_structure "$original" "$fitted" || return 1
+    printf '%s\n' "$fitted"
+}
+
 summarize_then_dispatch() {
     local prompt="$1"
     local role="${2:-}"
@@ -1051,11 +1064,7 @@ ${summary_input}"
         fi
         summary=$(run_agent_sync "$candidate" "$summary_prompt" 120 "synthesizer" "preflight" 2>/dev/null) || summary=""
         if [[ -n "$summary" && "$summary" != "Provider available" ]]; then
-            fitted_summary="$summary"
-            if [[ "$(octo_estimate_prompt_tokens "$fitted_summary")" -gt "$budget" ]]; then
-                fitted_summary="$(octo_fit_prompt_to_token_budget "$fitted_summary" "$budget" $'\n\n[... summarized output truncated to fit context budget (~'"$budget"$' tokens) ...]')"
-            fi
-            if ! octo_summary_preserves_structure "$prompt" "$fitted_summary"; then
+            if ! fitted_summary="$(octo_fit_and_validate_summary "$prompt" "$summary" "$budget")"; then
                 continue
             fi
             if [[ -n "$previous_preflight_budget" ]]; then
@@ -1222,10 +1231,7 @@ enforce_context_budget() {
             summarize)
                 local summarized
                 if summarized=$(summarize_then_dispatch "$prompt" "$role" "$target" "$budget") && [[ -n "$summarized" ]]; then
-                    if [[ "$(octo_estimate_prompt_tokens "$summarized")" -gt "$budget" ]]; then
-                        summarized=$(octo_fit_prompt_to_token_budget "$summarized" "$budget" $'\n\n[... summarized output truncated to fit context budget (~'"$budget"$' tokens) ...]')
-                    fi
-                    if ! octo_summary_preserves_structure "$prompt" "$summarized"; then
+                    if ! summarized="$(octo_fit_and_validate_summary "$prompt" "$summarized" "$budget")"; then
                         log "DEBUG" "Context budget: rejected summary for $target because fitting removed a required structure anchor"
                         summarized=""
                     fi

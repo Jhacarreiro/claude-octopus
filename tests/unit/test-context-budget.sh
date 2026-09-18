@@ -179,6 +179,21 @@ if summarize_then_dispatch "$structural_prompt" researcher commandcode 4000 >/de
 else
   test_pass
 fi
+
+test_case "enforcement falls back after rejecting a fitted summary"
+OCTOPUS_CONTEXT_BUDGET=4000
+OCTOPUS_OVERSIZE_STRATEGY=summarize
+run_agent_sync() {
+  printf '%s' "$(printf 'x%.0s' {1..30000})"
+  printf '%s\n' " [CODING] Reads: summary-tail Creates: summary-tail Files: summary-tail Task: summary-tail"
+}
+fallback_prompt="$structural_prompt $(printf 'q%.0s' {1..30000})"
+fallback=$(enforce_context_budget "$fallback_prompt" "" codex tangle 2>/dev/null)
+if [[ "$fallback" != *"summary-tail"* && "$fallback" == *"[CODING]"* ]]; then
+  test_pass
+else
+  test_fail "invalid fitted summary was returned instead of the original-prompt fallback"
+fi
 unset OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO OCTOPUS_OVERSIZE_STRATEGY
 
 test_summary

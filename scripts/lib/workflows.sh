@@ -1926,15 +1926,21 @@ tangle_run_decomposition_fallbacks() {
     # The configured fallback chain is the single dispatch authority. Do not
     # bypass it with a direct retry: an invalid explicit provider must fail
     # closed instead of silently falling through to another agent.
-    local candidate
+    local candidate materialized
     if candidate=$(run_agent_sync_fallback_chain \
         "$primary_agent" "$prompt" "$timeout_secs" researcher tangle \
         tangle_decomposition_output_usable default "$preferred_fallback"); then
-        if ! tangle_decomposition_wire_output_usable "$candidate"; then
-            log INFO "Normalized structured Markdown decomposition locally before provider fallback"
+        if materialized=$(tangle_materialize_decomposition_output "$candidate" 2>/dev/null); then
+            if ! tangle_decomposition_wire_output_usable "$candidate"; then
+                log INFO "Normalized structured Markdown decomposition locally before provider fallback"
+            fi
+            printf '%s\n' "$materialized"
+        else
+            # Preserve the fallback-chain validator contract for callers/tests
+            # that intentionally provide a different semantic validator.
+            printf '%s\n' "$candidate"
         fi
-        tangle_materialize_decomposition_output "$candidate"
-        return $?
+        return 0
     fi
     return $?
 }

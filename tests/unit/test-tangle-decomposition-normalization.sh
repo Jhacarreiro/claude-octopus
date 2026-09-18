@@ -22,8 +22,19 @@ if [[ "$(tangle_parseable_subtask_count "$normalized")" == 3 && "$(tangle_parsea
 test_case "normalizer preserves read, write and create scopes"
 if [[ "$normalized" == *"Reads: /context/approved-plan.md"* && "$normalized" == *"Files: app/build.gradle.kts, app/src/main/App.kt"* && "$normalized" == *"Creates: app/src/main/AuthScreen.kt"* ]]; then test_pass; else test_fail "scope clauses were not preserved"; fi
 
+test_case "normalizer preserves bare root-level scopes"
+root_scope=$'### 1. [CODING] Root-level maintenance\n\n**Files:**\n- Makefile\n- scripts\n\nTask: Update the root-level build and scripts.'
+root_normalized="$(tangle_materialize_decomposition_output "$root_scope")"
+if [[ "$root_normalized" == *"Files: Makefile, scripts"* ]]; then test_pass; else test_fail "bare root-level scopes were dropped: $root_normalized"; fi
+
 test_case "normalizer derives task prose without acceptance boilerplate"
 if [[ "$normalized" == *"Task: Implement and verify:"* && "$normalized" == *"Replace anonymous startup"* && "$normalized" != *"Acceptance evidence"* ]]; then test_pass; else test_fail "task prose normalization is wrong"; fi
+
+test_case "normalizer protects title and task separators"
+separator_input=$'### 1. [CODING] Preserve parser - error details\n\nFiles: scripts\n\nTask: Keep em dash — and hyphen - text intact.'
+separator_normalized="$(tangle_materialize_decomposition_output "$separator_input")"
+separator_task="$(tangle_extract_structured_clause "$separator_normalized" Task || true)"
+if [[ "$separator_normalized" == *"Preserve parser | error details"* && "$separator_task" == *"Keep em dash | and hyphen | text intact."* ]]; then test_pass; else test_fail "wire separators truncated normalized prose: $separator_normalized"; fi
 
 test_case "coding markdown without write scope fails closed"
 bad=$'### 1. [CODING] Missing scope\n\nImplement the feature.'
@@ -49,6 +60,18 @@ run_agent_sync_fallback_chain() {
 }
 out="$(tangle_run_decomposition_fallbacks primary fallback prompt 0)"
 if [[ ! -e "$marker" ]] && tangle_decomposition_wire_output_usable "$out"; then test_pass; else test_fail "local repair did not prevent provider fallback"; fi
+
+test_case "legacy fallback materializes output and retries after normalization failure"
+unset -f is_agent_available_v2 2>/dev/null || true
+run_agent_sync() {
+  if [[ "$1" == "primary" ]]; then
+    printf '%s\n' 'provider returned prose without subtasks'
+  else
+    printf '%s\n' "$raw"
+  fi
+}
+legacy_out="$(tangle_run_decomposition_fallbacks primary fallback prompt 0)"
+if tangle_decomposition_wire_output_usable "$legacy_out"; then test_pass; else test_fail "legacy fallback did not materialize and retry: output=$legacy_out"; fi
 
 test_case "already-valid wire format remains unchanged"
 wire='1. [CODING] Edit — Files: src/app.ts — Task: implement it'

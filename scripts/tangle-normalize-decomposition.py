@@ -13,7 +13,10 @@ IGNORE_SECTIONS = {"inputs", "output", "acceptance evidence", "blocks", "blocks 
 
 def clean_text(s: str) -> str:
     s = re.sub(r"\s+", " ", s.strip())
-    return s.replace(" — ", " - ")
+    # The wire format uses both em dashes and hyphens surrounded by spaces as
+    # field separators. Keep provider-controlled prose in a separator-safe
+    # representation so Task/title text cannot be truncated on re-parsing.
+    return re.sub(r"\s[-—]\s", " | ", s)
 
 def scope_items(text: str) -> list[str]:
     vals = BACKTICK.findall(text)
@@ -26,7 +29,13 @@ def scope_items(text: str) -> list[str]:
             continue
         if " " in val and not (val.startswith("/") or val.startswith("./")):
             continue
-        if not (val.startswith(("/", "./", "../")) or "/" in val or re.search(r"\.[A-Za-z0-9]{1,8}$", val) or "*" in val):
+        if not (
+            val.startswith(("/", "./", "../"))
+            or "/" in val
+            or re.search(r"\.[A-Za-z0-9]{1,8}$", val)
+            or "*" in val
+            or re.fullmatch(r"[A-Za-z0-9_.@%+-]+", val)
+        ):
             continue
         if val not in out:
             out.append(val)

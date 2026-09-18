@@ -1901,11 +1901,26 @@ tangle_run_decomposition_fallbacks() {
     # hosts retain the direct compatibility path, but only after explicit
     # provider names have been validated above.
     if ! declare -F is_agent_available_v2 >/dev/null 2>&1; then
-        if run_agent_sync "$primary_agent" "$prompt" "$timeout_secs" researcher tangle; then
+        local candidate materialized
+        if candidate=$(run_agent_sync "$primary_agent" "$prompt" "$timeout_secs" researcher tangle); then
+            if materialized=$(tangle_materialize_decomposition_output "$candidate"); then
+                printf '%s\n' "$materialized"
+                return 0
+            fi
+        fi
+        if candidate=$(run_agent_sync "$preferred_fallback" "$prompt" "$timeout_secs" researcher tangle); then
+            if materialized=$(tangle_materialize_decomposition_output "$candidate"); then
+                printf '%s\n' "$materialized"
+                return 0
+            fi
+            # Preserve the legacy caller contract when neither provider
+            # returns materializable output: tangle_develop can still route
+            # the successful provider response through first-principles
+            # redecomposition instead of treating a dispatch error as final.
+            printf '%s\n' "$candidate"
             return 0
         fi
-        run_agent_sync "$preferred_fallback" "$prompt" "$timeout_secs" researcher tangle
-        return $?
+        return 1
     fi
 
     # The configured fallback chain is the single dispatch authority. Do not

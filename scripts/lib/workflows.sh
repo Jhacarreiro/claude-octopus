@@ -1831,7 +1831,7 @@ tangle_validate_subtask_task_clauses() {
     done <<< "$subtasks"
 }
 
-tangle_decomposition_output_usable() {
+tangle_decomposition_wire_output_usable() {
     local subtasks="${1:-}" parseable_count coding_count line subtask scopes
     tangle_validate_subtask_task_clauses "$subtasks" || return 1
     parseable_count="$(tangle_parseable_subtask_count "$subtasks")"
@@ -1853,6 +1853,28 @@ tangle_decomposition_output_usable() {
         [[ -n "$scopes" ]] || return 1
     done <<<"$subtasks"
     return 0
+}
+
+
+tangle_normalize_decomposition_output() {
+    local raw="${1:-}"
+    command -v python3 >/dev/null 2>&1 || return 1
+    printf '%s\n' "$raw" | python3 "${BASH_SOURCE[0]%/*}/../tangle-normalize-decomposition.py"
+}
+
+tangle_materialize_decomposition_output() {
+    local raw="${1:-}" normalized
+    if tangle_decomposition_wire_output_usable "$raw"; then
+        printf '%s\n' "$raw"
+        return 0
+    fi
+    normalized="$(tangle_normalize_decomposition_output "$raw" 2>/dev/null)" || return 1
+    tangle_decomposition_wire_output_usable "$normalized" || return 1
+    printf '%s\n' "$normalized"
+}
+
+tangle_decomposition_output_usable() {
+    tangle_materialize_decomposition_output "${1:-}" >/dev/null
 }
 
 tangle_run_decomposition_fallbacks() {
@@ -1889,9 +1911,17 @@ tangle_run_decomposition_fallbacks() {
     # The configured fallback chain is the single dispatch authority. Do not
     # bypass it with a direct retry: an invalid explicit provider must fail
     # closed instead of silently falling through to another agent.
-    run_agent_sync_fallback_chain \
+    local candidate
+    if candidate=$(run_agent_sync_fallback_chain \
         "$primary_agent" "$prompt" "$timeout_secs" researcher tangle \
-        tangle_decomposition_output_usable default "$preferred_fallback"
+        tangle_decomposition_output_usable default "$preferred_fallback"); then
+        if ! tangle_decomposition_wire_output_usable "$candidate"; then
+            log INFO "Normalized structured Markdown decomposition locally before provider fallback"
+        fi
+        tangle_materialize_decomposition_output "$candidate"
+        return $?
+    fi
+    return $?
 }
 
 tangle_reformat_decomposition() {

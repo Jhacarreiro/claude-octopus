@@ -1002,6 +1002,56 @@ octo_fit_and_validate_summary() {
     printf '%s\n' "$fitted"
 }
 
+octo_summarizer_feature_specs() {
+    local config_file="${OCTOPUS_PROVIDERS_CONFIG:-${HOME}/.claude-octopus/config/providers.json}"
+    [[ -f "$config_file" ]] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+
+    jq -r '
+        (.routing.features.summarizer // [])
+        | if type == "array" then .[] else empty end
+        | select(type == "string" and length > 0)
+    ' "$config_file" 2>/dev/null || true
+}
+
+_octo_summarizer_ensure_fallback_helpers() {
+    local SCRIPT_DIR fallback_lib model_resolver_lib
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if ! declare -f validate_model_name_for_provider >/dev/null 2>&1; then
+        model_resolver_lib="$SCRIPT_DIR/model-resolver.sh"
+        [[ -f "$model_resolver_lib" ]] && source "$model_resolver_lib" 2>/dev/null || true
+    fi
+    if ! declare -f octo_fallback_canonical_agent_spec >/dev/null 2>&1; then
+        fallback_lib="$SCRIPT_DIR/fallback-chain.sh"
+        [[ -f "$fallback_lib" ]] && source "$fallback_lib" 2>/dev/null || true
+    fi
+    declare -f validate_model_name_for_provider >/dev/null 2>&1 || return 1
+    declare -f octo_fallback_canonical_agent_spec >/dev/null 2>&1 || return 1
+}
+
+octo_summarizer_candidates() {
+    _octo_summarizer_ensure_fallback_helpers || return 1
+
+    local raw spec seen="|"
+    if [[ -n "${OCTOPUS_OVERSIZE_SUMMARIZER:-}" ]]; then
+        if spec="$(octo_fallback_canonical_agent_spec "$OCTOPUS_OVERSIZE_SUMMARIZER" 2>/dev/null)"; then
+            printf '%s\n' "$spec"
+            seen+="$spec|"
+        fi
+    fi
+
+    while IFS= read -r raw; do
+        [[ -n "$raw" ]] || continue
+        spec="$(octo_fallback_canonical_agent_spec "$raw" 2>/dev/null)" || continue
+        [[ "$seen" == *"|$spec|"* ]] && continue
+        if declare -f octo_fallback_admit_automatic_spec >/dev/null 2>&1; then
+            octo_fallback_admit_automatic_spec "$spec" "" >/dev/null 2>&1 || continue
+        fi
+        seen+="$spec|"
+        printf '%s\n' "$spec"
+    done < <(octo_summarizer_feature_specs)
+}
+
 summarize_then_dispatch() {
     local prompt="$1"
     local role="${2:-}"
@@ -1042,13 +1092,14 @@ Remove repetition, logs, duplicate context, and low-value boilerplate. Return on
 Oversized prompt:
 ${summary_input}"
 
-    local candidates=()
-    if [[ -n "${OCTOPUS_OVERSIZE_SUMMARIZER:-}" ]]; then
-        candidates+=("$OCTOPUS_OVERSIZE_SUMMARIZER")
+    local candidate summary canonical_target_agent fitted_summary preflight_budget
+    _octo_summarizer_ensure_fallback_helpers || true
+    canonical_target_agent="$target_agent"
+    if canonical_target_agent="$(octo_fallback_canonical_agent_spec "$target_agent" 2>/dev/null)"; then
+        :
+    else
+        canonical_target_agent="$target_agent"
     fi
-    candidates+=("agy" "codex-mini" "claude-sonnet" "codex")
-
-    local candidate summary fitted_summary preflight_budget
     preflight_budget="$(octo_preflight_context_budget "$budget")" || return 2
     # Keep temporary dispatch overrides in a subshell. A failed provider,
     # rejected summary, or early return must not leak preflight state into the
@@ -1058,11 +1109,9 @@ ${summary_input}"
         export OCTOPUS_DEBUG="${OCTOPUS_DEBUG:-false}"
         export OCTOPUS_PREFLIGHT_CONTEXT_BUDGET="$preflight_budget"
 
-        for candidate in "${candidates[@]}"; do
-            [[ "$candidate" == "$target_agent" ]] && continue
-            if type validate_agent_type >/dev/null 2>&1 && ! validate_agent_type "$candidate" >/dev/null 2>&1; then
-                continue
-            fi
+        while IFS= read -r candidate; do
+            [[ -n "$candidate" ]] || continue
+            [[ "$candidate" == "$canonical_target_agent" ]] && continue
             if ! type run_agent_sync >/dev/null 2>&1; then
                 break
             fi
@@ -1074,7 +1123,7 @@ ${summary_input}"
                 printf '%s\n' "$fitted_summary"
                 exit 0
             fi
-        done
+        done < <(octo_summarizer_candidates)
         exit 1
     )
 }

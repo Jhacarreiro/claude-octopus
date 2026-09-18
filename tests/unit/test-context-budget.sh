@@ -11,6 +11,10 @@ log() { :; }
 source "$PROJECT_ROOT/scripts/lib/models.sh"
 source "$PROJECT_ROOT/scripts/lib/dispatch.sh"
 
+# Use a configured seat so budget tests do not depend on host routing state.
+export OCTOPUS_PROVIDERS_CONFIG="$TEST_TMP_DIR/providers.json"
+printf '%s\n' '{"routing":{"features":{"summarizer":["agy"]}}}' > "$OCTOPUS_PROVIDERS_CONFIG"
+
 test_case "exact Claude SDK Haiku seat cannot exceed its catalog window"
 OCTOPUS_CLAUDE_SDK_CONTEXT_BUDGET=1000000
 OCTOPUS_CONTEXT_OUTPUT_RESERVE_TOKENS=0

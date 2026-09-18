@@ -895,14 +895,24 @@ octo_estimate_prompt_tokens() {
 }
 
 octo_preflight_context_budget() {
-    local target_budget="$1"
+    local target_budget
+    target_budget="$(octo_normalize_context_budget "${1:-}" "target context budget")" || return 2
     local ratio="${OCTOPUS_PREFLIGHT_CONTEXT_BUDGET_RATIO:-125}"
     local additive="${OCTOPUS_PREFLIGHT_CONTEXT_BUDGET_ADDITIVE:-2048}"
-    [[ "$target_budget" =~ ^[0-9]+$ && "$target_budget" -gt 0 ]] || return 2
-    [[ "$ratio" =~ ^[0-9]+$ && "$ratio" -ge 100 ]] || return 2
-    [[ "$additive" =~ ^[0-9]+$ ]] || return 2
+    ratio="$(octo_normalize_context_budget "$ratio" "preflight context budget ratio")" || return 2
+    [[ "$ratio" -ge 100 ]] || return 2
+    additive="$(octo_normalize_nonnegative_context_value "$additive" "preflight context budget additive")" || return 2
+
+    # Keep the derived value inside the same bounded range used by context
+    # admission. This prevents both Bash arithmetic overflow and a later
+    # budget*4 character calculation from wrapping.
+    local max_budget=2147483647
+    [[ "$ratio" -le $((max_budget / target_budget)) ]] || return 2
+    [[ "$additive" -le $((max_budget - target_budget)) ]] || return 2
     local by_ratio=$(( (target_budget * ratio + 99) / 100 ))
     local by_add=$(( target_budget + additive ))
+    [[ "$by_ratio" -gt 0 && "$by_ratio" -ge "$target_budget" && "$by_ratio" -le "$max_budget" ]] || return 2
+    [[ "$by_add" -gt 0 && "$by_add" -ge "$target_budget" && "$by_add" -le "$max_budget" ]] || return 2
     if [[ "$by_ratio" -gt "$by_add" ]]; then
         printf '%s\n' "$by_ratio"
     else
@@ -911,11 +921,16 @@ octo_preflight_context_budget() {
 }
 
 octo_summary_trigger_budget() {
-    local target_budget="$1"
+    local target_budget
+    target_budget="$(octo_normalize_context_budget "${1:-}" "summary trigger context budget")" || return 2
     local ratio="${OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO:-110}"
-    [[ "$target_budget" =~ ^[0-9]+$ && "$target_budget" -gt 0 ]] || return 2
-    [[ "$ratio" =~ ^[0-9]+$ && "$ratio" -ge 100 ]] || return 2
-    printf '%s\n' "$(( (target_budget * ratio + 99) / 100 ))"
+    ratio="$(octo_normalize_context_budget "$ratio" "summary trigger ratio")" || return 2
+    [[ "$ratio" -ge 100 ]] || return 2
+    local max_budget=2147483647
+    [[ "$ratio" -le $((max_budget / target_budget)) ]] || return 2
+    local trigger_budget=$(( (target_budget * ratio + 99) / 100 ))
+    [[ "$trigger_budget" -gt 0 && "$trigger_budget" -ge "$target_budget" && "$trigger_budget" -le "$max_budget" ]] || return 2
+    printf '%s\n' "$trigger_budget"
 }
 
 octo_summary_preserves_structure() {
@@ -977,7 +992,7 @@ ${summary_input}"
     fi
     candidates+=("agy" "codex-mini" "claude-sonnet" "codex")
 
-    local candidate summary previous_strategy previous_debug previous_preflight_budget preflight_budget
+    local candidate summary fitted_summary previous_strategy previous_debug previous_preflight_budget preflight_budget
     previous_strategy="${OCTOPUS_OVERSIZE_STRATEGY-}"
     previous_debug="${OCTOPUS_DEBUG-}"
     previous_preflight_budget="${OCTOPUS_PREFLIGHT_CONTEXT_BUDGET-}"
@@ -995,7 +1010,14 @@ ${summary_input}"
             break
         fi
         summary=$(run_agent_sync "$candidate" "$summary_prompt" 120 "synthesizer" "preflight" 2>/dev/null) || summary=""
-        if [[ -n "$summary" && "$summary" != "Provider available" ]] && octo_summary_preserves_structure "$prompt" "$summary"; then
+        if [[ -n "$summary" && "$summary" != "Provider available" ]]; then
+            fitted_summary="$summary"
+            if [[ "$(octo_estimate_prompt_tokens "$fitted_summary")" -gt "$budget" ]]; then
+                fitted_summary="$(octo_fit_prompt_to_token_budget "$fitted_summary" "$budget" $'\n\n[... summarized output truncated to fit context budget (~'"$budget"$' tokens) ...]')"
+            fi
+            if ! octo_summary_preserves_structure "$prompt" "$fitted_summary"; then
+                continue
+            fi
             if [[ -n "$previous_preflight_budget" ]]; then
                 export OCTOPUS_PREFLIGHT_CONTEXT_BUDGET="$previous_preflight_budget"
             else
@@ -1011,7 +1033,7 @@ ${summary_input}"
             else
                 unset OCTOPUS_DEBUG
             fi
-            printf '%s\n' "$summary"
+            printf '%s\n' "$fitted_summary"
             return 0
         fi
     done
@@ -1140,7 +1162,10 @@ enforce_context_budget() {
     summary_trigger_budget="$(octo_summary_trigger_budget "$budget")" || return 2
     strategy="${OCTOPUS_OVERSIZE_STRATEGY:-summarize}"
     admission_limit="$budget"
-    [[ "$strategy" == "summarize" ]] && admission_limit="$summary_trigger_budget"
+    if [[ "$strategy" == "summarize" ]]; then
+        admission_limit="$summary_trigger_budget"
+        [[ "$admission_limit" -gt "$provider_budget" ]] && admission_limit="$provider_budget"
+    fi
 
     if [[ "$estimated_tokens" -gt "$admission_limit" ]]; then
         local original_chars=${#prompt}
@@ -1159,6 +1184,12 @@ enforce_context_budget() {
                     if [[ "$(octo_estimate_prompt_tokens "$summarized")" -gt "$budget" ]]; then
                         summarized=$(octo_fit_prompt_to_token_budget "$summarized" "$budget" $'\n\n[... summarized output truncated to fit context budget (~'"$budget"$' tokens) ...]')
                     fi
+                    if ! octo_summary_preserves_structure "$prompt" "$summarized"; then
+                        log "DEBUG" "Context budget: rejected summary for $target because fitting removed a required structure anchor"
+                        summarized=""
+                    fi
+                fi
+                if [[ -n "$summarized" ]]; then
                     type record_oversize_event >/dev/null 2>&1 && record_oversize_event "$target" "$original_chars" "${#summarized}" "summarized" "$role" "$phase" "$budget" || true
                     octo_context_budget_warning "Context budget: summarized $target role=${role:-none} phase=${phase:-none} from ${original_chars} to ${#summarized} chars (budget=$budget tokens/$char_budget chars)"
                     printf '%s\n' "$summarized"

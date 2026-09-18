@@ -111,6 +111,24 @@ else
   test_fail "unexpected preflight target budget: $(octo_preflight_context_budget 6278)"
 fi
 
+test_case "preflight budget rejects arithmetic-overflowing configuration"
+OCTOPUS_PREFLIGHT_CONTEXT_BUDGET_RATIO=2147483647
+if octo_preflight_context_budget 2147483647 >/dev/null 2>&1; then
+  test_fail "overflowing preflight ratio was accepted"
+else
+  test_pass
+fi
+unset OCTOPUS_PREFLIGHT_CONTEXT_BUDGET_RATIO
+
+test_case "summary trigger rejects arithmetic-overflowing configuration"
+OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO=2147483647
+if octo_summary_trigger_budget 2147483647 >/dev/null 2>&1; then
+  test_fail "overflowing summary trigger ratio was accepted"
+else
+  test_pass
+fi
+unset OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO
+
 test_case "preflight summary rejects loss of Tangle structural clauses"
 validate_agent_type() { return 0; }
 run_agent_sync() { printf '%s\n' "Condensed prose without the machine contract"; }
@@ -130,6 +148,21 @@ if [[ "$summary" == *"BUDGET=8326"* && "$summary" == *"Task:"* && "$summary" == 
   test_pass
 else
   test_fail "preflight did not expose target-sized budget or preserve contract"
+fi
+
+test_case "fitted summary cannot drop structural clauses after validation"
+run_agent_sync() {
+  printf '%s' "$(printf 'x%.0s' {1..30000})"
+  printf '%s\n' " Task: summary-tail Files: summary-tail"
+}
+set +e
+fitted_summary=$(enforce_context_budget "$structural_prompt $(printf 'q%.0s' {1..30000})" "" codex tangle 2>/dev/null)
+fitted_rc=$?
+set -e
+if [[ "$fitted_rc" -eq 0 && "$fitted_summary" != *"summary-tail"* ]]; then
+  test_pass
+else
+  test_fail "fitted summary retained anchors only before final fitting"
 fi
 unset OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO OCTOPUS_OVERSIZE_STRATEGY
 

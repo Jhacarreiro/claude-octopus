@@ -129,6 +129,17 @@ else
 fi
 unset OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO
 
+test_case "unused summary trigger configuration does not block truncation"
+OCTOPUS_CONTEXT_BUDGET=12000
+OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO=invalid
+OCTOPUS_OVERSIZE_STRATEGY=truncate
+if enforce_context_budget "$(printf 'z%.0s' {1..60000})" "researcher" codex tangle >/dev/null 2>&1; then
+  test_pass
+else
+  test_fail "truncate strategy unexpectedly evaluated an unused summary trigger"
+fi
+unset OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO OCTOPUS_OVERSIZE_STRATEGY
+
 test_case "preflight summary rejects loss of Tangle structural clauses"
 validate_agent_type() { return 0; }
 run_agent_sync() { printf '%s\n' "Condensed prose without the machine contract"; }

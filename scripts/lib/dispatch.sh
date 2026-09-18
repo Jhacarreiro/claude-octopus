@@ -1197,10 +1197,11 @@ enforce_context_budget() {
     local char_budget=$((budget * 4))
     local estimated_tokens summary_trigger_budget strategy admission_limit
     estimated_tokens="$(octo_estimate_prompt_tokens "$prompt")"
-    summary_trigger_budget="$(octo_summary_trigger_budget "$budget")" || return 2
     strategy="${OCTOPUS_OVERSIZE_STRATEGY:-summarize}"
     admission_limit="$budget"
+    summary_trigger_budget="$budget"
     if [[ "$strategy" == "summarize" ]]; then
+        summary_trigger_budget="$(octo_summary_trigger_budget "$budget")" || return 2
         admission_limit="$summary_trigger_budget"
         [[ "$admission_limit" -gt "$provider_budget" ]] && admission_limit="$provider_budget"
     fi

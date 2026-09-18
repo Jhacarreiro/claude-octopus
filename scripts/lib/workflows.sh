@@ -2058,8 +2058,9 @@ ${previous_output}"
             printf '%s\n' "$candidate"
         fi
         return 0
+    else
+        return $?
     fi
-    return $?
 }
 
 tangle_decomposition_adequacy_response_valid() {

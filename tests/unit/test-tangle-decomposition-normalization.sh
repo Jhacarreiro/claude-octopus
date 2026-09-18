@@ -87,6 +87,17 @@ else
   test_fail "redecomposition returned unmaterialized output: $redecomposed_out"
 fi
 
+test_case "redecomposition returns fallback-chain failure status"
+run_agent_sync_fallback_chain() {
+  return 37
+}
+if tangle_redecompose original-task previous-output validation-reason; then
+  test_fail "redecomposition masked fallback-chain failure"
+else
+  redecompose_rc=$?
+  if [[ "$redecompose_rc" == 37 ]]; then test_pass; else test_fail "unexpected redecomposition status: $redecompose_rc"; fi
+fi
+
 test_case "already-valid wire format remains unchanged"
 wire='1. [CODING] Edit — Files: src/app.ts — Task: implement it'
 if [[ "$(tangle_materialize_decomposition_output "$wire")" == "$wire" ]]; then test_pass; else test_fail "wire format was rewritten"; fi

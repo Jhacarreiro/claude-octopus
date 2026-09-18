@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Tangle decomposition v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "subtasks"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "subtasks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "reads",
+          "files",
+          "creates",
+          "task"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "kind": {
+            "enum": [
+              "coding",
+              "reasoning"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reads": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_.@%+/-]+$"
+            },
+            "uniqueItems": true
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_.@%+/-]+$"
+            },
+            "uniqueItems": true
+          },
+          "creates": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_.@%+/-]+$"
+            },
+            "uniqueItems": true
+          },
+          "task": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "coding"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            },
+            "then": {
+              "anyOf": [
+                {
+                  "properties": {
+                    "files": {
+                      "minItems": 1
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "creates": {
+                      "minItems": 1
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "reasoning"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            },
+            "then": {
+              "properties": {
+                "files": {
+                  "maxItems": 0
+                },
+                "creates": {
+                  "maxItems": 0
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

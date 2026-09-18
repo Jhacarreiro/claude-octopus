@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+source "$SCRIPT_DIR/../helpers/test-framework.sh"
+source "$ROOT/scripts/lib/workflows.sh"
+log() { :; }
+test_suite "tangle decomposition JSON v1 contract"
+
+valid='{"schema_version":1,"subtasks":[{"id":1,"kind":"reasoning","title":"Audit","reads":["docs/plan.md"],"files":[],"creates":[],"task":"Audit the contract."},{"id":2,"kind":"coding","title":"Implement","reads":["docs/plan.md"],"files":["src/app.ts"],"creates":["src/test.ts"],"task":"Implement and test."}]}'
+
+test_case "valid JSON v1 is accepted"
+tangle_decomposition_json_output_usable "$valid" && test_pass || test_fail "valid JSON rejected"
+
+test_case "JSON v1 renders to existing wire format"
+wire="$(tangle_render_json_decomposition_output "$valid")"
+if tangle_decomposition_wire_output_usable "$wire" && [[ "$wire" == *"2. [CODING] Implement"* && "$wire" == *"Files: src/app.ts"* && "$wire" == *"Creates: src/test.ts"* ]]; then test_pass; else test_fail "rendered wire output invalid"; fi
+
+test_case "materializer prefers JSON v1"
+if [[ "$(tangle_decomposition_source_format "$valid")" == json-v1 && "$(tangle_materialize_decomposition_output "$valid")" == "$wire" ]]; then test_pass; else test_fail "JSON v1 not primary"; fi
+
+test_case "fenced JSON is repaired deterministically"
+fenced=$'```json\n'"$valid"$'\n```'
+[[ "$(tangle_decomposition_source_format "$fenced")" == json-v1 ]] && test_pass || test_fail "fenced JSON not repaired"
+
+test_case "single JSON object surrounded by prose is repaired"
+wrapped=$'Here is the requested object.\n'"$valid"$'\nEnd of response.'
+tangle_decomposition_json_output_usable "$wrapped" && test_pass || test_fail "wrapped JSON not repaired"
+
+test_case "multiple JSON objects fail closed"
+tangle_decomposition_json_output_usable "$valid $valid" && test_fail "ambiguous JSON objects accepted" || test_pass
+
+test_case "missing required field fails schema validation"
+bad='{"schema_version":1,"subtasks":[{"id":1,"kind":"coding","title":"Bad","reads":[],"files":["src/a.ts"],"creates":[]}]}'
+tangle_decomposition_json_output_usable "$bad" && test_fail "missing task accepted" || test_pass
+
+test_case "reasoning write scopes fail closed"
+bad='{"schema_version":1,"subtasks":[{"id":1,"kind":"reasoning","title":"Bad","reads":[],"files":["src/a.ts"],"creates":[],"task":"Inspect."},{"id":2,"kind":"coding","title":"Good","reads":[],"files":["src/b.ts"],"creates":[],"task":"Edit."}]}'
+tangle_decomposition_json_output_usable "$bad" && test_fail "reasoning write scope accepted" || test_pass
+
+test_case "coding without write scope fails closed"
+bad='{"schema_version":1,"subtasks":[{"id":1,"kind":"coding","title":"Bad","reads":[],"files":[],"creates":[],"task":"Edit."}]}'
+tangle_decomposition_json_output_usable "$bad" && test_fail "coding task without write scope accepted" || test_pass
+
+test_case "ids must be contiguous from one"
+bad='{"schema_version":1,"subtasks":[{"id":2,"kind":"coding","title":"Bad","reads":[],"files":["src/a.ts"],"creates":[],"task":"Edit."}]}'
+tangle_decomposition_json_output_usable "$bad" && test_fail "noncontiguous id accepted" || test_pass
+
+test_case "glob paths are rejected by JSON v1 before downstream scope validation"
+bad='''{"schema_version":1,"subtasks":[{"id":1,"kind":"coding","title":"Bad glob","reads":["src/**"],"files":["src/app.ts"],"creates":[],"task":"Edit."}]}'''
+if tangle_decomposition_json_output_usable "$bad"; then test_fail "glob read scope accepted"; else test_pass; fi
+
+test_case "legacy wire is classified deprecated"
+legacy='1. [CODING] Legacy — Files: src/a.ts — Task: edit it'
+[[ "$(tangle_decomposition_source_format "$legacy")" == legacy-wire ]] && test_pass || test_fail "legacy wire classification wrong"
+
+test_case "legacy markdown remains compatibility fallback"
+legacy_md=$'### 1. [CODING] Legacy\n\n**Files:** `src/a.ts`\n\nImplement:\n- edit it'
+[[ "$(tangle_decomposition_source_format "$legacy_md")" == legacy-markdown ]] && test_pass || test_fail "legacy markdown compatibility lost"
+
+test_case "fallback validator accepts JSON without provider retry"
+marker="$TEST_TMP_DIR/second-provider"
+is_agent_available_v2() { return 0; }
+octopus_explicit_provider_override() { return 0; }
+octo_fallback_canonical_agent_spec() { printf "%s\n" "$1"; }
+run_agent_sync_fallback_chain() { local validator="${6:-}"; if "$validator" "$valid"; then printf "%s\n" "$valid"; return 0; fi; : > "$marker"; return 1; }
+out="$(tangle_run_decomposition_fallbacks primary fallback prompt 0)"
+if [[ ! -e "$marker" ]] && tangle_decomposition_wire_output_usable "$out"; then test_pass; else test_fail "JSON contract did not stop fallback"; fi
+
+test_summary

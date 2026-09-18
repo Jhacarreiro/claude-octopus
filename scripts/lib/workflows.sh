@@ -1856,6 +1856,80 @@ tangle_decomposition_wire_output_usable() {
 }
 
 
+tangle_decomposition_json_contract_guidance() {
+    cat <<'EOF'
+Return ONLY JSON matching Tangle decomposition schema v1. No Markdown fences, headings, or prose.
+Shape:
+{"schema_version":1,"subtasks":[{"id":1,"kind":"coding","title":"Short title","reads":[],"files":["relative/file.js"],"creates":[],"task":"Specific coding work"}]}
+Rules:
+- schema_version must be 1.
+- subtasks must contain 1-6 items with contiguous ids starting at 1.
+- kind is exactly "coding" or "reasoning".
+- reads, files, and creates are always JSON arrays of concrete file or directory paths; use [] when empty.
+- do not use glob/metacharacter scopes (`*`, `?`, `[`, `]`); use the concrete directory path instead (for example `app/widget`, not `app/widget/**`).
+- every coding subtask must have at least one files or creates entry.
+- reasoning subtasks must have empty files and creates arrays.
+- coding write scopes must be disjoint. Merge coding work that needs the same file or directory.
+- reads is read-only context and never grants write permission.
+- include at least one coding subtask and preserve the original deliverable.
+EOF
+}
+
+tangle_decomposition_json_payload() {
+    local raw="${1:-}"
+    command -v python3 >/dev/null 2>&1 || return 1
+    printf '%s\n' "$raw" | python3 "${BASH_SOURCE[0]%/*}/../tangle-decomposition-json-payload.py"
+}
+
+tangle_decomposition_json_output_usable() {
+    local raw="${1:-}" payload
+    command -v jq >/dev/null 2>&1 || return 1
+    payload="$(tangle_decomposition_json_payload "$raw")" || return 1
+    printf '%s\n' "$payload" | jq -e '
+      def nonempty: type == "string" and length > 0;
+      def pathstr: nonempty and test("^[A-Za-z0-9_.@%+/-]+$");
+      def strarr: type == "array" and all(.[]; pathstr) and ((unique|length) == length);
+      (type == "object") and
+      ((keys|sort) == (["schema_version","subtasks"]|sort)) and
+      (.schema_version == 1) and
+      (.subtasks|type == "array" and length >= 1 and length <= 6) and
+      ([.subtasks[].id] == [range(1; (.subtasks|length)+1)]) and
+      all(.subtasks[];
+        (type == "object") and
+        ((keys|sort) == (["creates","files","id","kind","reads","task","title"]|sort)) and
+        (.id|type == "number" and floor == . and . >= 1) and
+        (.kind == "coding" or .kind == "reasoning") and
+        (.title|nonempty) and (.task|nonempty) and
+        (.reads|strarr) and (.files|strarr) and (.creates|strarr) and
+        (if .kind == "coding" then ((.files|length)+(.creates|length) > 0) else ((.files|length)==0 and (.creates|length)==0) end)
+      ) and any(.subtasks[]; .kind == "coding")
+    ' >/dev/null 2>&1
+}
+
+tangle_render_json_decomposition_output() {
+    local raw="${1:-}" payload
+    tangle_decomposition_json_output_usable "$raw" || return 1
+    payload="$(tangle_decomposition_json_payload "$raw")" || return 1
+    printf '%s\n' "$payload" | jq -r '
+      def safe: gsub("\\s+";" ") | gsub(" — ";" | ") | gsub(" - ";" | ");
+      .subtasks[] |
+      ("\(.id). [\(.kind|ascii_upcase)] \(.title|safe)") +
+      (if (.reads|length)>0 then " — Reads: " + (.reads|join(", ")) else "" end) +
+      (if (.files|length)>0 then " — Files: " + (.files|join(", ")) else "" end) +
+      (if (.creates|length)>0 then " — Creates: " + (.creates|join(", ")) else "" end) +
+      " — Task: " + (.task|safe)
+    '
+}
+
+tangle_decomposition_source_format() {
+    local raw="${1:-}" normalized
+    if tangle_decomposition_json_output_usable "$raw" 2>/dev/null; then printf '%s\n' json-v1; return 0; fi
+    if tangle_decomposition_wire_output_usable "$raw"; then printf '%s\n' legacy-wire; return 0; fi
+    normalized="$(tangle_normalize_decomposition_output "$raw" 2>/dev/null)" || { printf '%s\n' invalid; return 1; }
+    if tangle_decomposition_wire_output_usable "$normalized"; then printf '%s\n' legacy-markdown; return 0; fi
+    printf '%s\n' invalid; return 1
+}
+
 tangle_normalize_decomposition_output() {
     local raw="${1:-}"
     command -v python3 >/dev/null 2>&1 || return 1
@@ -1863,11 +1937,18 @@ tangle_normalize_decomposition_output() {
 }
 
 tangle_materialize_decomposition_output() {
-    local raw="${1:-}" normalized
+    local raw="${1:-}" materialized normalized
+    if tangle_decomposition_json_output_usable "$raw" 2>/dev/null; then
+        materialized="$(tangle_render_json_decomposition_output "$raw" 2>/dev/null)" || return 1
+        tangle_decomposition_wire_output_usable "$materialized" || return 1
+        printf '%s\n' "$materialized"
+        return 0
+    fi
     if tangle_decomposition_wire_output_usable "$raw"; then
         printf '%s\n' "$raw"
         return 0
     fi
+    # Deprecated compatibility path. JSON v1 is the provider contract.
     normalized="$(tangle_normalize_decomposition_output "$raw" 2>/dev/null)" || return 1
     tangle_decomposition_wire_output_usable "$normalized" || return 1
     printf '%s\n' "$normalized"
@@ -1931,9 +2012,13 @@ tangle_run_decomposition_fallbacks() {
         "$primary_agent" "$prompt" "$timeout_secs" researcher tangle \
         tangle_decomposition_output_usable default "$preferred_fallback"); then
         if materialized=$(tangle_materialize_decomposition_output "$candidate" 2>/dev/null); then
-            if ! tangle_decomposition_wire_output_usable "$candidate"; then
-                log INFO "Normalized structured Markdown decomposition locally before provider fallback"
-            fi
+            local source_format
+            source_format="$(tangle_decomposition_source_format "$candidate" 2>/dev/null || printf invalid)"
+            case "$source_format" in
+                json-v1) log INFO "Accepted Tangle decomposition JSON v1" ;;
+                legacy-markdown) log WARN "Deprecated Tangle Markdown decomposition compatibility path used" ;;
+                legacy-wire) log WARN "Deprecated Tangle wire decomposition compatibility path used" ;;
+            esac
             printf '%s\n' "$materialized"
         else
             # Preserve the fallback-chain validator contract for callers/tests
@@ -1951,23 +2036,17 @@ tangle_reformat_decomposition() {
     local previous_decomposition="$2"
     local reason="${3:-not parseable}"
     local repo_file_map="${4:-}"
-    local reformat_prompt="Reformat the previous Octopus task decomposition. Do not add analysis.
+    local reformat_prompt="Repair the previous Octopus task decomposition into Tangle JSON schema v1. Do not add analysis or reconsider the task.
 
 $(tangle_read_scope_guidance)
 
-Required output format, exactly one subtask per line:
-1. [CODING] Short title — Files: relative/file.js, another/file.js — Task: specific coding work
-2. [REASONING] Short title — Task: specific reasoning/review work
+$(tangle_decomposition_json_contract_guidance)
 
-Rules:
-- Output only numbered lines. No Markdown headings, no code fences, no prose before or after.
-- Every [CODING] line must include a same-line 'Files:' clause.
+Additional rules:
 - Use relative file or directory scopes from the repository file map when possible.
 - Prefer concrete paths from the repository file map; invented/generic paths will be resolved against the actual worktree before dispatch.
 - New files should be explicit filenames whose parent directory already exists, or root-level files; avoid creating new source trees unless explicitly required.
-- Coding write scopes must be disjoint. If scopes overlap, merge those items into one [CODING] line.
-- If all coding work touches the same files, output one [CODING] line with those files rather than pretending it can be parallelized.
-- Keep 1-6 total subtasks.
+- If all coding work touches the same files, output one coding subtask rather than pretending it can be parallelized.
 
 ${repo_file_map}
 
@@ -2025,7 +2104,9 @@ tangle_redecompose() {
 
 $(tangle_read_scope_guidance)
 
-Return only numbered lines. Every [CODING] line must include Files: and/or Creates:, Reads: is read-only, coding scopes must be disjoint, and preserve the original deliverable.
+Return a fresh decomposition using Tangle JSON schema v1.
+
+$(tangle_decomposition_json_contract_guidance)
 
 ${repo_file_map}
 Design-review resolution:
@@ -2049,9 +2130,13 @@ ${previous_output}"
         run_agent_sync_fallback_chain "$primary" "$prompt" 0 "researcher" "tangle" \
         tangle_decomposition_output_usable default "$fallback"); then
         if materialized=$(tangle_materialize_decomposition_output "$candidate" 2>/dev/null); then
-            if ! tangle_decomposition_wire_output_usable "$candidate"; then
-                log INFO "Normalized structured Markdown redecomposition locally before returning"
-            fi
+            local source_format
+            source_format="$(tangle_decomposition_source_format "$candidate" 2>/dev/null || printf invalid)"
+            case "$source_format" in
+                json-v1) log INFO "Accepted Tangle redecomposition JSON v1" ;;
+                legacy-markdown) log WARN "Deprecated Tangle Markdown redecomposition compatibility path used" ;;
+                legacy-wire) log WARN "Deprecated Tangle wire redecomposition compatibility path used" ;;
+            esac
             printf '%s\n' "$materialized"
         else
             # Preserve the fallback-chain validator contract for callers/tests
@@ -4377,8 +4462,8 @@ $(tangle_read_scope_guidance)
 Each subtask should be:
 - Self-contained and independently verifiable
 - Clear about inputs and expected outputs
-- Assignable to either a coding agent [CODING] or reasoning agent [REASONING]
-- For every [CODING] subtask, include explicit write scope using Files:, Creates:, or both; Reads: is read-only context
+- Assignable to either a coding agent or reasoning agent
+- For every coding subtask, include explicit write scope using the files array, creates array, or both; reads is read-only context
 - Coding write scopes must be disjoint. If two subtasks need the same file or directory, merge them into one [CODING] subtask instead of splitting them.
 - Do not substitute internal/supporting changes for a requested externally observable deliverable.
 
@@ -4389,11 +4474,7 @@ Design-review resolution (planning guidance; original task remains authoritative
 ${design_review_synthesis:-[none]}
 Task: $resolved_prompt
 
-Output only numbered subtask lines, with no headings, no analysis, no Markdown fences, and no prose before or after.
-Required format:
-1. [CODING] Short title — Reads: reference/path/ — Files: relative/file.js — Creates: new/path/if-needed — Task: specific coding work
-2. [REASONING] Short title — Task: specific reasoning work
-Every [CODING] line must include at least one same-line Files: or Creates: clause."
+$(tangle_decomposition_json_contract_guidance)"
 
     # Tangle decomposition agents are overridable (OCTOPUS_TANGLE_DECOMPOSE_AGENT,
     # OCTOPUS_TANGLE_DECOMPOSE_FALLBACK_AGENT, OCTOPUS_TANGLE_AGENT). Override only

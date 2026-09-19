@@ -29,12 +29,17 @@ def extract(raw: str):
 def nonempty(v): return isinstance(v,str) and bool(v.strip())
 def strarr(v,minimum=0,maximum=20): return isinstance(v,list) and minimum<=len(v)<=maximum and all(nonempty(x) for x in v)
 def risks(v): return isinstance(v,list) and len(v)<=20 and all(isinstance(x,dict) and set(x)=={"risk","mitigation"} and nonempty(x["risk"]) and nonempty(x["mitigation"]) for x in v)
+def schema_version_valid(v): return not isinstance(v,bool) and isinstance(v,(int,float)) and v==1
 def seat_valid(o):
-    return isinstance(o,dict) and set(o)=={"schema_version","approach","dependencies","risks","testing","integration"} and type(o["schema_version"]) is int and o["schema_version"]==1 and strarr(o["approach"],1,5) and strarr(o["dependencies"]) and risks(o["risks"]) and strarr(o["testing"]) and strarr(o["integration"])
+    return isinstance(o,dict) and set(o)=={"schema_version","approach","dependencies","risks","testing","integration"} and schema_version_valid(o["schema_version"]) and strarr(o["approach"],1,5) and strarr(o["dependencies"]) and risks(o["risks"]) and strarr(o["testing"]) and strarr(o["integration"])
 def synthesis_valid(o):
-    return isinstance(o,dict) and set(o)=={"schema_version","conflicts","gaps","resolution","risks","decisions"} and type(o["schema_version"]) is int and o["schema_version"]==1 and strarr(o["conflicts"]) and strarr(o["gaps"]) and nonempty(o["resolution"]) and risks(o["risks"]) and strarr(o["decisions"])
+    return isinstance(o,dict) and set(o)=={"schema_version","conflicts","gaps","resolution","risks","decisions"} and schema_version_valid(o["schema_version"]) and strarr(o["conflicts"]) and strarr(o["gaps"]) and nonempty(o["resolution"]) and risks(o["risks"]) and strarr(o["decisions"])
 def compact(s): return re.sub(r"\s+"," ",s.strip())
-def canonical(o): return json.dumps(o,ensure_ascii=False,separators=(",",":"))
+def canonical(o):
+    if isinstance(o,dict) and "schema_version" in o:
+        o=dict(o)
+        o["schema_version"]=1
+    return json.dumps(o,ensure_ascii=False,separators=(",",":"))
 def main():
     mode=sys.argv[1] if len(sys.argv)>1 else "seat"
     raw=sys.stdin.read()

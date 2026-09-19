@@ -27,6 +27,13 @@ test_case "boolean schema_version is rejected"
 bool_seat='''{"schema_version":true,"approach":["Keep boundaries explicit."],"dependencies":[],"risks":[],"testing":[],"integration":[]}'''
 if design_review_approach_valid "$bool_seat"; then test_fail "boolean schema_version accepted"; else test_pass; fi
 
+test_case "numeric schema_version is accepted and canonicalized"
+numeric_seat='''{"schema_version":1.0,"approach":["Keep boundaries explicit."],"dependencies":[],"risks":[],"testing":[],"integration":[]}'''
+numeric_synthesis='''{"schema_version":1.0,"conflicts":[],"gaps":[],"resolution":"Keep boundaries explicit.","risks":[],"decisions":[]}'''
+canonical_seat="$(design_review_materialize_seat "$numeric_seat")"
+canonical_synthesis="$(design_review_materialize_synthesis "$numeric_synthesis")"
+if jq -e '(.schema_version == 1) and (.schema_version|type == "number")' <<<"$canonical_seat" >/dev/null && jq -e '(.schema_version == 1) and (.schema_version|type == "number")' <<<"$canonical_synthesis" >/dev/null; then test_pass; else test_fail "numeric schema_version was not canonicalized"; fi
+
 test_case "schema and helper agree on array maximum"
 long_seat='''{"schema_version":1,"approach":["A"],"dependencies":["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21"],"risks":[],"testing":[],"integration":[]}'''
 if design_review_approach_valid "$long_seat"; then test_fail "21-item array accepted"; else test_pass; fi

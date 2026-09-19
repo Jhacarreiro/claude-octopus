@@ -1885,7 +1885,7 @@ tangle_decomposition_json_output_usable() {
     local raw="${1:-}" payload
     command -v jq >/dev/null 2>&1 || return 1
     payload="$(tangle_decomposition_json_payload "$raw")" || return 1
-    printf '%s\n' "$payload" | jq -e '
+    if ! printf '%s\n' "$payload" | jq -e '
       def nonempty: type == "string" and length > 0;
       def pathstr: nonempty and test("^[A-Za-z0-9_.@%+/-]+$");
       def strarr: type == "array" and all(.[]; pathstr) and ((unique|length) == length);
@@ -1903,7 +1903,17 @@ tangle_decomposition_json_output_usable() {
         (.reads|strarr) and (.files|strarr) and (.creates|strarr) and
         (if .kind == "coding" then ((.files|length)+(.creates|length) > 0) else ((.files|length)==0 and (.creates|length)==0) end)
       ) and any(.subtasks[]; .kind == "coding")
-    ' >/dev/null 2>&1
+    ' >/dev/null 2>&1; then
+        return 1
+    fi
+
+    # Apply the shared write-scope policy to JSON files and creates entries.
+    # This rejects absolute paths, traversal, and protected .git paths while
+    # preserving valid root-level filenames.
+    while IFS= read -r scope; do
+        [[ -n "$scope" ]] || continue
+        tangle_scope_is_safe_relative_path "$scope" || return 1
+    done < <(printf '%s\n' "$payload" | jq -r '.subtasks[] | .files[], .creates[]')
 }
 
 tangle_render_json_decomposition_output() {

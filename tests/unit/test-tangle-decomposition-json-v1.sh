@@ -60,6 +60,28 @@ test_case "glob paths are rejected by JSON v1 before downstream scope validation
 bad='''{"schema_version":1,"subtasks":[{"id":1,"kind":"coding","title":"Bad glob","reads":["src/**"],"files":["src/app.ts"],"creates":[],"task":"Edit."}]}'''
 if tangle_decomposition_json_output_usable "$bad"; then test_fail "glob read scope accepted"; else test_pass; fi
 
+test_case "unsafe JSON write scopes fail closed"
+unsafe_scopes_rejected=true
+for field in files creates; do
+  for scope in "/tmp/out.ts" "../out.ts" "src/../out.ts" ".git/hooks/pre-commit" ".GIT/hooks/pre-commit"; do
+    if [[ "$field" == files ]]; then
+      bad=$(printf '{"schema_version":1,"subtasks":[{"id":1,"kind":"coding","title":"Bad scope","reads":[],"files":["%s"],"creates":[],"task":"Edit."}]}' "$scope")
+    else
+      bad=$(printf '{"schema_version":1,"subtasks":[{"id":1,"kind":"coding","title":"Bad scope","reads":[],"files":[],"creates":["%s"],"task":"Edit."}]}' "$scope")
+    fi
+    if tangle_decomposition_json_output_usable "$bad"; then
+      test_fail "unsafe $field scope accepted: $scope"
+      unsafe_scopes_rejected=false
+      break 2
+    fi
+  done
+done
+if [[ "$unsafe_scopes_rejected" == true ]]; then test_pass; fi
+
+test_case "root-level JSON write scopes remain valid"
+valid_root='{"schema_version":1,"subtasks":[{"id":1,"kind":"coding","title":"Update README","reads":[],"files":["README.md"],"creates":[],"task":"Update the root README."}]}'
+if tangle_decomposition_json_output_usable "$valid_root"; then test_pass; else test_fail "root-level write scope rejected"; fi
+
 test_case "legacy wire is classified deprecated"
 legacy='1. [CODING] Legacy — Files: src/a.ts — Task: edit it'
 [[ "$(tangle_decomposition_source_format "$legacy")" == legacy-wire ]] && test_pass || test_fail "legacy wire classification wrong"

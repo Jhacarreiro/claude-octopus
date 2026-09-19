@@ -49,7 +49,14 @@
           "path": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^[A-Za-z0-9_.@%+/-]+$"
+            "pattern": "^(?:\\./)?(?!\\.{1,2}(?:/|$)|.*?/\\.{1,2}(?:/|$))[A-Za-z0-9_.@%+/-]+$",
+            "allOf": [
+              {
+                "not": {
+                  "pattern": "(^|/)[.]([Gg][Ii][Tt])($|/)"
+                }
+              }
+            ]
           },
           "reason": {
             "type": "string",

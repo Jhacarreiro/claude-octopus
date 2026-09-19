@@ -45,6 +45,22 @@ test_case "scope action rejects glob paths"
 bad='{"schema_version":1,"verdict":"fail","reasons":["Needs scope."],"scope_review":[{"action":"add_write","path":"src/**","reason":"Too broad."}]}'
 tangle_adequacy_json_output_usable "$bad" && test_fail "glob scope accepted" || test_pass
 
+test_case "scope action rejects dot-segment traversal"
+bad='{"schema_version":1,"verdict":"fail","reasons":["Needs scope."],"scope_review":[{"action":"add_write","path":"src/../.env","reason":"Unsafe path."}]}'
+tangle_adequacy_json_output_usable "$bad" && test_fail "dot-segment path accepted" || test_pass
+
+test_case "scope action permits a normalized leading dot slash"
+good='{"schema_version":1,"verdict":"fail","reasons":["Needs scope."],"scope_review":[{"action":"add_write","path":"./src/a.ts","reason":"Concrete path."}]}'
+tangle_adequacy_json_output_usable "$good" && test_pass || test_fail "leading dot slash rejected"
+
+test_case "scope action rejects protected git paths"
+bad='{"schema_version":1,"verdict":"fail","reasons":["Needs scope."],"scope_review":[{"action":"add_write","path":".GIT/hooks/pre-commit","reason":"Protected path."}]}'
+tangle_adequacy_json_output_usable "$bad" && test_fail "protected git path accepted" || test_pass
+
+test_case "schema version rejects JSON booleans"
+bad='{"schema_version":true,"verdict":"pass","reasons":["Looks good."],"scope_review":[]}'
+tangle_adequacy_json_output_usable "$bad" && test_fail "boolean schema version accepted" || test_pass
+
 test_case "unknown fields fail closed"
 bad='{"schema_version":1,"verdict":"pass","reasons":["Ok."],"scope_review":[],"extra":true}'
 tangle_adequacy_json_output_usable "$bad" && test_fail "unknown field accepted" || test_pass
@@ -83,5 +99,13 @@ status=0
 enforce_context_budget "small" architect codex tangle >/dev/null 2>&1 || status=$?
 unset OCTOPUS_CONTEXT_BUDGET OCTOPUS_TANGLE_ADEQUACY_CONTEXT_BUDGET_RATIO OCTOPUS_OVERSIZE_STRATEGY
 [[ "$status" -ne 0 ]] && test_pass || test_fail "ratio above 100 was accepted"
+
+test_case "adequacy fallback failure status is preserved"
+saved_fallback_chain_function="$(declare -f run_agent_sync_fallback_chain)"
+run_agent_sync_fallback_chain() { return 37; }
+status=0
+tangle_decomposition_adequacy_review "Original task" "Proposed decomposition" >/dev/null 2>&1 || status=$?
+eval "$saved_fallback_chain_function"
+[[ "$status" -eq 37 ]] && test_pass || test_fail "fallback failure status changed to $status"
 
 test_summary

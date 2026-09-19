@@ -2251,8 +2251,10 @@ ${subtasks}"
         tangle_decomposition_adequacy_response_valid default "$fallback"); then
         tangle_materialize_adequacy_response "$candidate"
         return $?
+    else
+        local fallback_status=$?
+        return "$fallback_status"
     fi
-    return $?
 }
 
 tangle_reconsideration_decisions() {

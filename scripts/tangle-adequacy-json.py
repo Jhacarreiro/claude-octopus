@@ -5,6 +5,18 @@ import json, re, sys
 PATH_RE=re.compile(r"^[A-Za-z0-9_.@%+/-]+$")
 ACTIONS={"move_to_reads","remove_write","add_write"}
 
+def safe_relative_path(value:str):
+    normalized=value[2:] if value.startswith("./") else value
+    if normalized.endswith("/"):
+        normalized=normalized[:-1]
+    if not normalized or not normalized.strip() or not PATH_RE.fullmatch(normalized):
+        return False
+    if normalized.startswith("/") or any(part in {".",".."} for part in normalized.split("/")):
+        return False
+    if any(part.lower()==".git" for part in normalized.split("/")):
+        return False
+    return True
+
 def extract(raw:str):
     raw=raw.strip()
     if raw.startswith("```"):
@@ -32,14 +44,14 @@ def extract(raw:str):
 
 def valid(obj):
     if not isinstance(obj,dict) or set(obj)!={"schema_version","verdict","reasons","scope_review"}: return False
-    if obj["schema_version"]!=1 or obj["verdict"] not in {"pass","fail"}: return False
+    if isinstance(obj["schema_version"], bool) or obj["schema_version"]!=1 or obj["verdict"] not in {"pass","fail"}: return False
     reasons=obj["reasons"]; review=obj["scope_review"]
     if not isinstance(reasons,list) or not reasons or not all(isinstance(x,str) and x.strip() for x in reasons): return False
     if not isinstance(review,list): return False
     for item in review:
         if not isinstance(item,dict) or set(item)!={"action","path","reason"}: return False
         if item["action"] not in ACTIONS: return False
-        if not isinstance(item["path"],str) or not PATH_RE.fullmatch(item["path"]) or any(x in item["path"] for x in "*?[]"): return False
+        if not isinstance(item["path"],str) or not safe_relative_path(item["path"]) or any(x in item["path"] for x in "*?[]"): return False
         if not isinstance(item["reason"],str) or not item["reason"].strip(): return False
     if obj["verdict"]=="pass" and review: return False
     if obj["verdict"]=="fail" and not review and not reasons: return False

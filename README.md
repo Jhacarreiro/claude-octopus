@@ -823,6 +823,10 @@ MIT — see [LICENSE](LICENSE)
 
 Design-review seats and synthesis use versioned JSON v1 contracts for all model-to-model data. Historical free text is accepted only through a deprecated compatibility wrapper that materializes canonical JSON before downstream use. See [Design review JSON contracts v1](docs/design-review-json-contract.md) and the schemas in `schemas/design-review-*-v1.schema.json`.
 
+### Tangle reconsideration JSON contract
+
+Planner reconsideration uses a versioned JSON v1 contract: explicit accept/reject decisions for every adequacy scope recommendation plus a nested decomposition JSON v1 object. The historical `DECISIONS:/DECOMPOSITION:` response remains a deprecated compatibility fallback. See [Tangle reconsideration JSON v1](docs/tangle-reconsideration-contract.md) and [`schemas/tangle-reconsideration-v1.schema.json`](schemas/tangle-reconsideration-v1.schema.json).
+
 ### Tangle adequacy review JSON contract
 
 Tangle adequacy review uses a versioned JSON v1 contract and renders validated reviews into the historical internal text format consumed by planner reconsideration. The textual `VERDICT:/REASONS:/SCOPE_REVIEW:` form remains a deprecated compatibility fallback. See [Tangle adequacy review JSON v1](docs/tangle-adequacy-contract.md) and [`schemas/tangle-adequacy-v1.schema.json`](schemas/tangle-adequacy-v1.schema.json).

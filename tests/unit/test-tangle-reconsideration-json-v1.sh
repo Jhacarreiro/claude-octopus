@@ -47,6 +47,10 @@ export TANGLE_RECONSIDERATION_EXPECTED_SCOPE_REVIEW_JSON='[{"action":"add_write"
 if tangle_reconsideration_json_output_usable "$bad_glob"; then test_fail "glob decision accepted"; else test_pass; fi
 export TANGLE_RECONSIDERATION_EXPECTED_SCOPE_REVIEW_JSON="$expected"
 
+test_case "whitespace-only decision reason fails closed"
+blank_reason='''{"schema_version":1,"decisions":[{"action":"add_write","path":"app/build.gradle.kts","decision":"accept","reason":"   "},{"action":"move_to_reads","path":"docs/plan.md","decision":"accept","reason":"Context."}],"decomposition":{"schema_version":1,"subtasks":[{"id":1,"kind":"coding","title":"Implement","reads":[],"files":["app/build.gradle.kts"],"creates":[],"task":"Implement."}]}}'''
+if tangle_reconsideration_json_output_usable "$blank_reason"; then test_fail "blank reason accepted"; else test_pass; fi
+
 test_case "fenced JSON is accepted"
 fenced=$'```json\n'"$valid"$'\n```'
 if tangle_reconsideration_response_valid "$fenced"; then test_pass; else test_fail "fenced JSON rejected"; fi
@@ -62,14 +66,16 @@ probe=$(printf 'x%.0s' {1..30000})
 unset OCTOPUS_TANGLE_RECONSIDERATION_CONTEXT_BUDGET_RATIO
 base=0; enforce_context_budget "$probe" researcher codex tangle >/dev/null 2>&1 || base=$?
 export OCTOPUS_TANGLE_RECONSIDERATION_CONTEXT_BUDGET_RATIO=90
+unmarked=0; enforce_context_budget "$probe" researcher codex tangle >/dev/null 2>&1 || unmarked=$?
+export TANGLE_RECONSIDERATION_ACTIVE=1
 wide=0; enforce_context_budget "$probe" researcher codex tangle >/dev/null 2>&1 || wide=$?
-unset OCTOPUS_TANGLE_RECONSIDERATION_CONTEXT_BUDGET_RATIO OCTOPUS_CONTEXT_BUDGET OCTOPUS_CONTEXT_OUTPUT_RESERVE_TOKENS OCTOPUS_CONTEXT_OVERHEAD_TOKENS OCTOPUS_OVERSIZE_STRATEGY
-if [[ "$base" -ne 0 && "$wide" -eq 0 ]]; then test_pass; else test_fail "reconsideration budget not scoped correctly: base=$base wide=$wide"; fi
+unset TANGLE_RECONSIDERATION_ACTIVE OCTOPUS_TANGLE_RECONSIDERATION_CONTEXT_BUDGET_RATIO OCTOPUS_CONTEXT_BUDGET OCTOPUS_CONTEXT_OUTPUT_RESERVE_TOKENS OCTOPUS_CONTEXT_OVERHEAD_TOKENS OCTOPUS_OVERSIZE_STRATEGY
+if [[ "$base" -ne 0 && "$unmarked" -ne 0 && "$wide" -eq 0 ]]; then test_pass; else test_fail "reconsideration budget not scoped correctly: base=$base unmarked=$unmarked wide=$wide"; fi
 
 test_case "invalid reconsideration ratio fails closed"
-export OCTOPUS_CONTEXT_BUDGET=12000 OCTOPUS_TANGLE_RECONSIDERATION_CONTEXT_BUDGET_RATIO=101 OCTOPUS_OVERSIZE_STRATEGY=fail
+export OCTOPUS_CONTEXT_BUDGET=12000 OCTOPUS_TANGLE_RECONSIDERATION_CONTEXT_BUDGET_RATIO=101 OCTOPUS_OVERSIZE_STRATEGY=fail TANGLE_RECONSIDERATION_ACTIVE=1
 status=0; enforce_context_budget small researcher codex tangle >/dev/null 2>&1 || status=$?
-unset OCTOPUS_CONTEXT_BUDGET OCTOPUS_TANGLE_RECONSIDERATION_CONTEXT_BUDGET_RATIO OCTOPUS_OVERSIZE_STRATEGY
+unset OCTOPUS_CONTEXT_BUDGET OCTOPUS_TANGLE_RECONSIDERATION_CONTEXT_BUDGET_RATIO OCTOPUS_OVERSIZE_STRATEGY TANGLE_RECONSIDERATION_ACTIVE
 [[ "$status" -ne 0 ]] && test_pass || test_fail "ratio above 100 accepted"
 
 unset TANGLE_RECONSIDERATION_EXPECTED_SCOPE_REVIEW_JSON

@@ -2365,6 +2365,7 @@ ${adequacy_review}"
         return 1
     fi
     if response=$(TANGLE_RECONSIDERATION_EXPECTED_SCOPE_REVIEW_JSON="$expected_scope_review" \
+        TANGLE_RECONSIDERATION_ACTIVE=1 \
         OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-reconsideration" \
         OCTOPUS_TANGLE_RECONSIDERATION_CONTEXT_BUDGET_RATIO="${OCTOPUS_TANGLE_RECONSIDERATION_CONTEXT_BUDGET_RATIO:-90}" \
         run_agent_sync_fallback_chain "$primary" "$prompt" 0 "researcher" "tangle" \

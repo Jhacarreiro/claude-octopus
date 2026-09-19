@@ -2175,7 +2175,24 @@ ${previous_output}"
     fi
 }
 
-tangle_decomposition_adequacy_response_valid() {
+tangle_adequacy_json_contract_guidance() {
+    cat <<'EOF'
+Return ONLY JSON matching Tangle adequacy schema v1:
+{"schema_version":1,"verdict":"pass|fail","reasons":["..."],"scope_review":[{"action":"move_to_reads|remove_write|add_write","path":"repo/relative/path","reason":"..."}]}
+Rules:
+- reasons is a non-empty array of concise strings.
+- verdict=pass requires scope_review=[]; verdict=fail may include actionable scope_review entries.
+- path is one concrete repository-relative path; no globs or prose.
+- do not emit Markdown, prose before/after JSON, or legacy VERDICT:/REASONS:/SCOPE_REVIEW: text.
+EOF
+}
+
+tangle_adequacy_json_output_usable() {
+    command -v python3 >/dev/null 2>&1 || return 1
+    printf '%s\n' "${1:-}" | python3 "${BASH_SOURCE[0]%/*}/../tangle-adequacy-json.py" >/dev/null
+}
+
+tangle_adequacy_legacy_response_valid() {
     local response="${1:-}" verdict verdict_count
     verdict_count=$(printf '%s\n' "$response" | grep -Ec '^[[:space:]]*VERDICT:' || true)
     [[ "$verdict_count" -eq 1 ]] || return 1
@@ -2185,13 +2202,31 @@ tangle_decomposition_adequacy_response_valid() {
     grep -Eq '^[[:space:]]*SCOPE_REVIEW:' <<< "$response"
 }
 
+tangle_materialize_adequacy_response() {
+    local response="${1:-}"
+    if tangle_adequacy_json_output_usable "$response"; then
+        printf '%s\n' "$response" | python3 "${BASH_SOURCE[0]%/*}/../tangle-adequacy-json.py" render
+        return $?
+    fi
+    if tangle_adequacy_legacy_response_valid "$response"; then
+        log WARN "Deprecated Tangle textual adequacy compatibility path used"
+        printf '%s\n' "$response"
+        return 0
+    fi
+    return 1
+}
+
+tangle_decomposition_adequacy_response_valid() {
+    tangle_materialize_adequacy_response "${1:-}" >/dev/null
+}
+
 tangle_decomposition_adequacy_review() {
     local original_task="$1" subtasks="$2" repo_file_map="${3:-}" design_resolution="${4:-}" planner_decisions="${5:-}"
     local prompt="Review whether this decomposition can materialize the original deliverable. Check coverage, scope coherence, artifact creation, and scope discipline. Reads: never grants write permission.
 
 $(tangle_read_scope_guidance)
 
-Return exactly VERDICT: PASS or FAIL, REASONS:, and SCOPE_REVIEW: NONE or actionable MOVE_TO_READS/REMOVE_WRITE/ADD_WRITE lines.
+$(tangle_adequacy_json_contract_guidance)
 
 ${repo_file_map}
 Design-review resolution: ${design_resolution:-[none]}
@@ -2209,9 +2244,15 @@ ${subtasks}"
         log ERROR "Tangle decomposition adequacy review requires the configured fallback-chain engine"
         return 1
     fi
-    OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-adequacy" \
+    local candidate
+    if candidate=$(OCTOPUS_UNBOUNDED_EXECUTION_SUPERVISED="tangle-decomposition-adequacy" \
+        OCTOPUS_TANGLE_ADEQUACY_CONTEXT_BUDGET_RATIO="${OCTOPUS_TANGLE_ADEQUACY_CONTEXT_BUDGET_RATIO:-80}" \
         run_agent_sync_fallback_chain "$primary" "$prompt" 0 "architect" "tangle" \
-        tangle_decomposition_adequacy_response_valid default "$fallback"
+        tangle_decomposition_adequacy_response_valid default "$fallback"); then
+        tangle_materialize_adequacy_response "$candidate"
+        return $?
+    fi
+    return $?
 }
 
 tangle_reconsideration_decisions() {

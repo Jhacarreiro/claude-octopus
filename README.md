@@ -819,6 +819,10 @@ MIT — see [LICENSE](LICENSE)
   <a href="https://github.com/nyldn">nyldn</a> | MIT License | <a href="https://www.reddit.com/r/ClaudeOctopus/">r/ClaudeOctopus</a> | <a href="https://github.com/nyldn/claude-octopus/issues">Report Issues</a>
 </p>
 
+### Tangle adequacy review JSON contract
+
+Tangle adequacy review uses a versioned JSON v1 contract and renders validated reviews into the historical internal text format consumed by planner reconsideration. The textual `VERDICT:/REASONS:/SCOPE_REVIEW:` form remains a deprecated compatibility fallback. See [Tangle adequacy review JSON v1](docs/tangle-adequacy-contract.md) and [`schemas/tangle-adequacy-v1.schema.json`](schemas/tangle-adequacy-v1.schema.json).
+
 ### Tangle decomposition JSON contract
 
 Tangle decomposition uses a versioned JSON v1 provider contract and renders validated JSON into the existing internal wire format. The historical wire/Markdown formats remain deprecated compatibility fallbacks during migration. See [Tangle decomposition JSON contract](docs/tangle-decomposition-contract.md) and [`schemas/tangle-decomposition-v1.schema.json`](schemas/tangle-decomposition-v1.schema.json).

@@ -873,7 +873,7 @@ EOF
         if human_synthesis="$(design_review_json_helper human-synthesis "$synthesis" 2>/dev/null)"; then
             sed -n '1,20p' <<< "$human_synthesis"
         else
-            log INFO "$synthesis"
+            log INFO "$(sed -n '1,20p' <<< "$synthesis")"
         fi
         echo ""
 

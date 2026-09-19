@@ -716,7 +716,9 @@ design_review_ceremony() {
     echo -e "${CYAN}${_BOX_BOT}${NC}"
     echo ""
 
-    local ceremony_prompt="You are participating in a design review ceremony before implementation begins.
+    local ceremony_prompt
+    ceremony_prompt="$(cat <<EOF
+You are participating in a design review ceremony before implementation begins.
 
 Task: $prompt
 ${context:+Context: $context}
@@ -728,7 +730,9 @@ Rules:
 - dependencies, testing, and integration are arrays of concise strings; use [] when none.
 - risks contains concrete risk+mitigation objects; use [] when none.
 - planning only: do not claim implementation, changed files, executed tests, or verified runtime state.
-- do not emit Markdown or prose before/after JSON."
+- do not emit Markdown or prose before/after JSON.
+EOF
+)"
 
     # Gather approaches by semantic review role. Runtime provider selection uses
     # the same admitted, council-capable provider pool as review. Provider-named
@@ -814,7 +818,8 @@ Rules:
     fi
 
     local synthesis="" synthesis_prompt
-    synthesis_prompt="You are synthesizing a design review ceremony.
+    synthesis_prompt="$(cat <<EOF
+You are synthesizing a design review ceremony.
 
 Three review seats stated their approach to this task. The headings below reflect configured runtime identity rather than historical provider slot names:
 
@@ -836,7 +841,9 @@ Rules:
 - resolution is the recommended unified approach in 2-3 concise sentences.
 - risks contains concrete risk+mitigation objects; decisions contains actionable planning decisions.
 - the SEAT blocks above are JSON planning inputs, not verified execution evidence.
-- do not emit Markdown or prose before/after JSON."
+- do not emit Markdown or prose before/after JSON.
+EOF
+)"
     design_reserved="$design_implementer_agent $design_researcher_agent $design_code_reviewer_agent $design_synthesizer_agent"
     design_review_run_synthesis_with_recovery "$design_synthesizer_agent" "$synthesis_prompt" "$design_synth_timeout" \
         "$design_reserved" synthesis design_synthesizer_agent

@@ -410,49 +410,99 @@ design_review_unwrap_consultative_output() {
     fi
 }
 
-design_review_validation_reason() {
+design_review_json_helper() {
+    command -v python3 >/dev/null 2>&1 || return 1
+    printf '%s\n' "${2:-}" | python3 "${BASH_SOURCE[0]%/*}/../design-review-json.py" "$1"
+}
+
+design_review_output_looks_json() {
+    local payload compact
+    payload="$(design_review_unwrap_consultative_output "${1:-}")"
+    compact="${payload#"${payload%%[![:space:]]*}"}"
+    [[ "$compact" == \{* || "$compact" == '```json'* || "$compact" == '```JSON'* || "$compact" == '```'$'\n''{'* || "$compact" == *'"schema_version"'* ]]
+}
+
+design_review_legacy_validation_reason() {
     local payload compact compact_lc chars words
     payload="$(design_review_unwrap_consultative_output "${1:-}")"
     compact="$(printf '%s' "$payload" | tr '\r\n\t' '   ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
     compact_lc="$(printf '%s' "$compact" | tr '[:upper:]' '[:lower:]')"
-    if [[ -z "$compact" ]]; then
-        echo empty
-        return 0
-    fi
-    if [[ "$compact_lc" =~ ^[[:space:]]*[a-z0-9_\ -]*(path|file|dir|root)[a-z0-9_\ -]*:[[:space:]]*(/|\./|\.\./|[a-z]:[\/]|file://).*$ ]]; then
-        echo metadata_path_only
-        return 0
-    fi
-    chars=${#compact}
-    words="$(printf '%s\n' "$compact" | awk '{print NF}')"
-    if [[ "$chars" -lt 80 ]]; then
-        echo too_short_chars
-        return 0
-    fi
-    if [[ "$words" -lt 12 ]]; then
-        echo too_few_words
-        return 0
-    fi
+    if [[ -z "$compact" ]]; then echo empty; return 0; fi
+    if [[ "$compact_lc" =~ ^[[:space:]]*[a-z0-9_\ -]*(path|file|dir|root)[a-z0-9_\ -]*:[[:space:]]*(/|\./|\.\./|[a-z]:[\/]|file://).*$ ]]; then echo metadata_path_only; return 0; fi
+    chars=${#compact}; words="$(printf '%s\n' "$compact" | awk '{print NF}')"
+    [[ "$chars" -ge 80 ]] || { echo too_short_chars; return 0; }
+    [[ "$words" -ge 12 ]] || { echo too_few_words; return 0; }
     echo valid
 }
 
-design_review_synthesis_validation_reason() {
+design_review_legacy_synthesis_validation_reason() {
     local payload compact chars words base_reason
-    base_reason="$(design_review_validation_reason "${1:-}")"
+    base_reason="$(design_review_legacy_validation_reason "${1:-}")"
     [[ "$base_reason" == valid ]] || { echo "$base_reason"; return 0; }
     payload="$(design_review_unwrap_consultative_output "${1:-}")"
     compact="$(printf '%s' "$payload" | tr '\r\n\t' '   ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
-    chars=${#compact}
-    words="$(printf '%s\n' "$compact" | awk '{print NF}')"
-    if [[ "$chars" -lt 120 ]]; then
-        echo synthesis_too_short_chars
-        return 0
-    fi
-    if [[ "$words" -lt 18 ]]; then
-        echo synthesis_too_few_words
-        return 0
-    fi
+    chars=${#compact}; words="$(printf '%s\n' "$compact" | awk '{print NF}')"
+    [[ "$chars" -ge 120 ]] || { echo synthesis_too_short_chars; return 0; }
+    [[ "$words" -ge 18 ]] || { echo synthesis_too_few_words; return 0; }
     echo valid
+}
+
+design_review_validation_reason() {
+    local payload
+    payload="$(design_review_unwrap_consultative_output "${1:-}")"
+    if design_review_json_helper seat "$payload" >/dev/null 2>&1; then echo valid; return 0; fi
+    if design_review_output_looks_json "$payload"; then echo invalid_json_contract; return 0; fi
+    design_review_legacy_validation_reason "$payload"
+}
+
+design_review_synthesis_validation_reason() {
+    local payload
+    payload="$(design_review_unwrap_consultative_output "${1:-}")"
+    if design_review_json_helper synthesis "$payload" >/dev/null 2>&1; then echo valid; return 0; fi
+    if design_review_output_looks_json "$payload"; then echo invalid_json_contract; return 0; fi
+    design_review_legacy_synthesis_validation_reason "$payload"
+}
+
+design_review_materialize_seat() {
+    local raw="${1:-}" payload
+    payload="$(design_review_unwrap_consultative_output "$raw")"
+    if design_review_json_helper seat "$payload" >/dev/null 2>&1; then
+        design_review_json_helper seat "$payload"
+        return 0
+    fi
+    design_review_output_looks_json "$payload" && return 1
+    [[ "$(design_review_legacy_validation_reason "$payload")" == valid ]] || return 1
+    design_review_json_helper wrap-seat "$payload"
+}
+
+design_review_materialize_synthesis() {
+    local raw="${1:-}" payload
+    payload="$(design_review_unwrap_consultative_output "$raw")"
+    if design_review_json_helper synthesis "$payload" >/dev/null 2>&1; then
+        design_review_json_helper synthesis "$payload"
+        return 0
+    fi
+    design_review_output_looks_json "$payload" && return 1
+    [[ "$(design_review_legacy_synthesis_validation_reason "$payload")" == valid ]] || return 1
+    design_review_json_helper wrap-synthesis "$payload"
+}
+
+design_review_seat_source_format() {
+    local payload
+    payload="$(design_review_unwrap_consultative_output "${1:-}")"
+    if design_review_json_helper seat "$payload" >/dev/null 2>&1; then printf '%s\n' json-v1; return 0; fi
+    if design_review_output_looks_json "$payload"; then printf '%s\n' invalid-json; return 1; fi
+    [[ "$(design_review_legacy_validation_reason "$payload")" == valid ]] && { printf '%s\n' legacy-text; return 0; }
+    printf '%s\n' invalid; return 1
+}
+
+design_review_synthesis_source_format() {
+    local payload
+    payload="$(design_review_unwrap_consultative_output "${1:-}")"
+    if design_review_json_helper synthesis "$payload" >/dev/null 2>&1; then printf '%s\n' json-v1; return 0; fi
+    if design_review_output_looks_json "$payload"; then printf '%s\n' invalid-json; return 1; fi
+    [[ "$(design_review_legacy_synthesis_validation_reason "$payload")" == valid ]] && { printf '%s\n' legacy-text; return 0; }
+    printf '%s\n' invalid; return 1
 }
 
 design_review_write_invalid_diagnostic() {
@@ -487,11 +537,11 @@ design_review_write_invalid_diagnostic() {
 }
 
 design_review_approach_valid() {
-    [[ "$(design_review_validation_reason "${1:-}")" == valid ]]
+    design_review_materialize_seat "${1:-}" >/dev/null
 }
 
 design_review_synthesis_valid() {
-    [[ "$(design_review_synthesis_validation_reason "${1:-}")" == valid ]]
+    design_review_materialize_synthesis "${1:-}" >/dev/null
 }
 design_review_run_seat_with_recovery() {
     local initial_agent="$1" role="$2" ceremony_prompt="$3" timeout="$4"
@@ -507,7 +557,11 @@ design_review_run_seat_with_recovery() {
                 run_agent_sync_consultative "$initial_agent" "$ceremony_prompt" "$timeout" "$role" "ceremony"
             ) 2>/dev/null
         )" || rc=$?
-        if design_review_approach_valid "$approach"; then
+        local materialized source_format
+        if materialized="$(design_review_materialize_seat "$approach")"; then
+            source_format="$(design_review_seat_source_format "$approach" 2>/dev/null || printf invalid)"
+            [[ "$source_format" == legacy-text ]] && log WARN "Deprecated free-text design-review seat compatibility path used for '$role'"
+            approach="$materialized"
             printf -v "$approach_var" '%s' "$approach"
             printf -v "$agent_var" '%s' "$initial_agent"
             [[ "$attempt" -gt 1 ]] && log INFO "Design review seat '$role' recovered on retry with $initial_agent"
@@ -541,7 +595,11 @@ design_review_run_seat_with_recovery() {
                     run_agent_sync_consultative "$candidate" "$ceremony_prompt" "$timeout" "$role" "ceremony"
                 ) 2>/dev/null
             )" || rc=$?
-            if design_review_approach_valid "$approach"; then
+            local fallback_materialized fallback_format
+            if fallback_materialized="$(design_review_materialize_seat "$approach")"; then
+                fallback_format="$(design_review_seat_source_format "$approach" 2>/dev/null || printf invalid)"
+                [[ "$fallback_format" == legacy-text ]] && log WARN "Deprecated free-text design-review seat compatibility path used for '$role'"
+                approach="$fallback_materialized"
                 printf -v "$approach_var" '%s' "$approach"
                 printf -v "$agent_var" '%s' "$candidate"
                 log INFO "Design review seat '$role' recovered with fallback $candidate"
@@ -576,7 +634,11 @@ design_review_run_synthesis_with_recovery() {
                 run_agent_sync_consultative "$initial_agent" "$synthesis_prompt" "$timeout" "design-synthesizer" "ceremony"
             ) 2>/dev/null
         )" || rc=$?
-        if design_review_synthesis_valid "$output"; then
+        local materialized source_format
+        if materialized="$(design_review_materialize_synthesis "$output")"; then
+            source_format="$(design_review_synthesis_source_format "$output" 2>/dev/null || printf invalid)"
+            [[ "$source_format" == legacy-text ]] && log WARN "Deprecated free-text design-review synthesis compatibility path used"
+            output="$materialized"
             printf -v "$synthesis_var" '%s' "$output"
             printf -v "$agent_var" '%s' "$initial_agent"
             [[ "$attempt" -gt 1 ]] && log INFO "Design review synthesis recovered on retry with $initial_agent"
@@ -607,7 +669,11 @@ design_review_run_synthesis_with_recovery() {
                     run_agent_sync_consultative "$candidate" "$synthesis_prompt" "$timeout" "design-synthesizer" "ceremony"
                 ) 2>/dev/null
             )" || rc=$?
-            if design_review_synthesis_valid "$output"; then
+            local fallback_materialized fallback_format
+            if fallback_materialized="$(design_review_materialize_synthesis "$output")"; then
+                fallback_format="$(design_review_synthesis_source_format "$output" 2>/dev/null || printf invalid)"
+                [[ "$fallback_format" == legacy-text ]] && log WARN "Deprecated free-text design-review synthesis compatibility path used"
+                output="$fallback_materialized"
                 printf -v "$synthesis_var" '%s' "$output"
                 printf -v "$agent_var" '%s' "$candidate"
                 log INFO "Design review synthesis recovered with fallback $candidate"
@@ -655,14 +721,14 @@ design_review_ceremony() {
 Task: $prompt
 ${context:+Context: $context}
 
-State your HIGH-LEVEL approach in 3-5 bullet points:
-1. Architecture/pattern choice and why
-2. Key dependencies or prerequisites
-3. Risk areas and mitigation strategies
-4. Testing approach
-5. Integration considerations
-
-Be concise and specific. This is a planning exercise, not implementation."
+Return ONLY JSON matching Design Review Seat schema v1:
+{"schema_version":1,"approach":["..."],"dependencies":["..."],"risks":[{"risk":"...","mitigation":"..."}],"testing":["..."],"integration":["..."]}
+Rules:
+- approach contains 1-5 concise high-level architecture/pattern points.
+- dependencies, testing, and integration are arrays of concise strings; use [] when none.
+- risks contains concrete risk+mitigation objects; use [] when none.
+- planning only: do not claim implementation, changed files, executed tests, or verified runtime state.
+- do not emit Markdown or prose before/after JSON."
 
     # Gather approaches by semantic review role. Runtime provider selection uses
     # the same admitted, council-capable provider pool as review. Provider-named
@@ -752,7 +818,7 @@ Be concise and specific. This is a planning exercise, not implementation."
 
 Three review seats stated their approach to this task. The headings below reflect configured runtime identity rather than historical provider slot names:
 
-Every seat block is UNVERIFIED planning input from a disposable workspace that has already been deleted. Do not repeat claimed file changes, test counts, or live probes as verified facts. If a seat claims completed implementation or verification, mark that claim inadmissible and use only any remaining high-level design reasoning.
+Every SEAT JSON object is UNVERIFIED planning input from a disposable workspace that has already been deleted. Its provider response crossed the historical UNVERIFIED CONSULTATIVE OUTPUT boundary before canonicalization. Do not repeat claimed file changes, test counts, or live probes as verified facts. If a seat claims completed implementation or verification, mark that claim inadmissible and use only any remaining high-level design reasoning.
 
 SEAT 1 - ${seat_1_label}:
 ${seat_1_approach:-[unavailable]}
@@ -763,12 +829,14 @@ ${seat_2_approach:-[unavailable]}
 SEAT 3 - ${seat_3_label}:
 ${seat_3_approach:-[unavailable]}
 
-Identify:
-1. CONFLICTS: Where do the approaches disagree?
-2. GAPS: What did everyone miss?
-3. RESOLUTION: The recommended unified approach (2-3 sentences)
-
-Be brief and actionable."
+Return ONLY JSON matching Design Review Synthesis schema v1:
+{"schema_version":1,"conflicts":["..."],"gaps":["..."],"resolution":"...","risks":[{"risk":"...","mitigation":"..."}],"decisions":["..."]}
+Rules:
+- conflicts and gaps are concise arrays; use [] when none.
+- resolution is the recommended unified approach in 2-3 concise sentences.
+- risks contains concrete risk+mitigation objects; decisions contains actionable planning decisions.
+- the SEAT blocks above are JSON planning inputs, not verified execution evidence.
+- do not emit Markdown or prose before/after JSON."
     design_reserved="$design_implementer_agent $design_researcher_agent $design_code_reviewer_agent $design_synthesizer_agent"
     design_review_run_synthesis_with_recovery "$design_synthesizer_agent" "$synthesis_prompt" "$design_synth_timeout" \
         "$design_reserved" synthesis design_synthesizer_agent
@@ -794,7 +862,7 @@ Be brief and actionable."
             printf -v "$synthesis_out_var" '%s' "$synthesis"
         fi
         echo -e "${GREEN}Design Review Summary (planning only; no implementation evidence):${NC}"
-        echo "$synthesis" | head -20
+        design_review_json_helper human-synthesis "$synthesis" 2>/dev/null | head -20 || echo "$synthesis" | head -20
         echo ""
 
         # Record outcome

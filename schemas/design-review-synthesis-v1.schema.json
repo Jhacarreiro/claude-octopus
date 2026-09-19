@@ -1,0 +1,15 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "title":"Design Review Synthesis v1",
+  "type":"object",
+  "additionalProperties":false,
+  "required":["schema_version","conflicts","gaps","resolution","risks","decisions"],
+  "properties":{
+    "schema_version":{"const":1},
+    "conflicts":{"type":"array","items":{"type":"string","minLength":1,"pattern":".*\\S.*"}},
+    "gaps":{"type":"array","items":{"type":"string","minLength":1,"pattern":".*\\S.*"}},
+    "resolution":{"type":"string","minLength":1,"pattern":".*\\S.*"},
+    "risks":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["risk","mitigation"],"properties":{"risk":{"type":"string","minLength":1,"pattern":".*\\S.*"},"mitigation":{"type":"string","minLength":1,"pattern":".*\\S.*"}}}},
+    "decisions":{"type":"array","items":{"type":"string","minLength":1,"pattern":".*\\S.*"}}
+  }
+}

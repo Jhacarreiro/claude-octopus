@@ -869,7 +869,12 @@ EOF
             printf -v "$synthesis_out_var" '%s' "$synthesis"
         fi
         echo -e "${GREEN}Design Review Summary (planning only; no implementation evidence):${NC}"
-        design_review_json_helper human-synthesis "$synthesis" 2>/dev/null | head -20 || echo "$synthesis" | head -20
+        local human_synthesis
+        if human_synthesis="$(design_review_json_helper human-synthesis "$synthesis" 2>/dev/null)"; then
+            sed -n '1,20p' <<< "$human_synthesis"
+        else
+            log INFO "$synthesis"
+        fi
         echo ""
 
         # Record outcome

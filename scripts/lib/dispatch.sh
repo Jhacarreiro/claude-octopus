@@ -979,8 +979,41 @@ octo_summary_trigger_budget() {
     printf '%s\n' "$trigger_budget"
 }
 
+octo_json_contract_block() {
+    local prompt="${1:-}"
+    printf '%s\n' "$prompt" | awk '
+        BEGIN { capture = 0; seen = 0 }
+        /^[[:space:]]*Return ONLY JSON matching / { capture = 1 }
+        capture {
+            if (seen && $0 ~ /^[[:space:]]*$/) exit
+            print
+            seen = 1
+        }
+    '
+}
+
+octo_without_json_contract_block() {
+    local prompt="${1:-}"
+    printf '%s\n' "$prompt" | awk '
+        BEGIN { removing = 0; removed = 0 }
+        !removed && /^[[:space:]]*Return ONLY JSON matching / {
+            removing = 1
+            removed = 1
+            next
+        }
+        removing {
+            if ($0 ~ /^[[:space:]]*$/) {
+                removing = 0
+                print
+            }
+            next
+        }
+        { print }
+    '
+}
+
 octo_summary_preserves_structure() {
-    local original="$1" summary="$2" anchor
+    local original="$1" summary="$2" anchor protected_contract
     for anchor in 'Task:' 'Files:' 'Creates:' 'Reads:'; do
         if [[ "$original" == *"$anchor"* && "$summary" != *"$anchor"* ]]; then
             return 1
@@ -989,7 +1022,48 @@ octo_summary_preserves_structure() {
     if [[ "$original" == *'[CODING]'* && "$summary" != *'[CODING]'* ]]; then
         return 1
     fi
+
+    protected_contract="$(octo_json_contract_block "$original")"
+    if [[ -n "$protected_contract" && "$summary" != *"$protected_contract"* ]]; then
+        return 1
+    fi
     return 0
+}
+
+octo_fit_prompt_preserving_json_contract() {
+    local prompt="$1" original="$2" token_budget="$3" marker="$4"
+    local protected_contract body suffix suffix_tokens body_budget fitted candidate candidate_tokens excess attempts=0
+
+    token_budget="$(octo_normalize_context_budget "$token_budget" "protected prompt context budget")" || return 2
+    protected_contract="$(octo_json_contract_block "$original")"
+    if [[ -z "$protected_contract" ]]; then
+        octo_fit_prompt_to_token_budget "$prompt" "$token_budget" "$marker"
+        return $?
+    fi
+
+    # A machine-readable response contract is not summarizable. The exact
+    # original block must survive provider dispatch; otherwise fail closed.
+    [[ "$prompt" == *"$protected_contract"* ]] || return 1
+    body="$(octo_without_json_contract_block "$prompt")"
+    suffix=$'\n\n'"$protected_contract"
+    suffix_tokens="$(octo_estimate_prompt_tokens "$suffix")"
+    [[ "$suffix_tokens" -lt "$token_budget" ]] || return 1
+    body_budget=$((token_budget - suffix_tokens))
+    [[ "$body_budget" -gt 0 ]] || return 1
+
+    while [[ "$attempts" -lt 8 && "$body_budget" -gt 0 ]]; do
+        fitted="$(octo_fit_prompt_to_token_budget "$body" "$body_budget" "$marker")"
+        candidate="${fitted}${suffix}"
+        candidate_tokens="$(octo_estimate_prompt_tokens "$candidate")"
+        if [[ "$candidate_tokens" -le "$token_budget" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+        excess=$((candidate_tokens - token_budget))
+        body_budget=$((body_budget - excess - 1))
+        attempts=$((attempts + 1))
+    done
+    return 1
 }
 
 octo_fit_and_validate_summary() {
@@ -1001,8 +1075,9 @@ octo_fit_and_validate_summary() {
     budget="$(octo_normalize_context_budget "$budget" "summary context budget")" || return 2
 
     # Fit first, then validate the exact candidate that will be dispatched.
+    # JSON response contracts are reserved verbatim instead of being truncated.
     if [[ "$(octo_estimate_prompt_tokens "$fitted")" -gt "$budget" ]]; then
-        fitted="$(octo_fit_prompt_to_token_budget "$fitted" "$budget" $'\n\n[... summarized output truncated to fit context budget (~'"$budget"$' tokens) ...]')"
+        fitted="$(octo_fit_prompt_preserving_json_contract "$fitted" "$original" "$budget" $'\n\n[... summarized output truncated to fit context budget (~'"$budget"$' tokens) ...]')" || return 1
     fi
 
     fitted_tokens="$(octo_estimate_prompt_tokens "$fitted")"
@@ -1072,6 +1147,11 @@ summarize_then_dispatch() {
     # Keep the summarizer request itself bounded; preserve both task framing and
     # tail-loaded instructions/diffs because provider CLIs often fail near ARG_MAX.
     local summary_input="$prompt"
+    local protected_json_contract=""
+    protected_json_contract="$(octo_json_contract_block "$prompt")"
+    if [[ -n "$protected_json_contract" ]]; then
+        summary_input="$(octo_without_json_contract_block "$summary_input")"
+    fi
     local max_summary_input="${OCTOPUS_OVERSIZE_SUMMARY_INPUT_CHARS:-120000}"
     if [[ ${#summary_input} -gt $max_summary_input ]]; then
         local head_chars=$((max_summary_input / 2))
@@ -1084,6 +1164,18 @@ summarize_then_dispatch() {
 ${summary_input:$tail_start:$tail_chars}"
     fi
 
+    # Keep the machine response contract outside the lossy input region. This
+    # protects contracts that would otherwise straddle or disappear inside the
+    # preflight head/tail cap.
+    local protected_contract_instruction=""
+    if [[ -n "$protected_json_contract" ]]; then
+        protected_contract_instruction="
+- copy the protected machine-readable output contract below verbatim into the condensed prompt; do not rewrite it as prose or legacy Markdown
+
+Protected machine-readable output contract (verbatim):
+${protected_json_contract}"
+    fi
+
     local summary_prompt="Condense this oversized agent prompt before provider dispatch.
 
 Target provider: ${target_agent}
@@ -1094,7 +1186,7 @@ Preserve:
 - the user's exact objective and constraints
 - file paths, commands, URLs, IDs, and quoted requirements
 - acceptance criteria and verification instructions
-- any explicit safety or permission limits
+- any explicit safety or permission limits${protected_contract_instruction}
 
 Remove repetition, logs, duplicate context, and low-value boilerplate. Return only the condensed prompt.
 
@@ -1287,7 +1379,10 @@ enforce_context_budget() {
                 fi
                 log "DEBUG" "Context budget: truncating prompt for $target from ${#prompt} to $char_budget chars (~$budget tokens)"
                 local truncated
-                truncated=$(octo_fit_prompt_to_token_budget "$prompt" "$budget" $'\n\n[... truncated to fit context budget (~'"$budget"$' tokens) ...]')
+                if ! truncated=$(octo_fit_prompt_preserving_json_contract "$prompt" "$prompt" "$budget" $'\n\n[... truncated to fit context budget (~'"$budget"$' tokens) ...]'); then
+                    log "ERROR" "Context budget: cannot fit protected JSON output contract for $target inside the effective budget"
+                    return 78
+                fi
                 type record_oversize_event >/dev/null 2>&1 && record_oversize_event "$target" "$original_chars" "${#truncated}" "truncated" "$role" "$phase" "$budget" || true
                 octo_context_budget_warning "Context budget: summarizer unavailable; truncated $target role=${role:-none} phase=${phase:-none} from ${original_chars} to ${#truncated} chars (budget=$budget tokens/$char_budget chars)"
                 printf '%s\n' "$truncated"
@@ -1295,7 +1390,10 @@ enforce_context_budget() {
             truncate|*)
                 log "DEBUG" "Context budget: truncating prompt for $target from ${#prompt} to $char_budget chars (~$budget tokens)"
                 local truncated
-                truncated=$(octo_fit_prompt_to_token_budget "$prompt" "$budget" $'\n\n[... truncated to fit context budget (~'"$budget"$' tokens) ...]')
+                if ! truncated=$(octo_fit_prompt_preserving_json_contract "$prompt" "$prompt" "$budget" $'\n\n[... truncated to fit context budget (~'"$budget"$' tokens) ...]'); then
+                    log "ERROR" "Context budget: cannot fit protected JSON output contract for $target inside the effective budget"
+                    return 78
+                fi
                 type record_oversize_event >/dev/null 2>&1 && record_oversize_event "$target" "$original_chars" "${#truncated}" "truncated" "$role" "$phase" "$budget" || true
                 octo_context_budget_warning "Context budget: truncated $target role=${role:-none} phase=${phase:-none} from ${original_chars} to ${#truncated} chars (budget=$budget tokens/$char_budget chars)"
                 printf '%s\n' "$truncated"

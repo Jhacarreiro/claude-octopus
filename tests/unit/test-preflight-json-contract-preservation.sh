@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+source "$SCRIPT_DIR/../helpers/test-framework.sh"
+test_suite "preflight JSON contract preservation"
+
+log() { :; }
+source "$PROJECT_ROOT/scripts/lib/models.sh"
+source "$PROJECT_ROOT/scripts/lib/dispatch.sh"
+
+export OCTOPUS_PROVIDERS_CONFIG="$TEST_TMP_DIR/providers.json"
+printf '%s\n' '{"routing":{"features":{"summarizer":["agy"]}}}' > "$OCTOPUS_PROVIDERS_CONFIG"
+validate_agent_type() { return 0; }
+
+json_contract=$'Return ONLY JSON matching Tangle decomposition schema v1. No Markdown fences, headings, or prose.\nShape:\n{"schema_version":1,"subtasks":[{"id":1,"kind":"coding","title":"Short title","reads":[],"files":["relative/file.js"],"creates":[],"task":"Specific coding work"}]}\nRules:\n- schema_version must be 1.\n- subtasks must contain 1-6 items with contiguous ids starting at 1.\n- do not use glob/metacharacter scopes (`*`, `?`, `[`, `]`).\n- do not emit Markdown or legacy wire-format text.'
+json_contract_prompt="Implement the approved deliverable while preserving all acceptance criteria.
+
+$(printf 'context %.0s' {1..1800})
+
+${json_contract}"
+
+test_case "extracts the JSON response contract verbatim"
+if [[ "$(octo_json_contract_block "$json_contract_prompt")" == "$json_contract" ]]; then
+  test_pass
+else
+  test_fail "JSON response contract extraction changed or lost contract text"
+fi
+
+test_case "rejects legacy summary when original requires JSON"
+run_agent_sync() {
+  printf '%s\n' '1. [CODING] Implement — Reads: plan.md — Files: app.kt — Creates: tests.kt — Task: legacy wire response'
+}
+if summarize_then_dispatch "$json_contract_prompt" researcher commandcode 6278 >/dev/null 2>&1; then
+  test_fail "legacy summary was accepted after dropping the protected JSON contract"
+else
+  test_pass
+fi
+
+test_case "gives summarizer protected JSON contract outside omitted middle"
+export OCTOPUS_OVERSIZE_SUMMARY_INPUT_CHARS=500
+protected_probe="$TEST_TMP_DIR/protected-contract-seen"
+middle_contract_prompt="$(printf 'head %.0s' {1..100})
+
+${json_contract}
+
+$(printf 'tail %.0s' {1..100})"
+run_agent_sync() {
+  local received_prompt="${2:-}"
+  if [[ "$received_prompt" == *"Protected machine-readable output contract (verbatim):"* &&
+        "$received_prompt" == *"$json_contract"* ]]; then
+    : > "$protected_probe"
+  fi
+  printf 'Condensed objective and constraints.\n\n%s\n' "$json_contract"
+}
+protected_result="$(summarize_then_dispatch "$middle_contract_prompt" researcher commandcode 6278)"
+unset OCTOPUS_OVERSIZE_SUMMARY_INPUT_CHARS
+if [[ -e "$protected_probe" && "$protected_result" == *"$json_contract"* ]]; then
+  test_pass
+else
+  test_fail "summarizer did not receive or return the protected JSON contract"
+fi
+
+test_case "fitted summary reserves JSON contract verbatim"
+long_json_summary="Condensed implementation context $(printf 'x%.0s' {1..18000})
+
+${json_contract}"
+fitted_json_summary="$(octo_fit_and_validate_summary "$json_contract_prompt" "$long_json_summary" 1200)"
+if [[ "$(octo_estimate_prompt_tokens "$fitted_json_summary")" -le 1200 &&
+      "$fitted_json_summary" == *"$json_contract"* ]]; then
+  test_pass
+else
+  test_fail "summary fitting exceeded budget or truncated the JSON response contract"
+fi
+
+test_case "summarizer failure truncates body but preserves JSON contract"
+export OCTOPUS_CONTEXT_BUDGET=1200
+export OCTOPUS_CONTEXT_OUTPUT_RESERVE_TOKENS=0
+export OCTOPUS_CONTEXT_OVERHEAD_TOKENS=0
+export OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO=100
+export OCTOPUS_OVERSIZE_STRATEGY=summarize
+run_agent_sync() { return 1; }
+oversized_json_prompt="Implement the approved deliverable. $(printf 'body %.0s' {1..4000})
+
+${json_contract}"
+fallback_json="$(enforce_context_budget "$oversized_json_prompt" "" codex tangle 2>/dev/null)"
+if [[ "$(octo_estimate_prompt_tokens "$fallback_json")" -le 1200 &&
+      "$fallback_json" == *"$json_contract"* ]]; then
+  test_pass
+else
+  test_fail "summarizer-unavailable fallback lost the JSON response contract"
+fi
+
+test_case "explicit truncation preserves JSON contract"
+export OCTOPUS_OVERSIZE_STRATEGY=truncate
+truncated_json="$(enforce_context_budget "$oversized_json_prompt" "" codex tangle 2>/dev/null)"
+if [[ "$(octo_estimate_prompt_tokens "$truncated_json")" -le 1200 &&
+      "$truncated_json" == *"$json_contract"* ]]; then
+  test_pass
+else
+  test_fail "explicit truncation lost the JSON response contract"
+fi
+
+unset OCTOPUS_CONTEXT_BUDGET OCTOPUS_CONTEXT_OUTPUT_RESERVE_TOKENS OCTOPUS_CONTEXT_OVERHEAD_TOKENS OCTOPUS_CONTEXT_SUMMARY_TRIGGER_RATIO OCTOPUS_OVERSIZE_STRATEGY
+test_summary

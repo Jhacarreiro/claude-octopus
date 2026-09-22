@@ -74,6 +74,16 @@ else
   test_fail "summary fitting exceeded budget or truncated the JSON response contract"
 fi
 
+test_case "dispatches a contract that fits without a body or separator"
+contract_tokens="$(octo_estimate_prompt_tokens "$json_contract")"
+if contract_only="$(octo_fit_prompt_preserving_json_contract "$json_contract" "$json_contract" "$contract_tokens" "[truncated]")" &&
+   [[ "$contract_only" == "$json_contract" ]] &&
+   [[ "$(octo_estimate_prompt_tokens "$contract_only")" -le "$contract_tokens" ]]; then
+  test_pass
+else
+  test_fail "a contract that fits alone was rejected when the separator could not fit"
+fi
+
 test_case "summarizer failure truncates body but preserves JSON contract"
 export OCTOPUS_CONTEXT_BUDGET=1200
 export OCTOPUS_CONTEXT_OUTPUT_RESERVE_TOKENS=0

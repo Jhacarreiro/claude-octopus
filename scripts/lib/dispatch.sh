@@ -1032,7 +1032,7 @@ octo_summary_preserves_structure() {
 
 octo_fit_prompt_preserving_json_contract() {
     local prompt="$1" original="$2" token_budget="$3" marker="$4"
-    local protected_contract body suffix suffix_tokens body_budget fitted candidate candidate_tokens excess attempts=0
+    local protected_contract body suffix suffix_tokens contract_tokens body_budget fitted candidate candidate_tokens excess attempts=0
 
     token_budget="$(octo_normalize_context_budget "$token_budget" "protected prompt context budget")" || return 2
     protected_contract="$(octo_json_contract_block "$original")"
@@ -1044,9 +1044,15 @@ octo_fit_prompt_preserving_json_contract() {
     # A machine-readable response contract is not summarizable. The exact
     # original block must survive provider dispatch; otherwise fail closed.
     [[ "$prompt" == *"$protected_contract"* ]] || return 1
+    contract_tokens="$(octo_estimate_prompt_tokens "$protected_contract")"
+    [[ "$contract_tokens" -le "$token_budget" ]] || return 1
     body="$(octo_without_json_contract_block "$prompt")"
     suffix=$'\n\n'"$protected_contract"
     suffix_tokens="$(octo_estimate_prompt_tokens "$suffix")"
+    if [[ "$suffix_tokens" -ge "$token_budget" ]]; then
+        printf '%s\n' "$protected_contract"
+        return 0
+    fi
     [[ "$suffix_tokens" -lt "$token_budget" ]] || return 1
     body_budget=$((token_budget - suffix_tokens))
     [[ "$body_budget" -gt 0 ]] || return 1

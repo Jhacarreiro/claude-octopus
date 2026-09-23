@@ -68,9 +68,14 @@ test_stale_lock_recovery() {
     mkdir -p "$lockdir"
     printf '%s\n' "$$" > "$lockdir/pid"
     printf '%s\n' "$(( $(date +%s) - 60 ))" > "$lockdir/ts"
-    if OCTO_EVENT_LOCK_STALE_SECS=1 _octo_event_lock "$target"; then
+    local live_lock_rc=0
+    OCTO_EVENT_LOCK_STALE_SECS=1 _octo_event_lock "$target" || live_lock_rc=$?
+    if [[ "$live_lock_rc" -eq 0 ]]; then
         _octo_event_unlock "$target"
         test_fail "live stale-looking lock was stolen"
+        return
+    elif [[ "$live_lock_rc" -ne 75 ]]; then
+        test_fail "live lock returned $live_lock_rc instead of contention status 75"
         return
     fi
     rm -f "$lockdir/pid" "$lockdir/ts"

@@ -21,6 +21,18 @@ if [[ ! -f "$PROJECT_ROOT/scripts/lib/run-contract.sh" ]]; then
 fi
 source "$PROJECT_ROOT/scripts/lib/run-contract.sh"
 
+test_case "the contract lock retries only ordinary contention"
+event_lock_impl="$(declare -f _octo_event_lock)"
+_octo_event_lock() { return 74; }
+contract_lock_rc=0
+_octo_run_contract_lock "$TEST_TMP_DIR/infrastructure-failure" || contract_lock_rc=$?
+eval "$event_lock_impl"
+if [[ "$contract_lock_rc" -eq 74 ]]; then
+    test_pass
+else
+    test_fail "expected infrastructure status 74, got $contract_lock_rc"
+fi
+
 test_case "test harness fallback never writes contract state under HOME"
 fallback_path="$(unset WORKSPACE_DIR; octo_run_contract_ledger_path)"
 if [[ "$fallback_path" == "$TEST_TMP_DIR/"* ]]; then

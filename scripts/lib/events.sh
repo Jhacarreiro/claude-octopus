@@ -110,7 +110,12 @@ _octo_event_lock() {
     while ! mkdir "$lockdir" 2>/dev/null; do
         tries=$((tries + 1))
         if [[ "$tries" -ge 50 ]]; then
-            _octo_event_reclaim_stale_lock "$lockdir" || return 1
+            if ! _octo_event_reclaim_stale_lock "$lockdir"; then
+                # Distinguish ordinary contention from an infrastructure
+                # failure so durable callers can retry only a live lock.
+                [[ -d "$lockdir" ]] && return 75
+                return 1
+            fi
             tries=0
         fi
         sleep 0.02 2>/dev/null || return 1

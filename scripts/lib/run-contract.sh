@@ -59,6 +59,28 @@ octo_run_contract_recovery_path() {
     printf '%s.recovery\n' "$(octo_run_contract_ledger_path)"
 }
 
+_octo_run_contract_lock() {
+    local lock_target="$1" started_at now lock_rc
+    # Event logging is best-effort and may abandon its lock after ~1s. The
+    # run contract is durable execution state, and snapshot publication can
+    # legitimately take longer on slower filesystems, so wait boundedly.
+    local wait_secs=30
+
+    started_at="$(date +%s)" || return 1
+    while :; do
+        if _octo_event_lock "$lock_target"; then
+            return 0
+        else
+            lock_rc=$?
+        fi
+        [[ "$lock_rc" -eq 75 ]] || return "$lock_rc"
+        now="$(date +%s)" || return 1
+        if (( now - started_at >= wait_secs )); then
+            return 1
+        fi
+    done
+}
+
 # A published generation is committed only when both durable snapshots contain
 # the same latest-seat projection as the ledger. This lets recovery distinguish
 # a stale cleanup marker from an append whose snapshot never committed.

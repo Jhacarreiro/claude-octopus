@@ -23,6 +23,10 @@
 
 ### Fixed
 
+- Concurrent run-contract updates now wait for an in-progress snapshot to
+  finish instead of failing after the event log's shorter lock window.
+  Filesystem and lock-metadata errors still fail immediately rather than being
+  retried as ordinary contention.
 - Select the PID-ledger Python interpreter by native process-control capability
   instead of trusting the first `python3` on `PATH`. Doctor reports the selected
   interpreter, and `OCTOPUS_PYTHON` provides an explicit, validated override.

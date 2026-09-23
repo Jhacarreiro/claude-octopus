@@ -33,6 +33,15 @@ if ! should_use_agent_teams "claude-sonnet" &&
 else
     test_fail "native dispatch can leave a permanent running row without SubagentStop capture"
 fi
+
+test_case "Tangle coding stays on the supervised subprocess path"
+SUPPORTS_HOOK_LAST_MESSAGE=true
+if ! should_use_agent_teams "claude-sonnet" "tangle" "implementer" && \
+   should_use_agent_teams "claude-sonnet" "tangle" "researcher"; then
+    test_pass
+else
+    test_fail "Tangle implementers can bypass the provider stall watchdog"
+fi
 TIMEOUT=600
 
 test_case "tangle implementers are unbounded by default but honor explicit budgets"

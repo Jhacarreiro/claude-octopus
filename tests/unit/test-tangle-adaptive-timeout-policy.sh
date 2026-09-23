@@ -8,7 +8,6 @@ source "$PROJECT_ROOT/scripts/lib/heartbeat.sh"
 source "$PROJECT_ROOT/scripts/lib/spawn.sh"
 test_suite "Tangle adaptive timeout policy"
 cleanup_env() { unset OCTOPUS_TANGLE_TIMEOUT OCTOPUS_TIMEOUT_EXPLICIT OCTOPUS_TANGLE_STALL_WINDOW OCTOPUS_TANGLE_STALL_POLL_SECS; }
-trap cleanup_env EXIT INT TERM
 cleanup_env
 
 test_case "Tangle implementer is unbounded by default"
@@ -22,6 +21,11 @@ unset OCTOPUS_TIMEOUT_EXPLICIT
 test_case "Tangle-specific timeout overrides default policy"
 OCTOPUS_TANGLE_TIMEOUT=1500
 [[ "$(octopus_effective_agent_timeout 600 tangle implementer)" == 1500 ]] && test_pass || test_fail "Tangle timeout override was ignored"
+unset OCTOPUS_TANGLE_TIMEOUT
+
+test_case "Tangle-specific timeout normalizes leading zeroes"
+OCTOPUS_TANGLE_TIMEOUT=08
+[[ "$(octopus_effective_agent_timeout 600 tangle implementer)" == 8 ]] && test_pass || test_fail "leading-zero Tangle timeout was not normalized to base 10"
 unset OCTOPUS_TANGLE_TIMEOUT
 
 test_case "explicit Tangle timeout zero remains unbounded"

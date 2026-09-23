@@ -340,7 +340,7 @@ octopus_effective_agent_timeout() {
                 log "ERROR" "OCTOPUS_TANGLE_TIMEOUT='$tangle_timeout' must be a non-negative integer"
                 return 2
             fi
-            configured_timeout="$tangle_timeout"
+            configured_timeout=$((10#$tangle_timeout))
         elif [[ "${OCTOPUS_TIMEOUT_EXPLICIT:-0}" != "1" ]]; then
             configured_timeout=0
         fi
@@ -1064,7 +1064,7 @@ ${heuristic_ctx}"
     # plugin-accessible cancellation handle, so positive bounded work must stay
     # on the supervised subprocess path where the timeout is enforceable.
     local _use_agent_teams=false
-    if should_use_agent_teams "$agent_type"; then
+    if should_use_agent_teams "$agent_type" "$phase" "$role"; then
         if octopus_agent_teams_can_honor_timeout "$_eff_timeout"; then
             _use_agent_teams=true
         else
@@ -1590,7 +1590,7 @@ ${heuristic_ctx}"
             tokens_out=$(octo_estimate_tokens_for_file "$raw_output" 2>/dev/null || echo 0)
             update_agent_status "$agent_type" "stalled" "$elapsed_ms" "$_estimated_cost" "$_eff_timeout" "$task_id" "${phase:-unknown}" "$result_file"
             type write_agent_status >/dev/null 2>&1 && write_agent_status "$agent_type" "stalled" "$tokens_in" "$tokens_out" "No observable progress within stall window" "$elapsed_ms" "$result_file" "${role:-none}" || true
-            if ! octo_spawn_contract_finish "$_contract_seat_id" failed "$result_file" "$temp_errors" \\
+            if ! octo_spawn_contract_finish "$_contract_seat_id" failed "$result_file" "$temp_errors" \
                 "Provider stalled without observable progress" "$exit_code" "$elapsed_ms" >/dev/null 2>&1; then
                 exit_code=74
                 update_agent_status "$agent_type" "failed" "$elapsed_ms" "$_estimated_cost" "$_eff_timeout" "$task_id" "${phase:-unknown}" "$result_file"

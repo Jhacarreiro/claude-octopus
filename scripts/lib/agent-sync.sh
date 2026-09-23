@@ -81,6 +81,15 @@ octopus_sync_attempt_timeout() {
 # Returns 0 (true) if agent should use native teams, 1 (false) for legacy bash
 should_use_agent_teams() {
     local agent_type="$1"
+    local phase="${2:-}"
+    local role="${3:-}"
+
+    # Tangle coding workers require the provider stall watchdog and its
+    # process-group cancellation path, which native Agent Teams cannot expose.
+    if [[ "$phase" == "tangle" && ( "$role" == "implementer" || "$role" == "implementer-heavy" ) ]]; then
+        log "DEBUG" "Tangle coding dispatch requires the supervised provider subprocess"
+        return 1
+    fi
 
     # Keep every caller (including retry/resume routing) consistent with
     # spawn_agent(): a bounded task needs the subprocess watchdog and PID tree.

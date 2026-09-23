@@ -1135,6 +1135,11 @@ resume_agent() {
         return 1
     fi
 
+    if [[ "$phase" == "tangle" && ( "$role" == "implementer" || "$role" == "implementer-heavy" ) ]]; then
+        log "DEBUG" "resume_agent: Tangle coding requires the supervised provider subprocess"
+        return 1
+    fi
+
     # Gate: agent_id must be non-empty
     if [[ -z "$agent_id" ]]; then
         log "DEBUG" "resume_agent: empty agent_id, falling back"

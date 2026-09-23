@@ -629,6 +629,10 @@ _octo_capture_provider_with_stall_watchdog() {
     local last_signature current_signature last_progress now next_probe
     local stalled=false grace_deadline
 
+    # Probe at least once before the first stall check. A poll interval longer
+    # than the stall window must not classify an active provider as stalled.
+    (( poll_secs > stall_window )) && poll_secs="$stall_window"
+
     rc_file="$(umask 077 && mktemp "${temp_input}.rc.XXXXXX")" || return 1
     (
         local provider_rc=0

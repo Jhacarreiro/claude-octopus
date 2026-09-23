@@ -5120,7 +5120,9 @@ $(tangle_decomposition_json_contract_guidance)"
     log INFO "Step 3: Validation gate..."
     local validation_file="${RESULTS_DIR:-${HOME}/.claude-octopus/results}/tangle-validation-${task_group}.md"
     local validation_rc=0
-    tangle_validate_results_with_scope_contract "$task_group" "$resolved_prompt" "$worktree_before_file" "$subtasks" "$tangle_start_head" "$tangle_scope_manifest" "$worktree_before_state_file" || validation_rc=$?
+    local expected_subtask_ids
+    expected_subtask_ids=$(printf '%s\n' "${task_ids[@]}")
+    tangle_validate_results_with_scope_contract "$task_group" "$resolved_prompt" "$worktree_before_file" "$subtasks" "$tangle_start_head" "$tangle_scope_manifest" "$worktree_before_state_file" "$expected_subtask_ids" || validation_rc=$?
 
     if ! tangle_should_attempt_contextual_review "$validation_rc" "$worktree_before_state_file"; then
         log ERROR "Tangle validation failed with status ${validation_rc}; no recoverable worktree progress detected, stopping before contextual review and corrections"
@@ -5131,7 +5133,7 @@ $(tangle_decomposition_json_contract_guidance)"
     fi
 
     tangle_contextual_review_gate "$task_group" "$resolved_prompt" "$context" "$subtasks" \
-        "$validation_file" "$worktree_before_file" "$validation_rc" "$tangle_coding_agent" "$tangle_start_head" "$tangle_scope_manifest" "$worktree_before_state_file"
+        "$validation_file" "$worktree_before_file" "$validation_rc" "$tangle_coding_agent" "$tangle_start_head" "$tangle_scope_manifest" "$worktree_before_state_file" "$expected_subtask_ids"
     return $?
 }
 
@@ -5197,6 +5199,7 @@ tangle_validate_results_with_scope_contract() {
     local task_group="$1" original_prompt="$2" worktree_before_file="$3" subtasks="$4"
     local baseline_head="${5:-}" scope_manifest_digest="${6:-}"
     local worktree_before_state_file="${7:-}"
+    local expected_task_ids="${8:-}"
     local validation_file="${RESULTS_DIR:-${HOME}/.claude-octopus/results}/tangle-validation-${task_group}.md"
     local authorized read_only violations="" adaptive_scope_evidence="" integrity_violations="" current_manifest_digest base_rc=0
     authorized=$(tangle_authorized_write_scopes "$subtasks")
@@ -5257,7 +5260,7 @@ tangle_validate_results_with_scope_contract() {
         fi
         return 1
     fi
-    validate_tangle_results "$task_group" "$original_prompt" "$worktree_before_file" "$baseline_head" "$worktree_before_state_file" || base_rc=$?
+    validate_tangle_results "$task_group" "$original_prompt" "$worktree_before_file" "$baseline_head" "$worktree_before_state_file" "$expected_task_ids" || base_rc=$?
     tangle_append_write_scope_contract_report "$validation_file" "$authorized" "$read_only" "$violations" "$baseline_head"
     if [[ -n "$adaptive_scope_evidence" ]]; then
         {
@@ -5327,6 +5330,7 @@ tangle_contextual_review_gate() {
     local baseline_head="${9:-}"
     local scope_manifest_digest="${10:-}"
     local worktree_before_state_file="${11:-}"
+    local expected_task_ids="${12:-}"
 
     if octo_bool_disabled "${OCTOPUS_TANGLE_CODE_REVIEW:-true}"; then
         log INFO "Contextual code review disabled by OCTOPUS_TANGLE_CODE_REVIEW"
@@ -5420,7 +5424,7 @@ tangle_contextual_review_gate() {
         OCTOPUS_TANGLE_VALIDATION_CORRECTION_ROUND="$correction_round" \
         OCTOPUS_TANGLE_VALIDATION_CORRECTION_STATUS="${TANGLE_CORRECTION_STATUS:-}" \
         OCTOPUS_TANGLE_VALIDATION_CORRECTION_CHANGED="${TANGLE_CORRECTION_CHANGED:-0}" \
-            tangle_validate_results_with_scope_contract "$task_group" "$resolved_prompt" "$worktree_before_file" "$subtasks" "$baseline_head" "$scope_manifest_digest" "$worktree_before_state_file" || validation_rc=$?
+            tangle_validate_results_with_scope_contract "$task_group" "$resolved_prompt" "$worktree_before_file" "$subtasks" "$baseline_head" "$scope_manifest_digest" "$worktree_before_state_file" "$expected_task_ids" || validation_rc=$?
 
         review_context_file=$(tangle_build_develop_review_context "$task_group" "$resolved_prompt" "$context" "$subtasks" "$validation_file" "$worktree_before_file" "correction-${correction_round}")
         review_rc=0

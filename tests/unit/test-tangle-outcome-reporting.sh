@@ -2,7 +2,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-TEST_TMP_DIR="${TEST_TMP_DIR:-/tmp/octopus-tests-$$}"
+TEST_TMP_DIR="/tmp/octopus-tests-$$"
 trap 'rm -rf "$TEST_TMP_DIR"' EXIT INT TERM
 source "$SCRIPT_DIR/../helpers/test-framework.sh"
 source "$PROJECT_ROOT/scripts/lib/testing.sh"
@@ -63,6 +63,14 @@ if [[ "$summary" == "1 timed out, 1 persistence failed" ]]; then
     test_pass
 else
     test_fail "unexpected retry summary: $summary"
+fi
+
+test_case "counts missing dispatched results as unknown"
+summary=$(tangle_result_paths_outcome_summary "$success" $'success\nmissing')
+if [[ "$summary" == "1 succeeded, 1 unknown" ]]; then
+    test_pass
+else
+    test_fail "missing dispatched result was not reported as unknown: $summary"
 fi
 
 test_case "watcher reports finished rather than complete"

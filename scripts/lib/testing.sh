@@ -419,15 +419,18 @@ tangle_result_terminal_outcome() {
 
 tangle_result_paths_outcome_summary() {
     local result_lines="${1:-}"
+    local expected_task_ids="${2:-}"
     local success=0 timeout=0 persistence_failed=0 blocked=0 failed=0 error=0 unknown=0
-    local entry result outcome
+    local entry result outcome task_id observed_task_ids=""
     while IFS= read -r entry; do
         [[ -n "$entry" ]] || continue
         result="${entry#result:}"
         if [[ ! -f "$result" ]]; then
-            ((unknown++)) || true
+            [[ -n "$expected_task_ids" ]] || ((unknown++)) || true
             continue
         fi
+        task_id=$(tangle_result_logical_task_id "$result")
+        [[ -z "$task_id" ]] || observed_task_ids+="$task_id"$'\n'
         outcome=$(tangle_result_terminal_outcome "$result")
         case "$outcome" in
             success) ((success++)) || true ;;
@@ -439,6 +442,16 @@ tangle_result_paths_outcome_summary() {
             *) ((unknown++)) || true ;;
         esac
     done <<< "$result_lines"
+
+    # The effective result set contains only artifacts that were written. Keep
+    # the dispatched task identities as the accounting baseline so a missing
+    # artifact remains visible in the terminal summary as an unknown outcome.
+    while IFS= read -r task_id; do
+        [[ -n "$task_id" ]] || continue
+        if ! grep -Fqx "$task_id" <<< "$observed_task_ids"; then
+            ((unknown++)) || true
+        fi
+    done <<< "$expected_task_ids"
 
     local parts=()
     [[ "$success" -gt 0 ]] && parts+=("$success succeeded")
@@ -541,6 +554,7 @@ validate_tangle_results() {
     local worktree_before_file="${3:-}"
     local baseline_head="${4:-}"
     local worktree_before_state_file="${5:-}"
+    local expected_task_ids="${6:-}"
     local validation_file="${RESULTS_DIR}/tangle-validation-${task_group}.md"
     local quality_retry_count=0
     local correction_file="${OCTOPUS_TANGLE_VALIDATION_CORRECTION_FILE:-}"
@@ -607,7 +621,7 @@ validate_tangle_results() {
         done <<< "$effective_result_files"
 
         local terminal_outcome_summary
-        terminal_outcome_summary=$(tangle_result_paths_outcome_summary "$effective_result_files")
+        terminal_outcome_summary=$(tangle_result_paths_outcome_summary "$effective_result_files" "$expected_task_ids")
 
         local worktree_changes=""
         local requires_worktree_changes=false
@@ -873,11 +887,12 @@ EOF
                     local retry_outcome_summary
                     retry_outcome_summary=$(tangle_result_paths_outcome_summary "$FAILED_SUBTASKS")
                     if [[ -n "$hard_gate_retry_feedback" ]]; then
-                        echo "Retry reason: hard-gate correction; candidate terminal outcomes: ${retry_outcome_summary}"
+                        log INFO "Retry reason: hard-gate correction; candidate terminal outcomes: ${retry_outcome_summary}"
+                        log WARN "Hard-gate correction required: $(printf '%s' "$hard_gate_retry_feedback" | tr '\n' ' ') Retrying..."
                     else
-                        echo "Retrying failed subtasks: ${retry_outcome_summary}"
+                        log INFO "Retrying failed subtasks: ${retry_outcome_summary}"
+                        log WARN "Quality gate at ${quality_success_rate}%, below ${tangle_threshold}%. Terminal outcomes: ${terminal_outcome_summary}. Retrying..."
                     fi
-                    log WARN "Quality gate at ${quality_success_rate}%, below ${tangle_threshold}%. Terminal outcomes: ${terminal_outcome_summary}. Retrying..."
                     # v8.18.0: Lock providers that failed quality gate
                     while IFS= read -r failed_task; do
                         [[ -z "$failed_task" ]] && continue

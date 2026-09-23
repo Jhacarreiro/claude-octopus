@@ -123,6 +123,42 @@ else
     test_fail "observable worktree progress did not keep provider healthy (rc=$rc)"
 fi
 
+test_case "silent provider ignored-file writes reset the stall window"
+repo="$TEST_TMP_DIR/ignored-progress-repo"
+mkdir -p "$repo"
+git -C "$repo" init -q
+git -C "$repo" config user.email test@example.invalid
+git -C "$repo" config user.name Test
+printf '.ignored-progress\n' > "$repo/.gitignore"
+printf 'base\n' > "$repo/progress.txt"
+git -C "$repo" add .gitignore progress.txt
+git -C "$repo" commit -qm base
+writer="$TEST_TMP_DIR/ignored-worktree-writer.sh"
+cat > "$writer" <<'EOF'
+#!/bin/sh
+repo="$1"
+sleep 1
+printf 'one\n' > "$repo/.ignored-progress"
+sleep 1
+printf 'two\n' >> "$repo/.ignored-progress"
+sleep 1
+printf 'three\n' >> "$repo/.ignored-progress"
+sleep 1
+EOF
+chmod +x "$writer"
+raw="$TEST_TMP_DIR/ignored-worktree.raw"
+err="$TEST_TMP_DIR/ignored-worktree.err"
+hint="$TEST_TMP_DIR/ignored-worktree.in"
+rc=0
+OCTOPUS_PROVIDER_STALL_WINDOW=2 OCTOPUS_PROVIDER_STALL_POLL_SECS=1 OCTOPUS_PROVIDER_STALL_WORKTREE="$repo" \
+    octopus_capture_provider_output "prompt" 0 "$hint" "$raw" "$err" \
+        "$writer" "$repo" || rc=$?
+if [[ "$rc" -eq 0 && "$(wc -l < "$repo/.ignored-progress" | tr -d ' ')" -eq 3 ]]; then
+    test_pass
+else
+    test_fail "ignored worktree progress did not keep provider healthy (rc=$rc)"
+fi
+
 test_case "explicit wall-clock timeout still caps a progressing provider"
 raw="$TEST_TMP_DIR/bounded.raw"
 err="$TEST_TMP_DIR/bounded.err"

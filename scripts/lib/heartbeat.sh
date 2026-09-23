@@ -596,6 +596,7 @@ _octo_capture_worktree_fingerprint() {
             git -C "$worktree" diff --name-only -z 2>/dev/null || true
             git -C "$worktree" diff --cached --name-only -z 2>/dev/null || true
             git -C "$worktree" ls-files --others --exclude-standard -z 2>/dev/null || true
+            git -C "$worktree" ls-files --others --ignored --exclude-standard -z 2>/dev/null || true
         } | while IFS= read -r -d '' rel; do
             [[ -n "$rel" ]] || continue
             printf 'path=%s;' "$rel"

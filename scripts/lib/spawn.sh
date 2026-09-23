@@ -349,7 +349,7 @@ octopus_effective_agent_timeout() {
                 normalized_timeout="${normalized_timeout:1}"
             done
             if [[ "${#normalized_timeout}" -gt "${#max_timeout}" ]] ||
-               { [[ "${#normalized_timeout}" -eq "${#max_timeout}" ]] && [[ "$normalized_timeout" > "$max_timeout" ]]; }; then
+               { [[ "${#normalized_timeout}" -eq "${#max_timeout}" ]] && [[ "$normalized_timeout" -gt "$max_timeout" ]]; }; then
                 log "ERROR" "OCTOPUS_TANGLE_TIMEOUT='$tangle_timeout' exceeds the supported maximum of $max_timeout seconds"
                 return 2
             fi

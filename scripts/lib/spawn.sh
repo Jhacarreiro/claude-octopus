@@ -340,7 +340,20 @@ octopus_effective_agent_timeout() {
                 log "ERROR" "OCTOPUS_TANGLE_TIMEOUT='$tangle_timeout' must be a non-negative integer"
                 return 2
             fi
-            configured_timeout=$((10#$tangle_timeout))
+            # Normalize and range-check before Bash arithmetic. Keep timeout
+            # values within the same signed range accepted by the portable
+            # process supervisors and deadline calculations below.
+            local normalized_timeout="$tangle_timeout"
+            local max_timeout=2147483647
+            while [[ "${#normalized_timeout}" -gt 1 && "${normalized_timeout:0:1}" == "0" ]]; do
+                normalized_timeout="${normalized_timeout:1}"
+            done
+            if [[ "${#normalized_timeout}" -gt "${#max_timeout}" ]] ||
+               { [[ "${#normalized_timeout}" -eq "${#max_timeout}" ]] && [[ "$normalized_timeout" > "$max_timeout" ]]; }; then
+                log "ERROR" "OCTOPUS_TANGLE_TIMEOUT='$tangle_timeout' exceeds the supported maximum of $max_timeout seconds"
+                return 2
+            fi
+            configured_timeout=$((10#$normalized_timeout))
         elif [[ "${OCTOPUS_TIMEOUT_EXPLICIT:-0}" != "1" ]]; then
             configured_timeout=0
         fi

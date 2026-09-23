@@ -655,6 +655,12 @@ _octo_capture_provider_with_stall_watchdog() {
     while kill -0 "$capture_pid" 2>/dev/null; do
         [[ -s "$rc_file" ]] && break
         sleep 1
+        # A silent provider may finish during the sleep. Recheck completion
+        # before probing for progress or declaring a stall, otherwise a clean
+        # exit at the stall boundary can be misclassified as exit 76.
+        if [[ -s "$rc_file" ]] || ! kill -0 "$capture_pid" 2>/dev/null; then
+            break
+        fi
         now="$(date +%s)"
         if [[ "$now" -ge "$next_probe" ]]; then
             current_signature="$(_octo_capture_activity_signature "$raw_output" "$temp_errors" "$worktree")"

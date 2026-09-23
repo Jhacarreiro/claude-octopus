@@ -28,6 +28,11 @@ OCTOPUS_TANGLE_TIMEOUT=08
 [[ "$(octopus_effective_agent_timeout 600 tangle implementer)" == 8 ]] && test_pass || test_fail "leading-zero Tangle timeout was not normalized to base 10"
 unset OCTOPUS_TANGLE_TIMEOUT
 
+test_case "oversized Tangle timeout fails before arithmetic"
+OCTOPUS_TANGLE_TIMEOUT=18446744073709551616
+if octopus_effective_agent_timeout 600 tangle implementer >/dev/null 2>&1; then test_fail "oversized timeout was accepted"; else test_pass; fi
+unset OCTOPUS_TANGLE_TIMEOUT
+
 test_case "explicit Tangle timeout zero remains unbounded"
 OCTOPUS_TANGLE_TIMEOUT=0
 [[ "$(octopus_effective_agent_timeout 600 tangle implementer)" == 0 ]] && test_pass || test_fail "explicit zero timeout was not preserved"

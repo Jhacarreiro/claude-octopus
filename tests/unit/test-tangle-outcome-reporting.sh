@@ -9,6 +9,26 @@ source "$PROJECT_ROOT/scripts/lib/testing.sh"
 test_suite "tangle terminal outcome reporting"
 mkdir -p "$TEST_TMP_DIR"
 
+RED=""
+GREEN=""
+YELLOW=""
+NC=""
+_BOX_TOP=""
+_BOX_BOT=""
+MAX_QUALITY_RETRIES=0
+QUALITY_THRESHOLD=75
+LOOP_UNTIL_APPROVED=false
+CI_MODE=true
+OCTOPUS_ANTISYCOPHANCY=false
+OCTOPUS_FILE_VALIDATION=false
+
+log() { :; }
+record_task_metric() { :; }
+write_structured_decision() { :; }
+retry_failed_subtasks() { :; }
+evaluate_quality_branch() { printf '%s\n' "proceed"; }
+get_gate_threshold() { printf '%s\n' "75"; }
+
 make_result() {
     local name="$1" status="$2" output="${3:-work completed}"
     local path="$TEST_TMP_DIR/$name.md"
@@ -71,6 +91,20 @@ if [[ "$summary" == "1 succeeded, 1 unknown" ]]; then
     test_pass
 else
     test_fail "missing dispatched result was not reported as unknown: $summary"
+fi
+
+test_case "reachable validation report includes missing dispatched result"
+validation_results="$TEST_TMP_DIR/reachable-validation"
+mkdir -p "$validation_results"
+cp "$success" "$validation_results/test-tangle-outcomes-0.md"
+RESULTS_DIR="$validation_results"
+WORKSPACE_DIR="$TEST_TMP_DIR/workspace"
+mkdir -p "$WORKSPACE_DIR"
+if validate_tangle_results "outcomes" "Report terminal outcomes" "" "" "" $'success\nmissing' >/dev/null 2>&1 &&
+   grep -q -- '- Terminal Outcomes: 1 succeeded, 1 unknown' "$RESULTS_DIR/tangle-validation-outcomes.md"; then
+    test_pass
+else
+    test_fail "reachable validation path did not report the missing dispatched result"
 fi
 
 test_case "watcher reports finished rather than complete"

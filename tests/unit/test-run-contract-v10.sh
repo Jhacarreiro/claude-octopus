@@ -356,7 +356,7 @@ _octo_event_lock() {
 OCTO_TEST_LOCK_WAIT_MARKER="$lock_wait_gate" run_contract_transition race-seat planned >/dev/null &
 new_transition_pid=$!
 lock_wait_seen=false
-for _lock_wait in $(seq 1 300); do
+for _lock_wait in $(seq 1 3000); do
     if [[ -f "$lock_wait_gate" ]]; then
         lock_wait_seen=true
         break

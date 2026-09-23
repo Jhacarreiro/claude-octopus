@@ -438,7 +438,7 @@ run_contract_snapshot() (
     events_ledger="$(octo_run_contract_events_path)"
     [[ -s "$ledger" || -s "$events_ledger" ]] || return 1
     lock_target="$(octo_run_contract_lock_path)"
-    _octo_event_lock "$lock_target" || return 1
+    _octo_run_contract_lock "$lock_target" || return 1
     trap '_octo_event_unlock "$lock_target"' EXIT
     _octo_run_contract_recover_unlocked || return 1
     output="$(_octo_run_contract_snapshot_unlocked)" || return 1
@@ -534,7 +534,7 @@ run_contract_record_event() (
         '{schema_version:$schema_version, run_id:$run_id, event:$event, timestamp:$timestamp, attributes:$attributes}')" || return 1
 
     lock_target="$(octo_run_contract_lock_path)"
-    _octo_event_lock "$lock_target" || return 1
+    _octo_run_contract_lock "$lock_target" || return 1
     trap '_octo_event_unlock "$lock_target"' EXIT
     _octo_run_contract_recover_unlocked || return 1
     printf '%s\n' "$record" >> "$events_ledger" 2>/dev/null || return 1
@@ -596,7 +596,7 @@ run_contract_transition() (
     run_dir="$(dirname "$ledger")"
     mkdir -p "$run_dir" 2>/dev/null || return 1
     lock_target="$(octo_run_contract_lock_path)"
-    _octo_event_lock "$lock_target" || return 1
+    _octo_run_contract_lock "$lock_target" || return 1
     trap '_octo_event_unlock "$lock_target"' EXIT
     _octo_run_contract_recover_unlocked || return 1
 

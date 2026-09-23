@@ -324,6 +324,7 @@ fi
 # production paths.
 snapshot_gate="$TEST_TMP_DIR/snapshot-publish-entered"
 snapshot_release="$TEST_TMP_DIR/snapshot-publish-release"
+lock_wait_gate="$TEST_TMP_DIR/contract-lock-wait-entered"
 mv() {
     if [[ "${OCTO_DELAY_SNAPSHOT_PUBLISH:-false}" == true && "${1:-}" == *seats.json.tmp.* ]]; then
         : > "$snapshot_gate"
@@ -341,16 +342,38 @@ for _snapshot_wait in $(seq 1 100); do
     sleep 0.01
 done
 
-run_contract_transition race-seat planned >/dev/null &
+event_lock_impl="$(declare -f _octo_event_lock)"
+eval "$(declare -f _octo_event_lock | sed '1s/_octo_event_lock/_octo_event_lock_real/')"
+_octo_event_lock() {
+    local lock_rc=0
+    _octo_event_lock_real "$@" || lock_rc=$?
+    if [[ "$lock_rc" -eq 75 && -n "${OCTO_TEST_LOCK_WAIT_MARKER:-}" ]]; then
+        : > "$OCTO_TEST_LOCK_WAIT_MARKER"
+    fi
+    return "$lock_rc"
+}
+
+OCTO_TEST_LOCK_WAIT_MARKER="$lock_wait_gate" run_contract_transition race-seat planned >/dev/null &
 new_transition_pid=$!
-sleep 0.1
+lock_wait_seen=false
+for _lock_wait in $(seq 1 300); do
+    if [[ -f "$lock_wait_gate" ]]; then
+        lock_wait_seen=true
+        break
+    fi
+    sleep 0.01
+done
 : > "$snapshot_release"
 wait "$stale_snapshot_pid"
 wait "$new_transition_pid"
 unset -f mv
+unset -f _octo_event_lock _octo_event_lock_real
+eval "$event_lock_impl"
 
-test_case "the contract lock serializes snapshot publication before later transitions"
-if jq -e '.seats | any(.seat_id == "race-seat" and .transition == "planned")' "$snapshot" >/dev/null; then
+test_case "the contract lock waits for slow snapshot publication before later transitions"
+if [[ "$lock_wait_seen" != true ]]; then
+    test_fail "later transition never reached verified contract-lock contention"
+elif jq -e '.seats | any(.seat_id == "race-seat" and .transition == "planned")' "$snapshot" >/dev/null; then
     test_pass
 else
     test_fail "serialized snapshot publication lost the later seat state"

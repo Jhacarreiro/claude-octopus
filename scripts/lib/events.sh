@@ -89,15 +89,25 @@ _octo_event_reclaim_stale_lock() {
     [[ "$stale_secs" =~ ^[0-9]+$ ]] || stale_secs=30
     [[ -d "$lockdir" ]] || return 1
 
-    [[ -f "$lockdir/pid" ]] && IFS= read -r owner < "$lockdir/pid" || true
+    if [[ -e "$lockdir/pid" ]]; then
+        [[ -f "$lockdir/pid" && -r "$lockdir/pid" ]] || return 1
+        if [[ -s "$lockdir/pid" ]]; then
+            IFS= read -r owner < "$lockdir/pid" || return 1
+        fi
+    fi
     if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
-        return 1
+        return 75
     fi
-    [[ -f "$lockdir/ts" ]] && IFS= read -r timestamp < "$lockdir/ts" || true
+    if [[ -e "$lockdir/ts" ]]; then
+        [[ -f "$lockdir/ts" && -r "$lockdir/ts" ]] || return 1
+        if [[ -s "$lockdir/ts" ]]; then
+            IFS= read -r timestamp < "$lockdir/ts" || return 1
+        fi
+    fi
     if [[ ! "$timestamp" =~ ^[0-9]+$ ]]; then
-        timestamp="$(stat -f %m "$lockdir" 2>/dev/null || stat -c %Y "$lockdir" 2>/dev/null || printf '0')"
+        timestamp="$(stat -f %m "$lockdir" 2>/dev/null || stat -c %Y "$lockdir" 2>/dev/null)" || return 1
     fi
-    now="$(date +%s)"
+    now="$(date +%s)" || return 1
     [[ "$timestamp" =~ ^[0-9]+$ && $((now - timestamp)) -ge "$stale_secs" ]] || return 1
 
     rm -f "$lockdir/pid" "$lockdir/ts" 2>/dev/null || return 1
@@ -106,17 +116,18 @@ _octo_event_reclaim_stale_lock() {
 
 _octo_event_lock() {
     local lockdir="$1.lock"
-    local tries=0
+    local tries=0 reclaim_rc
     while ! mkdir "$lockdir" 2>/dev/null; do
         tries=$((tries + 1))
         if [[ "$tries" -ge 50 ]]; then
-            if ! _octo_event_reclaim_stale_lock "$lockdir"; then
-                # Distinguish ordinary contention from an infrastructure
-                # failure so durable callers can retry only a live lock.
-                [[ -d "$lockdir" ]] && return 75
-                return 1
+            if _octo_event_reclaim_stale_lock "$lockdir"; then
+                tries=0
+            else
+                reclaim_rc=$?
+                # Only verified live ownership is ordinary contention.
+                # Preserve metadata and cleanup failures for durable callers.
+                return "$reclaim_rc"
             fi
-            tries=0
         fi
         sleep 0.02 2>/dev/null || return 1
     done

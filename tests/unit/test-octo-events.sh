@@ -80,6 +80,19 @@ test_stale_lock_recovery() {
     fi
     rm -f "$lockdir/pid" "$lockdir/ts"
     rmdir "$lockdir"
+
+    local reclaim_impl infrastructure_rc=0
+    reclaim_impl="$(declare -f _octo_event_reclaim_stale_lock)"
+    _octo_event_reclaim_stale_lock() { return 74; }
+    mkdir -p "$lockdir"
+    OCTO_EVENT_LOCK_STALE_SECS=1 _octo_event_lock "$target" || infrastructure_rc=$?
+    eval "$reclaim_impl"
+    rm -f "$lockdir/pid" "$lockdir/ts"
+    rmdir "$lockdir"
+    if [[ "$infrastructure_rc" -ne 74 ]]; then
+        test_fail "lock infrastructure status 74 was converted to $infrastructure_rc"
+        return
+    fi
     test_pass
 }
 

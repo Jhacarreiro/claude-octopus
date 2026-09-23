@@ -397,6 +397,70 @@ tangle_result_latest_status() {
     esac
 }
 
+tangle_result_terminal_outcome() {
+    local result="$1"
+    local status_line=""
+    status_line=$(grep '^## Status:' "$result" 2>/dev/null | tail -1 || true)
+    case "$status_line" in
+        *SUCCESS*)
+            if tangle_result_has_blocker_output "$result"; then
+                echo "blocked"
+            else
+                echo "success"
+            fi
+            ;;
+        *"Execution contract persistence failed"*) echo "persistence_failed" ;;
+        *TIMEOUT*) echo "timeout" ;;
+        *FAILED*) echo "failed" ;;
+        *ERROR*) echo "error" ;;
+        *) echo "unknown" ;;
+    esac
+}
+
+tangle_result_paths_outcome_summary() {
+    local result_lines="${1:-}"
+    local success=0 timeout=0 persistence_failed=0 blocked=0 failed=0 error=0 unknown=0
+    local entry result outcome
+    while IFS= read -r entry; do
+        [[ -n "$entry" ]] || continue
+        result="${entry#result:}"
+        if [[ ! -f "$result" ]]; then
+            ((unknown++)) || true
+            continue
+        fi
+        outcome=$(tangle_result_terminal_outcome "$result")
+        case "$outcome" in
+            success) ((success++)) || true ;;
+            timeout) ((timeout++)) || true ;;
+            persistence_failed) ((persistence_failed++)) || true ;;
+            blocked) ((blocked++)) || true ;;
+            failed) ((failed++)) || true ;;
+            error) ((error++)) || true ;;
+            *) ((unknown++)) || true ;;
+        esac
+    done <<< "$result_lines"
+
+    local parts=()
+    [[ "$success" -gt 0 ]] && parts+=("$success succeeded")
+    [[ "$timeout" -gt 0 ]] && parts+=("$timeout timed out")
+    [[ "$persistence_failed" -gt 0 ]] && parts+=("$persistence_failed persistence failed")
+    [[ "$blocked" -gt 0 ]] && parts+=("$blocked blocked")
+    [[ "$failed" -gt 0 ]] && parts+=("$failed failed")
+    [[ "$error" -gt 0 ]] && parts+=("$error errored")
+    [[ "$unknown" -gt 0 ]] && parts+=("$unknown unknown")
+
+    if [[ "${#parts[@]}" -eq 0 ]]; then
+        printf '%s\n' "none"
+        return 0
+    fi
+    local summary="${parts[0]}"
+    local part
+    for part in "${parts[@]:1}"; do
+        summary+=", $part"
+    done
+    printf '%s\n' "$summary"
+}
+
 tangle_quality_retry_limit_value() {
     if declare -f quality_retry_limit >/dev/null 2>&1; then
         quality_retry_limit
@@ -499,6 +563,9 @@ validate_tangle_results() {
         FAILED_SUBTASKS=""  # Reset for this validation pass (string-based)
         TANGLE_HARD_GATE_RETRY_FEEDBACK=""
 
+        local effective_result_files
+        effective_result_files=$(tangle_effective_result_files "$task_group")
+
         local result
         while IFS= read -r result; do
             [[ -n "$result" && -f "$result" ]] || continue
@@ -537,7 +604,10 @@ validate_tangle_results() {
             fi
             results+="$(<"$result")\n\n---\n\n"
             result_outputs+="$(extract_tangle_result_body "$result")"$'\n'
-        done <<< "$(tangle_effective_result_files "$task_group")"
+        done <<< "$effective_result_files"
+
+        local terminal_outcome_summary
+        terminal_outcome_summary=$(tangle_result_paths_outcome_summary "$effective_result_files")
 
         local worktree_changes=""
         local requires_worktree_changes=false
@@ -748,6 +818,7 @@ $challenge_result
 - Success Rate: ${quality_success_rate}% (threshold: ${tangle_threshold}%)
 - Successful: ${success_count}/${total} result files
 - Failed: ${fail_count}/${total} result files
+- Terminal Outcomes: ${terminal_outcome_summary}
 - Decision Branch: ${quality_branch}
 - Retry Attempts: ${quality_retry_count}/$(tangle_quality_retry_limit_value)
 $(if [[ "$correction_overlay_applied" == "true" ]]; then
@@ -799,7 +870,14 @@ EOF
                     echo -e "${YELLOW}${_BOX_TOP}${NC}"
                     echo -e "${YELLOW}║  🐙 Branching: Retry Path (attempt $quality_retry_count/$retry_limit_display)                    ║${NC}"
                     echo -e "${YELLOW}${_BOX_BOT}${NC}"
-                    log WARN "Quality gate at ${quality_success_rate}%, below ${tangle_threshold}%. Retrying..."
+                    local retry_outcome_summary
+                    retry_outcome_summary=$(tangle_result_paths_outcome_summary "$FAILED_SUBTASKS")
+                    if [[ -n "$hard_gate_retry_feedback" ]]; then
+                        echo "Retry reason: hard-gate correction; candidate terminal outcomes: ${retry_outcome_summary}"
+                    else
+                        echo "Retrying failed subtasks: ${retry_outcome_summary}"
+                    fi
+                    log WARN "Quality gate at ${quality_success_rate}%, below ${tangle_threshold}%. Terminal outcomes: ${terminal_outcome_summary}. Retrying..."
                     # v8.18.0: Lock providers that failed quality gate
                     while IFS= read -r failed_task; do
                         [[ -z "$failed_task" ]] && continue

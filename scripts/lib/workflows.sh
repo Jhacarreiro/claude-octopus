@@ -5057,9 +5057,9 @@ $(tangle_decomposition_json_contract_guidance)"
             fi
         done
         if [[ -t 1 ]]; then
-            echo -ne "\r${CYAN}Progress: $completed/${#task_ids[@]} subtasks complete${NC}"
+            echo -ne "\r${CYAN}Progress: $completed/${#task_ids[@]} subtasks finished${NC}"
         elif [[ "$completed" -ne "$_last_progress" ]]; then
-            echo "Progress: $completed/${#task_ids[@]} subtasks complete"
+            echo "Progress: $completed/${#task_ids[@]} subtasks finished"
         fi
         _last_progress="$completed"
         [[ $completed -ge ${#task_ids[@]} ]] || sleep 2

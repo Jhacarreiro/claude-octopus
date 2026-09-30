@@ -123,6 +123,8 @@ provider remain distinct. Legacy provider-only status records are still read.
 
 Provider admission still applies independently. A seat fails closed when its
 provider is not admitted by the active provider allowlist.
+
+For managed/supervised runs, set `OCTOPUS_REQUIRE_EXPLICIT_REVIEW_ROUTING=true`. In that mode every Design Review and contextual-review seat must be explicitly configured; missing seats abort instead of using standalone defaults, and Design Review may retry the same seat but will not substitute a different provider/model after retries are exhausted.
 `OCTOPUS_REVIEW_SINGLE_PROVIDER` remains the global compatibility override and
 takes precedence over individual seat overrides. Run `octopus fleet review` to
 inspect the effective logic, security, architecture, CVE, diversity, verifier,

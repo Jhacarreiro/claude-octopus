@@ -574,6 +574,11 @@ design_review_run_seat_with_recovery() {
         rc=0
     done
 
+    if [[ "${OCTOPUS_REQUIRE_EXPLICIT_REVIEW_ROUTING:-false}" == "true" ]]; then
+        log ERROR "Design review seat '$role' exhausted retries for explicit route $initial_agent; managed routing forbids fallback"
+        return 1
+    fi
+
     candidates="$(design_review_candidate_agents "$ceremony_prompt" 2>/dev/null || true)"
     # Prefer an unused seat identity first; if the pool has no unused candidate,
     # reuse another admitted candidate rather than giving up without trying.
@@ -649,6 +654,11 @@ design_review_run_synthesis_with_recovery() {
         log WARN "Design review synthesis returned invalid output from $initial_agent (attempt $attempt/2, rc=$rc, bytes=${#output}, reason=$reason)"
         rc=0
     done
+
+    if [[ "${OCTOPUS_REQUIRE_EXPLICIT_REVIEW_ROUTING:-false}" == "true" ]]; then
+        log ERROR "Design review synthesis exhausted retries for explicit route $initial_agent; managed routing forbids fallback"
+        return 1
+    fi
 
     candidates="$(design_review_candidate_agents "$synthesis_prompt" 2>/dev/null || true)"
     for pass in unique reuse; do
@@ -733,6 +743,23 @@ Rules:
 - do not emit Markdown or prose before/after JSON.
 EOF
 )"
+
+    # Managed callers may require every design-review seat to be explicit. In
+    # that mode missing seat identities are a configuration error, not a reason
+    # to fall back to provider-neutral defaults.
+    if [[ "${OCTOPUS_REQUIRE_EXPLICIT_REVIEW_ROUTING:-false}" == "true" ]]; then
+        local required_design_env
+        for required_design_env in \
+            OCTOPUS_DESIGN_REVIEW_IMPLEMENTER_AGENT \
+            OCTOPUS_DESIGN_REVIEW_RESEARCHER_AGENT \
+            OCTOPUS_DESIGN_REVIEW_CODE_REVIEWER_AGENT \
+            OCTOPUS_DESIGN_REVIEW_SYNTHESIZER_AGENT; do
+            if [[ -z "${!required_design_env:-}" ]]; then
+                log ERROR "Explicit review routing required but ${required_design_env} is missing"
+                return 1
+            fi
+        done
+    fi
 
     # Gather approaches by semantic review role. Runtime provider selection uses
     # the same admitted, council-capable provider pool as review. Provider-named

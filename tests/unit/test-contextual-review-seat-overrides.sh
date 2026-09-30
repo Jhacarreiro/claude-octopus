@@ -170,6 +170,19 @@ if [[ "$(review_agent_for_seat codex implementation-logic-reviewer)" == 'codex' 
 else
   test_fail "unconfigured seat changed upstream default"
 fi
+export OCTOPUS_REVIEW_LOGIC_AGENT='openai:gpt-5.6-luna'
+
+test_case "managed contextual review requires every explicit semantic seat"
+unset OCTOPUS_REVIEW_SECURITY_AGENT
+managed_rc=0
+OCTOPUS_REQUIRE_EXPLICIT_REVIEW_ROUTING=true review_validate_configured_seat_overrides >/dev/null 2>&1 || managed_rc=$?
+if [[ "$managed_rc" -ne 0 ]]; then
+  test_pass
+else
+  test_fail "managed contextual review accepted a missing explicit seat"
+fi
+export OCTOPUS_REVIEW_SECURITY_AGENT='claude:claude-opus-5'
+unset OCTOPUS_REQUIRE_EXPLICIT_REVIEW_ROUTING
 
 test_case "model-qualified CommandCode seats retain provider telemetry identity"
 if [[ "$(review_provider_key_from_agent_type "$OCTOPUS_REVIEW_DIVERSITY_AGENT")" == 'commandcode' ]]; then

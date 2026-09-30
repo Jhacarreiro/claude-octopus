@@ -313,8 +313,20 @@ review_validate_configured_seat_overrides() {
         implementation-synthesizer
     )
 
-    # The global provider override supersedes all seat-specific configuration.
-    [[ -n "${OCTOPUS_REVIEW_SINGLE_PROVIDER:-}" ]] && return 0
+    if [[ "${OCTOPUS_REQUIRE_EXPLICIT_REVIEW_ROUTING:-false}" == "true" ]]; then
+        for role in "${roles[@]}"; do
+            env_name="$(review_seat_override_env_name "$role")" || continue
+            if [[ "${!env_name+x}" != "x" || -z "${!env_name:-}" ]]; then
+                log ERROR "Explicit review routing required but ${env_name} is missing"
+                return 2
+            fi
+        done
+    else
+        # The global provider override supersedes seat-specific configuration
+        # only for ordinary standalone runs. Managed explicit-routing runs must
+        # provide every semantic seat separately.
+        [[ -n "${OCTOPUS_REVIEW_SINGLE_PROVIDER:-}" ]] && return 0
+    fi
 
     for role in "${roles[@]}"; do
         env_name="$(review_seat_override_env_name "$role")" || continue

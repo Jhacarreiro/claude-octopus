@@ -111,6 +111,43 @@ else
   test_fail "caller did not receive design-review synthesis: ${returned_synthesis:0:160}"
 fi
 
+test_case "managed design review fails closed when an explicit seat is missing"
+: > "$CAPTURE"
+managed_rc=0
+OCTOPUS_REQUIRE_EXPLICIT_REVIEW_ROUTING=true \
+OCTOPUS_DESIGN_REVIEW_IMPLEMENTER_AGENT=codex \
+OCTOPUS_DESIGN_REVIEW_RESEARCHER_AGENT=commandcode \
+OCTOPUS_DESIGN_REVIEW_CODE_REVIEWER_AGENT=claude-sonnet \
+  design_review_ceremony "test" >/dev/null 2>&1 || managed_rc=$?
+if [[ "$managed_rc" -ne 0 && ! -s "$CAPTURE" ]]; then
+  test_pass
+else
+  test_fail "managed review used a fallback despite a missing explicit synthesis seat: rc=$managed_rc calls=$(tr '\n' ';' < "$CAPTURE")"
+fi
+
+test_case "managed design review retries the explicit seat but never changes provider/model"
+managed_calls="$TMP_HOME/managed-retry.calls"
+: > "$managed_calls"
+design_review_candidate_agents() { printf '%s\n' 'commandcode:fallback-model'; }
+run_agent_sync_consultative() {
+  printf '%s\n' "$1" >> "$managed_calls"
+  printf '%s\n' 'invalid'
+}
+managed_approach=""
+managed_agent=""
+managed_rc=0
+OCTOPUS_REQUIRE_EXPLICIT_REVIEW_ROUTING=true \
+  design_review_run_seat_with_recovery \
+    "codex" "design-feasibility-reviewer" "prompt" "0" "codex commandcode" managed_approach managed_agent \
+    >/dev/null 2>&1 || managed_rc=$?
+if [[ "$managed_rc" -ne 0 ]] \
+  && [[ "$(wc -l < "$managed_calls" | tr -d ' ')" == "2" ]] \
+  && [[ "$(sort -u "$managed_calls")" == "codex" ]]; then
+  test_pass
+else
+  test_fail "managed recovery changed seat or did not fail after same-seat retries: rc=$managed_rc calls=$(tr '\n' ';' < "$managed_calls")"
+fi
+
 test_case "explicit design-review override cannot bypass the provider allowlist"
 : > "$CAPTURE"
 override_rc=0

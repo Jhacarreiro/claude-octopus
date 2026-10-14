@@ -33,6 +33,7 @@ cli_pid=""
 heartbeat_pid=""
 cleanup() {
   [[ -n "$heartbeat_pid" ]] && kill "$heartbeat_pid" 2>/dev/null
+  [[ -n "$cli_pid" ]] && kill -KILL "$cli_pid" 2>/dev/null
   rm -f "$tmp" "$prompt_file"
 }
 trap cleanup EXIT
@@ -62,7 +63,10 @@ trap 'kill -KILL "$cli_pid" 2>/dev/null; exit 129' HUP
 # sees output would kill a model that is still reading and planning. The CLI
 # streams NDJSON events into $tmp; report on stderr while that stream grows.
 # The same loop kills the CLI if this helper disappears, and stops on its own
-# once the helper is gone, so it never spins on an unreaped (zombie) CLI.
+# once the helper is gone, so it never spins on an unreaped (zombie) CLI. The
+# helper counts as gone once this loop is reparented: an unreaped helper still
+# answers kill -0, and its PID can be reused. Bash 3.2 has no BASHPID, so an
+# exec'd sh reports this loop's own PID.
 heartbeat_secs="${OCTOPUS_COMMANDCODE_HEARTBEAT_SECS:-60}"
 [[ "$heartbeat_secs" =~ ^[1-9][0-9]*$ ]] || heartbeat_secs=60
 helper_pid=$$
@@ -70,9 +74,13 @@ helper_pid=$$
   exec >/dev/null
   last_size=0
   waited=0
+  watcher_pid="$(exec /bin/sh -c 'echo "$PPID"')"
   while kill -0 "$cli_pid" 2>/dev/null; do
     sleep 1
-    if ! kill -0 "$helper_pid" 2>/dev/null; then
+    watcher_parent="$(ps -o ppid= -p "$watcher_pid" 2>/dev/null || true)"
+    watcher_parent="${watcher_parent//[[:space:]]/}"
+    if [[ -n "$watcher_parent" && "$watcher_parent" != "$helper_pid" ]] ||
+       ! kill -0 "$helper_pid" 2>/dev/null; then
       kill -KILL "$cli_pid" 2>/dev/null
       exit 0
     fi
@@ -94,6 +102,7 @@ if wait "$cli_pid"; then
 else
   rc=$?
 fi
+cli_pid=""
 kill "$heartbeat_pid" 2>/dev/null || true
 wait "$heartbeat_pid" 2>/dev/null || true
 heartbeat_pid=""

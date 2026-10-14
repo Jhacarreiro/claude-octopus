@@ -23,13 +23,15 @@
 - `commandcode-exec.sh` no longer leaves the Command Code CLI running after the
   helper is killed. A Tangle stall watchdog kill used to orphan the CLI, which
   kept editing the shared worktree next to its own retry. The CLI now runs
-  under `setpriv --pdeathsig KILL` when available and the helper kills it on
-  TERM, INT or HUP.
+  under `setpriv --pdeathsig KILL` where available (Linux), the helper kills
+  it on TERM, INT or HUP, and on other platforms a watcher kills it within a
+  second of the helper disappearing.
 - Supervised Tangle implementers on Command Code are no longer stopped as
   stalled while the model is still reading and planning. The helper buffers
   the CLI's NDJSON event stream until the final result, so the watchdog saw
   no output; it now writes a progress line to stderr at most once per
-  `OCTOPUS_COMMANDCODE_HEARTBEAT_SECS` (default 60) while that stream grows.
+  `OCTOPUS_COMMANDCODE_HEARTBEAT_SECS` (default 60, forwarded through the
+  provider's isolated environment) while that stream grows.
 
 ## [11.13.2] - 2026-10-10
 

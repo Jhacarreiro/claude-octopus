@@ -46,12 +46,13 @@ esac
 
 # The CLI must not outlive this helper. A stall watchdog or timeout that
 # kills the helper would otherwise orphan an agent that keeps editing the
-# worktree next to its own retry. pdeathsig also covers SIGKILL.
-launcher=()
+# worktree next to its own retry. pdeathsig covers SIGKILL where setpriv
+# exists (Linux); the watcher below covers every other platform.
 if command -v setpriv >/dev/null 2>&1; then
-  launcher=(setpriv --pdeathsig KILL --)
+  setpriv --pdeathsig KILL -- "$bin" "${args[@]}" <"$prompt_file" >"$tmp" &
+else
+  "$bin" "${args[@]}" <"$prompt_file" >"$tmp" &
 fi
-"${launcher[@]}" "$bin" "${args[@]}" <"$prompt_file" >"$tmp" &
 cli_pid=$!
 trap 'kill -KILL "$cli_pid" 2>/dev/null; exit 143' TERM
 trap 'kill -KILL "$cli_pid" 2>/dev/null; exit 130' INT
@@ -60,16 +61,24 @@ trap 'kill -KILL "$cli_pid" 2>/dev/null; exit 129' HUP
 # stdout stays empty until the final result, so a stall watchdog that only
 # sees output would kill a model that is still reading and planning. The CLI
 # streams NDJSON events into $tmp; report on stderr while that stream grows.
+# The same loop kills the CLI if this helper disappears, and stops on its own
+# once the helper is gone, so it never spins on an unreaped (zombie) CLI.
 heartbeat_secs="${OCTOPUS_COMMANDCODE_HEARTBEAT_SECS:-60}"
 [[ "$heartbeat_secs" =~ ^[1-9][0-9]*$ ]] || heartbeat_secs=60
+helper_pid=$$
 (
   exec >/dev/null
   last_size=0
+  waited=0
   while kill -0 "$cli_pid" 2>/dev/null; do
-    for ((waited = 0; waited < heartbeat_secs; waited++)); do
-      sleep 1
-      kill -0 "$cli_pid" 2>/dev/null || exit 0
-    done
+    sleep 1
+    if ! kill -0 "$helper_pid" 2>/dev/null; then
+      kill -KILL "$cli_pid" 2>/dev/null
+      exit 0
+    fi
+    waited=$((waited + 1))
+    (( waited < heartbeat_secs )) && continue
+    waited=0
     size="$(wc -c <"$tmp" 2>/dev/null || echo 0)"
     size="${size//[[:space:]]/}"
     if [[ "$size" =~ ^[0-9]+$ ]] && (( size > last_size )); then

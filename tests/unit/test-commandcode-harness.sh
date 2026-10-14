@@ -169,25 +169,26 @@ else
 fi
 
 test_case "the CLI does not outlive a killed helper"
-if ! command -v setpriv >/dev/null 2>&1; then
-    test_skip "setpriv not available"
+# A CLI reparented to a PID 1 that never reaps stays as a zombie; that is gone too.
+cli_gone() {
+    kill -0 "$1" 2>/dev/null || return 0
+    [[ "$(ps -o stat= -p "$1" 2>/dev/null)" == Z* ]]
+}
+rm -f "$MOCK_PID_FILE"
+export MOCK_EVENT_GAP=20
+printf 'implement' | OCTOPUS_COMMANDCODE_BIN="$SLOW_CLI" \
+    "$PROJECT_ROOT/scripts/helpers/commandcode-exec.sh" deepseek/deepseek-v4-pro yolo >/dev/null 2>&1 &
+helper_pid=$!
+for _ in $(seq 1 50); do [[ -s "$MOCK_PID_FILE" ]] && break; sleep 0.1; done
+cli_pid="$(cat "$MOCK_PID_FILE" 2>/dev/null || true)"
+kill -KILL "$helper_pid" 2>/dev/null || true
+wait "$helper_pid" 2>/dev/null || true
+for _ in $(seq 1 50); do cli_gone "$cli_pid" && break; sleep 0.1; done
+if [[ -n "$cli_pid" ]] && cli_gone "$cli_pid"; then
+    test_pass
 else
-    rm -f "$MOCK_PID_FILE"
-    export MOCK_EVENT_GAP=20
-    printf 'implement' | OCTOPUS_COMMANDCODE_BIN="$SLOW_CLI" \
-        "$PROJECT_ROOT/scripts/helpers/commandcode-exec.sh" deepseek/deepseek-v4-pro yolo >/dev/null 2>&1 &
-    helper_pid=$!
-    for _ in $(seq 1 50); do [[ -s "$MOCK_PID_FILE" ]] && break; sleep 0.1; done
-    cli_pid="$(cat "$MOCK_PID_FILE" 2>/dev/null || true)"
-    kill -KILL "$helper_pid" 2>/dev/null || true
-    wait "$helper_pid" 2>/dev/null || true
-    for _ in $(seq 1 30); do kill -0 "$cli_pid" 2>/dev/null || break; sleep 0.1; done
-    if [[ -n "$cli_pid" ]] && ! kill -0 "$cli_pid" 2>/dev/null; then
-        test_pass
-    else
-        kill -KILL "$cli_pid" 2>/dev/null || true
-        test_fail "CLI $cli_pid survived its helper"
-    fi
+    kill -KILL "$cli_pid" 2>/dev/null || true
+    test_fail "CLI $cli_pid survived its helper"
 fi
 unset MOCK_PID_FILE MOCK_EVENT_GAP
 

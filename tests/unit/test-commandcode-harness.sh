@@ -144,4 +144,51 @@ else
     test_fail "missing isolated Command Code environment entries"
 fi
 
+SLOW_CLI="$FIXTURE_DIR/bin/slow-command-code"
+cat > "$SLOW_CLI" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$$" > "$MOCK_PID_FILE"
+cat >/dev/null
+for _ in 1 2 3; do
+    printf '%s\n' '{"type":"event","event":{"type":"tool_running"}}'
+    sleep "${MOCK_EVENT_GAP:-1}"
+done
+printf '%s\n' '{"type":"result","subtype":"success","sessionId":"abc","finalText":"SLOW_OK"}'
+MOCK
+chmod +x "$SLOW_CLI"
+
+test_case "reports progress on stderr while the event stream grows"
+export MOCK_PID_FILE="$FIXTURE_DIR/slow.pid" MOCK_EVENT_GAP=1
+progress_err="$FIXTURE_DIR/progress.err"
+out=$(printf 'implement' | OCTOPUS_COMMANDCODE_BIN="$SLOW_CLI" OCTOPUS_COMMANDCODE_HEARTBEAT_SECS=1 \
+    "$PROJECT_ROOT/scripts/helpers/commandcode-exec.sh" deepseek/deepseek-v4-pro yolo 2>"$progress_err")
+if [[ "$out" == "SLOW_OK" ]] && grep -q 'commandcode: still working' "$progress_err"; then
+    test_pass
+else
+    test_fail "expected final text and a progress line, got out=$out err=$(cat "$progress_err")"
+fi
+
+test_case "the CLI does not outlive a killed helper"
+if ! command -v setpriv >/dev/null 2>&1; then
+    test_skip "setpriv not available"
+else
+    rm -f "$MOCK_PID_FILE"
+    export MOCK_EVENT_GAP=20
+    printf 'implement' | OCTOPUS_COMMANDCODE_BIN="$SLOW_CLI" \
+        "$PROJECT_ROOT/scripts/helpers/commandcode-exec.sh" deepseek/deepseek-v4-pro yolo >/dev/null 2>&1 &
+    helper_pid=$!
+    for _ in $(seq 1 50); do [[ -s "$MOCK_PID_FILE" ]] && break; sleep 0.1; done
+    cli_pid="$(cat "$MOCK_PID_FILE" 2>/dev/null || true)"
+    kill -KILL "$helper_pid" 2>/dev/null || true
+    wait "$helper_pid" 2>/dev/null || true
+    for _ in $(seq 1 30); do kill -0 "$cli_pid" 2>/dev/null || break; sleep 0.1; done
+    if [[ -n "$cli_pid" ]] && ! kill -0 "$cli_pid" 2>/dev/null; then
+        test_pass
+    else
+        kill -KILL "$cli_pid" 2>/dev/null || true
+        test_fail "CLI $cli_pid survived its helper"
+    fi
+fi
+unset MOCK_PID_FILE MOCK_EVENT_GAP
+
 test_summary

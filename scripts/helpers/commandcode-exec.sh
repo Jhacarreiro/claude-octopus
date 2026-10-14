@@ -28,7 +28,15 @@ prompt="$(cat)"
 [[ -n "$prompt" ]] || { echo "commandcode: empty prompt" >&2; exit 1; }
 
 tmp="$(mktemp "${TMPDIR:-/tmp}/octopus-commandcode.XXXXXX")" || exit 1
-trap 'rm -f "$tmp"' EXIT INT TERM
+prompt_file="$(mktemp "${TMPDIR:-/tmp}/octopus-commandcode-prompt.XXXXXX")" || { rm -f "$tmp"; exit 1; }
+cli_pid=""
+heartbeat_pid=""
+cleanup() {
+  [[ -n "$heartbeat_pid" ]] && kill "$heartbeat_pid" 2>/dev/null
+  rm -f "$tmp" "$prompt_file"
+}
+trap cleanup EXIT
+printf '%s' "$prompt" >"$prompt_file"
 
 args=(-p --model "$model" --output-format json --skip-onboarding --no-auto-update --trust --no-session)
 case "$permission_mode" in
@@ -36,11 +44,50 @@ case "$permission_mode" in
   *) args+=(--permission-mode "$permission_mode") ;;
 esac
 
-if printf '%s' "$prompt" | "$bin" "${args[@]}" >"$tmp"; then
+# The CLI must not outlive this helper. A stall watchdog or timeout that
+# kills the helper would otherwise orphan an agent that keeps editing the
+# worktree next to its own retry. pdeathsig also covers SIGKILL.
+launcher=()
+if command -v setpriv >/dev/null 2>&1; then
+  launcher=(setpriv --pdeathsig KILL --)
+fi
+"${launcher[@]}" "$bin" "${args[@]}" <"$prompt_file" >"$tmp" &
+cli_pid=$!
+trap 'kill -KILL "$cli_pid" 2>/dev/null; exit 143' TERM
+trap 'kill -KILL "$cli_pid" 2>/dev/null; exit 130' INT
+trap 'kill -KILL "$cli_pid" 2>/dev/null; exit 129' HUP
+
+# stdout stays empty until the final result, so a stall watchdog that only
+# sees output would kill a model that is still reading and planning. The CLI
+# streams NDJSON events into $tmp; report on stderr while that stream grows.
+heartbeat_secs="${OCTOPUS_COMMANDCODE_HEARTBEAT_SECS:-60}"
+[[ "$heartbeat_secs" =~ ^[1-9][0-9]*$ ]] || heartbeat_secs=60
+(
+  exec >/dev/null
+  last_size=0
+  while kill -0 "$cli_pid" 2>/dev/null; do
+    for ((waited = 0; waited < heartbeat_secs; waited++)); do
+      sleep 1
+      kill -0 "$cli_pid" 2>/dev/null || exit 0
+    done
+    size="$(wc -c <"$tmp" 2>/dev/null || echo 0)"
+    size="${size//[[:space:]]/}"
+    if [[ "$size" =~ ^[0-9]+$ ]] && (( size > last_size )); then
+      printf 'commandcode: still working (%s bytes of events)\n' "$size" >&2
+      last_size="$size"
+    fi
+  done
+) &
+heartbeat_pid=$!
+
+if wait "$cli_pid"; then
   rc=0
 else
   rc=$?
 fi
+kill "$heartbeat_pid" 2>/dev/null || true
+wait "$heartbeat_pid" 2>/dev/null || true
+heartbeat_pid=""
 
 result_line="$(awk 'BEGIN{line=""} /^\{/{line=$0} END{print line}' "$tmp")"
 if [[ -z "$result_line" ]] || ! command -v jq >/dev/null 2>&1; then

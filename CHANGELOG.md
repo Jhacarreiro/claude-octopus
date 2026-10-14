@@ -18,6 +18,19 @@
   `auth-invalid`. The provider is excluded from Council,
   and a proxy model name does not establish model-family independence.
 
+### Fixed
+
+- `commandcode-exec.sh` no longer leaves the Command Code CLI running after the
+  helper is killed. A Tangle stall watchdog kill used to orphan the CLI, which
+  kept editing the shared worktree next to its own retry. The CLI now runs
+  under `setpriv --pdeathsig KILL` when available and the helper kills it on
+  TERM, INT or HUP.
+- Supervised Tangle implementers on Command Code are no longer stopped as
+  stalled while the model is still reading and planning. The helper buffers
+  the CLI's NDJSON event stream until the final result, so the watchdog saw
+  no output; it now writes a progress line to stderr at most once per
+  `OCTOPUS_COMMANDCODE_HEARTBEAT_SECS` (default 60) while that stream grows.
+
 ## [11.13.2] - 2026-10-10
 
 Provider routing and host detection fixes from [PR #1190](https://github.com/nyldn/claude-octopus/pull/1190), commit `b34780d48d9360d6c349c988e593be440b091c0f`.

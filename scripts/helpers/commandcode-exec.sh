@@ -33,12 +33,21 @@ cli_pid=""
 cli_pgid=""
 cli_group_isolated=0
 heartbeat_pid=""
+kill_process_tree() {
+  local parent_pid="$1"
+  local child_pid
+  while read -r child_pid; do
+    [[ "$child_pid" =~ ^[0-9]+$ ]] || continue
+    kill_process_tree "$child_pid"
+  done < <(ps -A -o pid= -o ppid= 2>/dev/null | awk -v parent="$parent_pid" '$2 == parent {print $1}')
+  kill -KILL "$parent_pid" 2>/dev/null || true
+}
 kill_cli() {
   [[ -z "$cli_pid" ]] && return 0
   if [[ "$cli_group_isolated" -eq 1 && -n "$cli_pgid" ]]; then
     kill -KILL -- "-$cli_pgid" 2>/dev/null || true
   else
-    kill -KILL "$cli_pid" 2>/dev/null || true
+    kill_process_tree "$cli_pid"
   fi
 }
 cleanup() {
@@ -57,9 +66,9 @@ esac
 
 # The CLI and its children must not outlive this helper. A stall watchdog or timeout that
 # kills the helper would otherwise orphan an agent that keeps editing the
-# worktree next to its own retry. pdeathsig covers SIGKILL where setpriv
-# exists (Linux); the process group and watcher cover child processes on
-# platforms where a direct child kill is not enough.
+# worktree next to its own retry. An isolated process group and the watcher
+# cover child processes when setsid is available; otherwise pdeathsig or the
+# process-tree fallback covers them where those facilities are available.
 cli_args=("$bin" "${args[@]}")
 if command -v setsid >/dev/null 2>&1; then
   cli_args=(setsid "${cli_args[@]}")

@@ -29,10 +29,10 @@
   being materialized again.
 - `commandcode-exec.sh` no longer leaves the Command Code CLI running after the
   helper is killed. A Tangle stall watchdog kill used to orphan the CLI, which
-  kept editing the shared worktree next to its own retry. The CLI now runs
-  under `setpriv --pdeathsig KILL` where available (Linux), the helper kills
-  it on TERM, INT or HUP, and on other platforms a watcher kills it within a
-  second of the helper disappearing.
+  kept editing the shared worktree next to its own retry. The helper now uses
+  an isolated process group where `setsid` is available, `setpriv
+  --pdeathsig KILL` when `setsid` is unavailable and `setpriv` is present,
+  and a watcher-backed process-tree fallback otherwise.
 - Supervised Tangle implementers on Command Code are no longer stopped as
   stalled while the model is still reading and planning. The helper buffers
   the CLI's NDJSON event stream until the final result, so the watchdog saw

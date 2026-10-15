@@ -45,7 +45,9 @@ kill_process_tree() {
 kill_cli() {
   [[ -z "$cli_pid" ]] && return 0
   if [[ "$cli_group_isolated" -eq 1 && -n "$cli_pgid" ]]; then
-    kill -KILL -- "-$cli_pgid" 2>/dev/null || true
+    if ! kill -KILL -- "-$cli_pgid" 2>/dev/null; then
+      kill_process_tree "$cli_pid"
+    fi
   else
     kill_process_tree "$cli_pid"
   fi
@@ -83,8 +85,10 @@ else
 fi
 cli_pid=$!
 if [[ "$cli_group_isolated" -eq 1 ]]; then
-  cli_pgid="$(ps -o pgid= -p "$cli_pid" 2>/dev/null || true)"
-  cli_pgid="${cli_pgid//[[:space:]]/}"
+  # setsid creates the child session with the CLI PID as its process-group ID.
+  # Reading it through ps here races with setsid() and can capture our own
+  # process group, making a later negative kill target the dispatcher too.
+  cli_pgid="$cli_pid"
 fi
 trap 'kill_cli; exit 143' TERM
 trap 'kill_cli; exit 130' INT

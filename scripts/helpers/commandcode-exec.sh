@@ -53,7 +53,7 @@ kill_cli() {
   fi
 }
 cleanup() {
-  [[ -n "$heartbeat_pid" ]] && kill "$heartbeat_pid" 2>/dev/null
+  [[ -n "$heartbeat_pid" ]] && kill "$heartbeat_pid" 2>/dev/null || true
   kill_cli
   rm -f "$tmp" "$prompt_file"
 }

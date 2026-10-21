@@ -1723,7 +1723,17 @@ ${provider_ctx}"
             if [[ ! "$_sync_output_tail_bytes" =~ ^[1-9][0-9]*$ ]]; then
                 _sync_output_tail_bytes=2000
             fi
-            log ERROR "Output tail: $(tail -c "$_sync_output_tail_bytes" "$temp_out")"
+            local _sync_output_tail=""
+            local _sync_output_scanner="${BASH_SOURCE[0]%/*}/../helpers/artifact-safety.py"
+            # Certify the complete provider output before truncating it. A
+            # secret prefix can fall outside the tail, so sanitizing only the
+            # bytes that will be logged is not sufficient.
+            if declare -F sanitize_secrets >/dev/null 2>&1 &&
+               command -v python3 >/dev/null 2>&1 &&
+               [[ -f "$_sync_output_scanner" ]] &&
+               _sync_output_tail="$(set -o pipefail; sanitize_secrets < "$temp_out" | python3 "$_sync_output_scanner" --redact | tail -c "$_sync_output_tail_bytes")"; then
+                log ERROR "Output tail: $_sync_output_tail"
+            fi
         fi
         # Hint callers when codex wrote deliverables under workspace-write
         # before SIGTERM — a bare "TIMEOUT" banner otherwise hides that work.

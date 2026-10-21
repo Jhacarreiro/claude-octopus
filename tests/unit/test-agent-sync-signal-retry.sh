@@ -14,6 +14,8 @@ test_suite "synchronous provider signal retry"
 # shellcheck source=/dev/null
 source "$PROJECT_ROOT/scripts/lib/agent-sync.sh"
 # shellcheck source=/dev/null
+source "$PROJECT_ROOT/scripts/lib/secure.sh"
+# shellcheck source=/dev/null
 source "$PROJECT_ROOT/scripts/lib/heartbeat.sh"
 eval "$(declare -f run_with_timeout | sed '1s/^run_with_timeout/octopus_test_real_run_with_timeout/')"
 
@@ -214,11 +216,29 @@ STDOUT_FAILURE="$invalid_tail_output" LOG_FILE="$invalid_tail_log" \
     run_sync_fixture openrouter 0 invalid-stdout-tail >/dev/null 2>&1
 invalid_tail_rc=$?
 set -e
+invalid_tail_length="$(awk '/Output tail:/{sub(/^.*Output tail: /, ""); print length($0); exit}' "$invalid_tail_log" 2>/dev/null || echo 0)"
 if [[ "$invalid_tail_rc" -eq 1 ]] && grep -Fq 'Output tail:' "$invalid_tail_log" && \
+   [[ "$invalid_tail_length" =~ ^[0-9]+$ ]] && [[ "$invalid_tail_length" -le 2000 ]] && \
    ! grep -Fq "$invalid_tail_output" "$invalid_tail_log"; then
     test_pass
 else
-    test_fail "invalid stdout tail-byte override was not bounded (rc=$invalid_tail_rc log-bytes=$(wc -c < "$invalid_tail_log" 2>/dev/null || echo 0))"
+    test_fail "invalid stdout tail-byte override was not bounded (rc=$invalid_tail_rc tail-length=${invalid_tail_length:-missing} log-bytes=$(wc -c < "$invalid_tail_log" 2>/dev/null || echo 0))"
+fi
+
+test_case "stdout failure tails are sanitized before logging"
+stdout_secret="sk-$(printf 'x%.0s' {1..40})"
+secret_log="$TEST_TMP_DIR/secret-stdout-failure.log"
+set +e
+STDOUT_FAILURE="provider credential $stdout_secret" LOG_FILE="$secret_log" \
+    run_sync_fixture openrouter 0 secret-stdout-failure >/dev/null 2>&1
+secret_rc=$?
+set -e
+if [[ "$secret_rc" -eq 1 ]] && grep -Fq 'Output tail:' "$secret_log" && \
+   grep -Fq '[REDACTED-API-KEY]' "$secret_log" && \
+   ! grep -Fq "$stdout_secret" "$secret_log"; then
+    test_pass
+else
+    test_fail "stdout failure tail was not sanitized (rc=$secret_rc log: $(tr '\n' ' ' < "$secret_log" 2>/dev/null))"
 fi
 
 test_case "successful sync dispatch preserves a caller with errexit disabled"

@@ -1714,6 +1714,17 @@ ${provider_ctx}"
         if [[ -s "$temp_err" ]]; then
             log ERROR "Error details: $(cat "$temp_err")"
         fi
+        # Some CLIs report the failure itself on stdout (Claude Code prints
+        # "Prompt is too long" or "Not logged in" there and exits 1), leaving
+        # only warnings on stderr. Keep a bounded tail so the cause survives
+        # the temp file cleanup below.
+        if [[ -s "$temp_out" ]]; then
+            local _sync_output_tail_bytes="${OCTOPUS_SYNC_FAILURE_OUTPUT_TAIL_BYTES:-2000}"
+            if [[ ! "$_sync_output_tail_bytes" =~ ^[1-9][0-9]*$ ]]; then
+                _sync_output_tail_bytes=2000
+            fi
+            log ERROR "Output tail: $(tail -c "$_sync_output_tail_bytes" "$temp_out")"
+        fi
         # Hint callers when codex wrote deliverables under workspace-write
         # before SIGTERM — a bare "TIMEOUT" banner otherwise hides that work.
         if [[ $exit_code -eq 124 || $exit_code -eq 143 ]]; then

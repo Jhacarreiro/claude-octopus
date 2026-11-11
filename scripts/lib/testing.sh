@@ -146,6 +146,12 @@ tangle_result_has_blocker_output() {
 }
 
 check_explicit_file_coverage() {
+    # Managed workflows supply parent-owned Files:/Creates: paths. They are
+    # checked on disk, not inferred from quoted read context or model wording.
+    if [[ "${TANGLE_REQUIRED_OUTPUT_SCOPES+x}" == x ]]; then
+        printf '%s\n' "$TANGLE_REQUIRED_OUTPUT_SCOPES" | python3 -I "${BASH_SOURCE[0]%/*}/../helpers/required-output-coverage.py" "${PROJECT_ROOT:-$PWD}" "${TANGLE_REQUIRED_OUTPUT_BASELINE:-}"
+        return $?
+    fi
     local original_prompt="$1"
     local output_corpus="$2"
     local missing=""
@@ -160,7 +166,17 @@ check_explicit_file_coverage() {
             *$'\n'"$ref"$'\n'*) ;;
             *) missing+="${ref}"$'\n' ;;
         esac
-    done <<< "$(extract_explicit_file_refs "$original_prompt")"
+    done <<< "$(extract_explicit_file_refs "$(printf '%s\n' "$original_prompt" | python3 -I -c '
+import re,sys
+text=sys.stdin.read()
+# Instruction boundaries can span lines; read/context segments remain inputs.
+writes={"add","update","create","edit","modify","delete","remove","refactor","fix","write","implement"}
+events=list(re.finditer(r"\b(add|update|create|edit|modify|delete|remove|refactor|fix|write|implement|read|review|inspect|consult|context|inputs?|references?)\b(?=[:\s]|$)",text,re.I))
+for index,event in enumerate(events):
+    if event.group(1).lower() in writes:
+        end=events[index+1].start() if index+1<len(events) else len(text)
+        print(text[event.end():end])
+')")"
 
     printf '%s' "$missing"
 }
@@ -790,7 +806,10 @@ $(<"$correction_file")
         fi
 
         local missing_explicit_files
-        missing_explicit_files=$(check_explicit_file_coverage "$original_prompt" "$result_outputs")
+        if ! missing_explicit_files=$(check_explicit_file_coverage "$original_prompt" "$result_outputs"); then
+            log ERROR "Unable to verify declared output coverage; refusing the quality gate"
+            return 1
+        fi
 
         # Quality gate check (using configurable per-phase threshold - v8.19.0)
         local total=$((success_count + fail_count))

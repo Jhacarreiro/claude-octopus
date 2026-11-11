@@ -174,4 +174,102 @@ else
     test_fail "partial filename matches were treated as exact coverage"
 fi
 
+test_case "read context is not a required output"
+if missing=$(check_explicit_file_coverage 'Read ./SPEC.md. Implement src/main.ts.' 'Implemented src/main.ts.') && [[ -z "$missing" ]]; then test_pass; else test_fail "read context became an output obligation"; fi
+
+test_case "standalone add instructions still require their declared output"
+if missing=$(check_explicit_file_coverage 'Add src/new.ts' 'done') && [[ "$missing" == src/new.ts ]]; then test_pass; else test_fail "add instruction lost its output obligation"; fi
+
+test_case "standalone write targets on the next line remain required"
+if missing=$(check_explicit_file_coverage $'Read\n./SPEC.md\nUpdate\nsrc/main.ts' 'done') && [[ "$missing" == src/main.ts ]]; then test_pass; else test_fail "multiline instruction lost its target or required the read input"; fi
+
+test_case "read context after a write instruction stays outside output coverage"
+if missing=$(check_explicit_file_coverage 'Update src/main.ts. Read ./SPEC.md.' 'Implemented src/main.ts.') && [[ -z "$missing" ]]; then test_pass; else test_fail "following read context became a required output"; fi
+
+test_case "managed coverage uses files rather than textual echoes"
+mkdir -p "$TEST_TMP_DIR/repo/src"
+printf 'implementation\n' > "$TEST_TMP_DIR/repo/src/main.ts"
+printf 'documentation\n' > "$TEST_TMP_DIR/repo/README.md"
+PROJECT_ROOT="$TEST_TMP_DIR/repo"
+TANGLE_REQUIRED_OUTPUT_SCOPES=$'src/main.ts\n./README.md'
+if missing=$(check_explicit_file_coverage 'Read ../outside/guide.md' 'done') && [[ -z "$missing" ]]; then test_pass; else test_fail "existing outputs needed textual echoes or external context"; fi
+
+test_case "a missing declared output still fails despite a model claiming it exists"
+TANGLE_REQUIRED_OUTPUT_SCOPES=$'src/main.ts\ntests/missing.test.ts'
+if [[ "$(check_explicit_file_coverage '' 'Created tests/missing.test.ts')" == 'tests/missing.test.ts' ]]; then test_pass; else test_fail "missing required artifact passed"; fi
+
+test_case "symlinks cannot satisfy output coverage"
+ln -s "$TEST_TMP_DIR/repo/src/main.ts" "$TEST_TMP_DIR/repo/link.ts"
+TANGLE_REQUIRED_OUTPUT_SCOPES=link.ts
+if [[ "$(check_explicit_file_coverage '' '')" == 'link.ts' ]]; then test_pass; else test_fail "symbolic output was accepted"; fi
+test_case "empty output directories remain incomplete"
+mkdir -p "$TEST_TMP_DIR/repo/empty"
+TANGLE_REQUIRED_OUTPUT_SCOPES=empty
+if [[ "$(check_explicit_file_coverage '' '')" == 'empty' ]]; then test_pass; else test_fail "empty output directory passed"; fi
+
+test_case "tracked deletions can satisfy a declared edit scope"
+git -C "$PROJECT_ROOT" init -q
+git -C "$PROJECT_ROOT" -c user.name=Test -c user.email=test@example.com add README.md
+git -C "$PROJECT_ROOT" -c user.name=Test -c user.email=test@example.com commit -qm baseline
+TANGLE_REQUIRED_OUTPUT_BASELINE=$(git -C "$PROJECT_ROOT" rev-parse HEAD)
+rm "$PROJECT_ROOT/README.md"
+TANGLE_REQUIRED_OUTPUT_SCOPES=README.md
+if missing=$(check_explicit_file_coverage '' '') && [[ -z "$missing" ]]; then test_pass; else test_fail "intentional tracked deletion was rejected"; fi
+unset TANGLE_REQUIRED_OUTPUT_SCOPES TANGLE_REQUIRED_OUTPUT_BASELINE PROJECT_ROOT
+
+test_case "managed scopes resolve from the Git root when launched in a package"
+PROJECT_ROOT="$TEST_TMP_DIR/deletion-repo"
+mkdir -p "$PROJECT_ROOT/pkg" "$PROJECT_ROOT/src/obsolete"
+git -C "$PROJECT_ROOT" init -q
+printf 'old\n' > "$PROJECT_ROOT/src/old.ts"
+printf 'obsolete\n' > "$PROJECT_ROOT/src/obsolete/index.ts"
+git -C "$PROJECT_ROOT" add src
+git -C "$PROJECT_ROOT" -c user.name=Test -c user.email=test@example.com commit -qm baseline
+TANGLE_REQUIRED_OUTPUT_BASELINE=$(git -C "$PROJECT_ROOT" rev-parse HEAD)
+printf 'new\n' > "$PROJECT_ROOT/pkg/a.txt"
+PROJECT_ROOT="$PROJECT_ROOT/pkg"
+TANGLE_REQUIRED_OUTPUT_SCOPES=pkg/a.txt
+if missing=$(check_explicit_file_coverage '' '') && [[ -z "$missing" ]]; then test_pass; else test_fail "package root was duplicated in the output path"; fi
+PROJECT_ROOT="${PROJECT_ROOT%/pkg}"
+
+test_case "staged renames satisfy both removed and created scopes"
+git -C "$PROJECT_ROOT" mv src/old.ts src/new.ts
+TANGLE_REQUIRED_OUTPUT_SCOPES=$'src/old.ts\nsrc/new.ts'
+if missing=$(check_explicit_file_coverage '' '') && [[ -z "$missing" ]]; then test_pass; else test_fail "rename source was not recognized as removed"; fi
+
+test_case "an intentionally emptied tracked directory satisfies its removal scope"
+rm "$PROJECT_ROOT/src/obsolete/index.ts"
+TANGLE_REQUIRED_OUTPUT_SCOPES=src/obsolete/
+if missing=$(check_explicit_file_coverage '' '') && [[ -z "$missing" ]]; then test_pass; else test_fail "tracked directory removal was rejected"; fi
+
+test_case "a fully removed tracked directory satisfies its removal scope"
+rmdir "$PROJECT_ROOT/src/obsolete"
+if missing=$(check_explicit_file_coverage '' '') && [[ -z "$missing" ]]; then test_pass; else test_fail "absent removed directory was rejected"; fi
+
+test_case "an uncreated directory has no baseline deletion evidence"
+TANGLE_REQUIRED_OUTPUT_SCOPES=src/missing/
+if [[ "$(check_explicit_file_coverage '' '')" == src/missing/ ]]; then test_pass; else test_fail "a new missing output passed as a deletion"; fi
+
+test_case "coverage retains previously configured trust for a shared checkout"
+real_git=$(command -v git)
+if GIT_TEST_ASSUME_DIFFERENT_OWNER=1 "$real_git" -C "$PROJECT_ROOT" rev-parse --show-toplevel >/dev/null 2>&1; then
+    test_skip "Git ownership protection is unavailable or this checkout is already trusted"
+else
+    # Git's native ownership test switch avoids privileged chown in this fixture.
+    mkdir -p "$TEST_TMP_DIR/shared-bin" "$TEST_TMP_DIR/shared-profile/git"
+    printf '[safe]\n\tdirectory = %s\n' "$PROJECT_ROOT" > "$TEST_TMP_DIR/shared-profile/git/config"
+    cat > "$TEST_TMP_DIR/shared-bin/git" <<'SH'
+#!/usr/bin/env bash
+GIT_TEST_ASSUME_DIFFERENT_OWNER=1 exec "$COVERAGE_REAL_GIT" "$@"
+SH
+    chmod 755 "$TEST_TMP_DIR/shared-bin/git"
+    TANGLE_REQUIRED_OUTPUT_SCOPES=src/new.ts
+    if missing=$(XDG_CONFIG_HOME="$TEST_TMP_DIR/shared-profile" PATH="$TEST_TMP_DIR/shared-bin:$PATH" COVERAGE_REAL_GIT="$real_git" check_explicit_file_coverage '' '') && [[ -z "$missing" ]]; then test_pass; else test_fail "isolated coverage discarded authorized checkout trust"; fi
+fi
+
+test_case "an unreadable baseline fails the coverage check rather than returning empty success"
+TANGLE_REQUIRED_OUTPUT_BASELINE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+if missing=$(check_explicit_file_coverage '' '' 2>/dev/null); then test_fail "unreadable baseline was accepted"; else test_pass; fi
+unset TANGLE_REQUIRED_OUTPUT_SCOPES TANGLE_REQUIRED_OUTPUT_BASELINE PROJECT_ROOT
+
 test_summary

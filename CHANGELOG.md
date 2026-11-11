@@ -8,6 +8,7 @@
   patch evidence. Final admission rejects oversized verifier requests instead of
   clipping their tails. An incomplete verification preserves the worktree and
   records a review infrastructure failure without applying unverified findings.
+- Managed Tangle output coverage checks declared artifacts rather than requiring model responses to repeat read-only context references. Missing outputs and unavailable coverage evidence remain blocking.
 
 ## [11.22.1] - 2026-11-11
 
